@@ -5,6 +5,7 @@ import { Server } from "@prisma/client";
 import { execStrict } from "./commands";
 import { execDocker, execDockerStrict } from "./internal/docker";
 import { privilegedCommand } from "./internal/privilege";
+import { escapeShellArg } from "./internal/shell";
 
 // NOTE: This file is a modularization of ssh.service.ts (domain: docker-containers).
 
@@ -103,10 +104,6 @@ export async function dockerLogs(
     shortDockerCommandTimeout(DOCKER_LOGS_TIMEOUT_MS),
   );
   return result.stdout + result.stderr;
-}
-
-function escapeShellArg(value: string): string {
-  return `'${value.replace(/'/g, `'"'"'`)}'`;
 }
 
 const SAFE_NAME_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/;
