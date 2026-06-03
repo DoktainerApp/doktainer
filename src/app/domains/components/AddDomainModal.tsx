@@ -743,11 +743,11 @@ export default function AddDomainModal({
                     lineHeight: 1.5,
                   }}
                 >
-                  Jika setelah save domain masih jatuh ke halaman default VPS,
-                  biasanya hostname sibling yang Anda akses memang belum dibuat
-                  sebagai domain terpisah. Dalam mode Isolated, hanya domain
-                  yang sedang disimpan yang akan diprovision ke container
-                  target.
+                  Isolated config means the Nginx config for this domain will be
+                  created separately and won't be shared with any other domain.
+                  This allows you to reuse target containers and ports that are
+                  already in use by other domains, as long as those domains are
+                  not using Shared mode on the same server.
                 </label>
               )}
 
