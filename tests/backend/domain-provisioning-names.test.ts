@@ -5,6 +5,7 @@ import {
   buildManagedNginxFileBase,
   buildManagedNginxSharedFileBase,
   getDomainConfigAnchor,
+  getLegacyTwoLabelDomainConfigAnchor,
 } from "../../src/server/services/domain-provisioning/names";
 
 test("isolated nginx config uses a single domain file name", () => {
@@ -46,5 +47,30 @@ test("shared nginx config anchor keeps service files separate across roots", () 
       "api.example.com",
     ]),
     "example.com",
+  );
+});
+
+test("shared nginx config anchor respects public suffix domains", () => {
+  assert.equal(
+    getDomainConfigAnchor(["stream.appku.web.id"]),
+    "appku.web.id",
+  );
+
+  assert.equal(getDomainConfigAnchor(["api.appku.co.id"]), "appku.co.id");
+  assert.equal(
+    getDomainConfigAnchor(["foo.example.co.uk"]),
+    "example.co.uk",
+  );
+
+  assert.equal(
+    buildManagedNginxSharedFileBase("livestream-app", [
+      "stream.appku.web.id",
+    ]),
+    "appku.web.id",
+  );
+
+  assert.equal(
+    getLegacyTwoLabelDomainConfigAnchor(["stream.appku.web.id"]),
+    "web.id",
   );
 });

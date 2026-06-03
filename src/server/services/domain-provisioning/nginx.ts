@@ -10,6 +10,7 @@ import {
   buildManagedNginxFileBase,
   buildManagedNginxSharedFileBase,
   getDomainConfigAnchor,
+  getLegacyTwoLabelDomainConfigAnchor,
   sanitizeDomainFileName,
   sanitizeContainerFileName,
 } from "./names";
@@ -385,6 +386,14 @@ export async function provisionNginxConfig(
     configMode === "SHARED"
       ? `${sanitizeContainerFileName(containerName)}--${sanitizeDomainFileName(getDomainConfigAnchor(domainNames))}`
       : null;
+  const legacyBuggyAnchorSafeName =
+    configMode === "SHARED"
+      ? sanitizeDomainFileName(getLegacyTwoLabelDomainConfigAnchor(domainNames))
+      : null;
+  const legacyBuggySharedSafeName =
+    configMode === "SHARED"
+      ? `${sanitizeContainerFileName(containerName)}--${sanitizeDomainFileName(getLegacyTwoLabelDomainConfigAnchor(domainNames))}`
+      : null;
   const legacyServiceSharedSafeName =
     configMode === "SHARED"
       ? `doktainer-${sanitizeContainerFileName(containerName)}`
@@ -423,6 +432,20 @@ export async function provisionNginxConfig(
   if (legacySharedSafeName && legacySharedSafeName !== safeName) {
     cleanupCommands.push(
       `rm -f ${escapeDoubleQuotedShellArg(`/etc/nginx/sites-enabled/${legacySharedSafeName}.conf`)} ${escapeDoubleQuotedShellArg(`/etc/nginx/sites-available/${legacySharedSafeName}.conf`)}`,
+    );
+  }
+  if (legacyBuggyAnchorSafeName && legacyBuggyAnchorSafeName !== safeName) {
+    cleanupCommands.push(
+      `rm -f ${escapeDoubleQuotedShellArg(`/etc/nginx/sites-enabled/${legacyBuggyAnchorSafeName}.conf`)} ${escapeDoubleQuotedShellArg(`/etc/nginx/sites-available/${legacyBuggyAnchorSafeName}.conf`)}`,
+    );
+  }
+  if (
+    legacyBuggySharedSafeName &&
+    legacyBuggySharedSafeName !== safeName &&
+    legacyBuggySharedSafeName !== legacySharedSafeName
+  ) {
+    cleanupCommands.push(
+      `rm -f ${escapeDoubleQuotedShellArg(`/etc/nginx/sites-enabled/${legacyBuggySharedSafeName}.conf`)} ${escapeDoubleQuotedShellArg(`/etc/nginx/sites-available/${legacyBuggySharedSafeName}.conf`)}`,
     );
   }
   if (
@@ -498,6 +521,14 @@ export async function removeManagedNginxProxyConfig(options: {
     options.containerName && configMode === "SHARED"
       ? `${sanitizeContainerFileName(options.containerName)}--${sanitizeDomainFileName(getDomainConfigAnchor(domainNames))}`
       : null;
+  const legacyBuggyAnchorSafeName =
+    configMode === "SHARED"
+      ? sanitizeDomainFileName(getLegacyTwoLabelDomainConfigAnchor(domainNames))
+      : null;
+  const legacyBuggySharedSafeName =
+    options.containerName && configMode === "SHARED"
+      ? `${sanitizeContainerFileName(options.containerName)}--${sanitizeDomainFileName(getLegacyTwoLabelDomainConfigAnchor(domainNames))}`
+      : null;
   const legacyServiceSharedSafeName =
     options.containerName && configMode === "SHARED"
       ? `doktainer-${sanitizeContainerFileName(options.containerName)}`
@@ -518,6 +549,30 @@ export async function removeManagedNginxProxyConfig(options: {
     await removePrivilegedFile(
       options.server,
       `/etc/nginx/sites-available/${legacySharedSafeName}.conf`,
+    );
+  }
+  if (legacyBuggyAnchorSafeName && legacyBuggyAnchorSafeName !== managedSafeName) {
+    await removePrivilegedFile(
+      options.server,
+      `/etc/nginx/sites-enabled/${legacyBuggyAnchorSafeName}.conf`,
+    );
+    await removePrivilegedFile(
+      options.server,
+      `/etc/nginx/sites-available/${legacyBuggyAnchorSafeName}.conf`,
+    );
+  }
+  if (
+    legacyBuggySharedSafeName &&
+    legacyBuggySharedSafeName !== managedSafeName &&
+    legacyBuggySharedSafeName !== legacySharedSafeName
+  ) {
+    await removePrivilegedFile(
+      options.server,
+      `/etc/nginx/sites-enabled/${legacyBuggySharedSafeName}.conf`,
+    );
+    await removePrivilegedFile(
+      options.server,
+      `/etc/nginx/sites-available/${legacyBuggySharedSafeName}.conf`,
     );
   }
   if (
