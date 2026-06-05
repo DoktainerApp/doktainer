@@ -14,6 +14,7 @@ import { auditLog } from "../services/audit.service";
 import { dispatchRuntimeNotification } from "../services/notification.service";
 import {
   appendProcessJobLog,
+  cancelProcessJob,
   createProcessJob,
   getProcessJob,
   serializeProcessJob,
@@ -958,6 +959,10 @@ function buildInternalJobHeaders(headers: Record<string, unknown>) {
   return nextHeaders;
 }
 
+function isProcessJobCancelling(job: { status: string }) {
+  return job.status === "cancelling";
+}
+
 function runInjectedContainerJob(input: {
   app: FastifyInstance;
   job: ReturnType<typeof createProcessJob>;
@@ -968,7 +973,20 @@ function runInjectedContainerJob(input: {
   redactSecret?: string;
 }) {
   void Promise.resolve().then(async () => {
-    updateProcessJob(input.job, { status: "running" });
+    const abortController = new AbortController();
+    if (isProcessJobCancelling(input.job)) {
+      updateProcessJob(input.job, {
+        status: "cancelled",
+        error: input.job.cancelReason ?? "Job cancelled",
+      });
+      appendProcessJobLog(input.job, "[job] Cancelled");
+      return;
+    }
+
+    updateProcessJob(input.job, {
+      status: "running",
+      cancel: (reason) => abortController.abort(reason),
+    });
     appendProcessJobLog(input.job, `[job] Started ${input.job.type}`);
 
     try {
@@ -987,7 +1005,20 @@ function runInjectedContainerJob(input: {
             headers: buildInternalJobHeaders(input.headers),
             payload: input.payload,
           }),
+        {
+          runIdPrefix: input.job.id,
+          signal: abortController.signal,
+        },
       );
+
+      if (abortController.signal.aborted || isProcessJobCancelling(input.job)) {
+        updateProcessJob(input.job, {
+          status: "cancelled",
+          error: input.job.cancelReason ?? "Job cancelled",
+        });
+        appendProcessJobLog(input.job, "[job] Cancelled");
+        return;
+      }
 
       const payload = response.json() as {
         error?: unknown;
@@ -1005,6 +1036,19 @@ function runInjectedContainerJob(input: {
       appendProcessJobLog(input.job, "[job] Completed successfully");
     } catch (error) {
       const message = error instanceof Error ? error.message : "Job failed";
+      if (
+        abortController.signal.aborted ||
+        isProcessJobCancelling(input.job) ||
+        message === "Command cancelled"
+      ) {
+        updateProcessJob(input.job, {
+          status: "cancelled",
+          error: input.job.cancelReason ?? "Job cancelled",
+        });
+        appendProcessJobLog(input.job, "[job] Cancelled");
+        return;
+      }
+
       updateProcessJob(input.job, { status: "error", error: message });
       appendProcessJobLog(input.job, `[job] Failed: ${message}`);
     }
@@ -1040,6 +1084,33 @@ export async function containerRoutes(app: FastifyInstance) {
       }
 
       return reply.send({ success: true, data: serializeProcessJob(job) });
+    },
+  );
+
+  app.post(
+    "/jobs/:jobId/cancel",
+    { preHandler: containerWriteAccess },
+    async (req, reply) => {
+      const { jobId } = req.params as { jobId: string };
+      const job = getProcessJob(jobId);
+
+      if (
+        !job ||
+        job.userId !== req.userId ||
+        job.organizationId !== req.organizationId
+      ) {
+        return reply
+          .status(404)
+          .send({ success: false, error: "Job not found" });
+      }
+
+      const cancelled = cancelProcessJob(job);
+
+      return reply.send({
+        success: true,
+        data: serializeProcessJob(job),
+        message: cancelled ? "Cancellation requested" : "Job already finished",
+      });
     },
   );
 
@@ -1087,7 +1158,11 @@ export async function containerRoutes(app: FastifyInstance) {
       });
       const statusInterval = setInterval(() => {
         writeProcessJobStreamEvent(reply, "status", serializeProcessJob(job));
-        if (job.status === "success" || job.status === "error") {
+        if (
+          job.status === "success" ||
+          job.status === "error" ||
+          job.status === "cancelled"
+        ) {
           clearInterval(statusInterval);
           unsubscribe();
           if (!reply.raw.destroyed && !reply.raw.writableEnded) {

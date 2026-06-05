@@ -424,6 +424,8 @@ export default function AppContainerDetailPage() {
     closeProcessLogs,
   } = useProcessLogsModal();
   const containerRecordRef = useRef<Container | null>(null);
+  const rebuildJobIdRef = useRef<string | null>(null);
+  const rebuildCancelRequestedRef = useRef(false);
   const runtimeMetricsInFlightRef = useRef(false);
   const environmentContainersHref = `/projects/${params.projectId}/environments/${params.environmentId}`;
   const appDetailId = appDetail?.id;
@@ -796,6 +798,8 @@ export default function AppContainerDetailPage() {
     setActing(true);
     setActiveAction("rebuild");
     setActionError("");
+    rebuildJobIdRef.current = null;
+    rebuildCancelRequestedRef.current = false;
     const baseTerminalLines = [
       `[rebuild] Starting rebuild for ${containerRecord.name}`,
       `[rebuild] Source: ${containerRecord.sourceType ?? "unknown"}`,
@@ -841,6 +845,7 @@ export default function AppContainerDetailPage() {
         params.containerId,
       );
       const job = jobResponse.data;
+      rebuildJobIdRef.current = job.id;
       let finalStatus = job.status;
       let finalError = job.error;
 
@@ -856,6 +861,31 @@ export default function AppContainerDetailPage() {
         },
       );
 
+      updateProcessLogs({
+        cancelAction: {
+          label: "Cancel",
+          loadingLabel: "Cancelling",
+          onClick: () => {
+            const jobId = rebuildJobIdRef.current;
+            if (!jobId || rebuildCancelRequestedRef.current) return;
+
+            rebuildCancelRequestedRef.current = true;
+            updateProcessLogs({
+              statusLabel: "Cancelling",
+              cancelAction: {
+                label: "Cancel",
+                loadingLabel: "Cancelling",
+                isLoading: true,
+                disabled: true,
+                onClick: () => undefined,
+              },
+            });
+
+            void containersApi.cancelJob(jobId).catch(() => undefined);
+          },
+        },
+      });
+
       await containersApi.streamJob(job.id, {
         onLog: (entry) => {
           updateProcessTerminal([...latestTerminalLines, entry.message], {
@@ -869,8 +899,23 @@ export default function AppContainerDetailPage() {
         },
       });
 
+      if (rebuildCancelRequestedRef.current && finalStatus !== "cancelled") {
+        const cancelledJob = rebuildJobIdRef.current
+          ? await containersApi.getJob(rebuildJobIdRef.current)
+          : null;
+        finalStatus = cancelledJob?.data.status ?? "cancelled";
+        finalError =
+          cancelledJob?.data.error ??
+          cancelledJob?.data.cancelReason ??
+          "Rebuild cancelled";
+      }
+
       if (finalStatus === "error") {
         throw new Error(finalError || "Rebuild job failed");
+      }
+
+      if (finalStatus === "cancelled") {
+        throw new Error(finalError || "Rebuild cancelled");
       }
 
       updateProcessLogs({
@@ -898,6 +943,7 @@ export default function AppContainerDetailPage() {
         ].filter(Boolean),
         statusLabel: "100%",
       });
+      updateProcessLogs({ cancelAction: undefined });
     } catch (rebuildError) {
       const message =
         rebuildError instanceof Error ? rebuildError.message : "Rebuild failed";
@@ -911,7 +957,9 @@ export default function AppContainerDetailPage() {
         ],
         statusLabel: "Failed",
       });
+      updateProcessLogs({ cancelAction: undefined });
     } finally {
+      rebuildJobIdRef.current = null;
       setActing(false);
       setActiveAction(null);
     }

@@ -1,6 +1,7 @@
 import type { SSHExecCommandResponse } from "node-ssh";
 import { Server } from "@prisma/client";
 import { AsyncLocalStorage } from "async_hooks";
+import { randomUUID } from "crypto";
 
 import {
   closeConnection,
@@ -11,11 +12,85 @@ import {
 const commandQueues = new Map<string, Promise<unknown>>();
 const streamCommandQueues = new Map<string, Promise<unknown>>();
 const commandLogSink = new AsyncLocalStorage<(data: string) => void>();
+const commandRunContext = new AsyncLocalStorage<{
+  runIdPrefix?: string;
+  signal?: AbortSignal;
+}>();
 
 type ExecOptions = {
   timeoutMs?: number;
   queueTimeoutMs?: number;
 };
+
+const REMOTE_JOB_DIR = "/tmp/doktainer-process-jobs";
+
+function shellQuote(value: string) {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+function sanitizeRunId(value: string) {
+  return value.replace(/[^a-zA-Z0-9_.-]/g, "-").slice(0, 120);
+}
+
+function buildTrackedCommand(command: string, runId: string) {
+  const safeRunId = sanitizeRunId(runId);
+  const script = [
+    "set -euo pipefail",
+    `RUN_DIR=${shellQuote(REMOTE_JOB_DIR)}`,
+    `RUN_ID=${shellQuote(safeRunId)}`,
+    'mkdir -p "$RUN_DIR"',
+    'PID_FILE="$RUN_DIR/$RUN_ID.pid"',
+    'rm -f "$PID_FILE"',
+    'cleanup() { rm -f "$PID_FILE"; }',
+    "trap cleanup EXIT",
+    `setsid bash -lc ${shellQuote(command)} &`,
+    "child=$!",
+    'printf "%s" "$child" > "$PID_FILE"',
+    "set +e",
+    'wait "$child"',
+    "code=$?",
+    "set -e",
+    "exit \"$code\"",
+  ].join("\n");
+
+  return `bash -lc ${shellQuote(script)}`;
+}
+
+async function terminateTrackedRemoteCommand(
+  server: Server,
+  runId: string,
+  reason: string,
+) {
+  const safeRunId = sanitizeRunId(runId);
+  const script = [
+    "set -euo pipefail",
+    `PID_FILE=${shellQuote(`${REMOTE_JOB_DIR}/${safeRunId}.pid`)}`,
+    'if [ ! -f "$PID_FILE" ]; then exit 0; fi',
+    'pid="$(cat "$PID_FILE" 2>/dev/null || true)"',
+    'case "$pid" in ""|*[!0-9]*) rm -f "$PID_FILE"; exit 0 ;; esac',
+    `printf "Terminating remote command ${safeRunId}: ${reason.replace(/"/g, "'")}\\n" >&2`,
+    'kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || sudo -n kill -TERM -- "-$pid" 2>/dev/null || sudo -n kill -TERM "$pid" 2>/dev/null || true',
+    "sleep 5",
+    'kill -KILL -- "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || sudo -n kill -KILL -- "-$pid" 2>/dev/null || sudo -n kill -KILL "$pid" 2>/dev/null || true',
+    'rm -f "$PID_FILE"',
+  ].join("\n");
+
+  try {
+    await withIsolatedConnection(server, async (ssh) => {
+      await ssh.execCommand(`bash -lc ${shellQuote(script)}`);
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(
+      `[ssh-cancel-failed] ${JSON.stringify({
+        serverId: server.id,
+        host: server.ip,
+        runId: safeRunId,
+        error: message,
+      })}`,
+    );
+  }
+}
 
 function isRecoverableSshError(message: string): boolean {
   return (
@@ -308,6 +383,10 @@ export async function execStrict(
 ): Promise<string> {
   const logSink = commandLogSink.getStore();
   if (logSink) {
+    const runContext = commandRunContext.getStore();
+    const runId = runContext?.runIdPrefix
+      ? `${runContext.runIdPrefix}-${randomUUID()}`
+      : undefined;
     let output = "";
     let exitCode = 0;
 
@@ -320,6 +399,11 @@ export async function execStrict(
       },
       (code) => {
         exitCode = code;
+      },
+      {
+        runId,
+        signal: runContext?.signal,
+        timeoutMs: options.timeoutMs,
       },
     );
 
@@ -344,8 +428,11 @@ export async function execStrict(
 export function withCommandLogSink<T>(
   onData: (data: string) => void,
   execute: () => Promise<T>,
+  options: { runIdPrefix?: string; signal?: AbortSignal } = {},
 ): Promise<T> {
-  return commandLogSink.run(onData, execute);
+  return commandLogSink.run(onData, () =>
+    commandRunContext.run(options, execute),
+  );
 }
 
 export async function execStrictIsolated(
@@ -371,19 +458,48 @@ export async function streamCommand(
   command: string,
   onData: (data: string) => void,
   onClose: (code: number) => void,
+  options: { timeoutMs?: number; signal?: AbortSignal; runId?: string } = {},
 ): Promise<void> {
   return enqueueStreamCommand(server, command, async () => {
     const ssh = await getConnection(server);
+    const commandToRun = options.runId
+      ? buildTrackedCommand(command, options.runId)
+      : command;
 
     return new Promise((resolve, reject) => {
-      ssh.connection!.exec(command, (err, stream) => {
+      let streamRef: { destroy: () => void } | null = null;
+      let timeoutId: NodeJS.Timeout | null = null;
+      let abortListener: ((event: Event) => void) | null = null;
+
+      const terminate = (reason: string) => {
+        if (options.runId) {
+          void terminateTrackedRemoteCommand(server, options.runId, reason);
+        }
+
+        try {
+          streamRef?.destroy();
+        } catch {
+          // Ignore stream races during remote cancellation.
+        }
+
+        closeConnection(server.id);
+      };
+
+      ssh.connection!.exec(commandToRun, (err, stream) => {
         if (err) {
           reject(err);
           return;
         }
 
+        streamRef = stream;
         let settled = false;
         const cleanup = () => {
+          if (timeoutId) {
+            clearTimeout(timeoutId);
+          }
+          if (abortListener && options.signal) {
+            options.signal.removeEventListener("abort", abortListener);
+          }
           stream.off("data", onStdout);
           stream.stderr?.off("data", onStderr);
           stream.off("close", onCloseStream);
@@ -417,6 +533,38 @@ export async function streamCommand(
         stream.on("end", onEnd);
         stream.on("error", onError);
         stream.stderr?.on("error", onError);
+
+        if (options.timeoutMs && options.timeoutMs > 0) {
+          timeoutId = setTimeout(() => {
+            if (settled) return;
+            logCommandTimeout(server, command, options.timeoutMs!);
+            terminate(
+              `Command timed out after ${Math.ceil(options.timeoutMs! / 1000)}s`,
+            );
+            fail(
+              new Error(
+                `Command timed out after ${Math.ceil(options.timeoutMs! / 1000)}s`,
+              ),
+            );
+          }, options.timeoutMs);
+          timeoutId.unref?.();
+        }
+
+        if (options.signal) {
+          if (options.signal.aborted) {
+            terminate("Command cancelled");
+            fail(new Error("Command cancelled"));
+            return;
+          }
+
+          abortListener = () => {
+            terminate("Command cancelled");
+            fail(new Error("Command cancelled"));
+          };
+          options.signal.addEventListener("abort", abortListener, {
+            once: true,
+          });
+        }
       });
     });
   });

@@ -1561,12 +1561,19 @@ export interface ProcessJobLogEntry {
 export interface ProcessJobRecord {
   id: string;
   type: string;
-  status: "queued" | "running" | "success" | "error";
+  status:
+    | "queued"
+    | "running"
+    | "cancelling"
+    | "cancelled"
+    | "success"
+    | "error";
   createdAt: string;
   updatedAt: string;
   logs: ProcessJobLogEntry[];
   result?: unknown;
   error?: string;
+  cancelReason?: string;
 }
 
 function parseServerSentEventBlock(block: string) {
@@ -1621,6 +1628,12 @@ export const containers = {
   getJob: (jobId: string) =>
     get<{ success: boolean; data: ProcessJobRecord }>(
       `/containers/jobs/${jobId}`,
+    ),
+  cancelJob: (jobId: string) =>
+    post<{ success: boolean; data: ProcessJobRecord; message?: string }>(
+      `/containers/jobs/${jobId}/cancel`,
+      {},
+      { timeoutMs: 15000 },
     ),
   streamJob: async (
     jobId: string,

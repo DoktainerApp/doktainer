@@ -22,6 +22,9 @@ const DOCKER_FILE_LIST_TIMEOUT_MS = 10_000;
 const DOCKER_FILE_READ_TIMEOUT_MS = 15_000;
 const DOCKER_FILE_WRITE_TIMEOUT_MS = 20_000;
 const DOCKER_FILE_DOWNLOAD_TIMEOUT_MS = 30_000;
+const DEPLOY_GIT_CLONE_TIMEOUT_MS = 10 * 60_000;
+const DEPLOY_BUILD_TIMEOUT_MS = 45 * 60_000;
+const DEPLOY_COMPOSE_TIMEOUT_MS = 45 * 60_000;
 
 function shortDockerCommandTimeout(timeoutMs: number) {
   return { timeoutMs, queueTimeoutMs: timeoutMs };
@@ -1953,6 +1956,7 @@ async function buildImageWithNixpacks(
   await execStrict(
     server,
     privilegedCommand(server, `bash -lc ${escapeShellArg(script)}`),
+    shortDockerCommandTimeout(DEPLOY_BUILD_TIMEOUT_MS),
   );
 
   await ensureImageExists(server, opts.imageTag, "Nixpacks build");
@@ -2005,6 +2009,7 @@ async function buildImageWithBuildpacks(
   await execStrict(
     server,
     privilegedCommand(server, `bash -lc ${escapeShellArg(script)}`),
+    shortDockerCommandTimeout(DEPLOY_BUILD_TIMEOUT_MS),
   );
 
   await ensureImageExists(server, opts.imageTag, "Buildpacks build");
@@ -2395,6 +2400,7 @@ export async function deployContainerFromGitSource(
     await execStrict(
       server,
       privilegedCommand(server, `bash -lc ${escapeShellArg(bootstrapScript)}`),
+      shortDockerCommandTimeout(DEPLOY_GIT_CLONE_TIMEOUT_MS),
     );
   } catch (error) {
     throw new Error(formatDeploymentErrorMessage(error));
@@ -2427,6 +2433,7 @@ export async function deployContainerFromGitSource(
       await execStrict(
         server,
         privilegedCommand(server, `bash -lc ${escapeShellArg(composeScript)}`),
+        shortDockerCommandTimeout(DEPLOY_COMPOSE_TIMEOUT_MS),
       );
     } catch (error) {
       throw new Error(formatComposeDeployError(error));
@@ -2693,6 +2700,7 @@ export async function deployContainerFromGitSource(
     await execStrict(
       server,
       privilegedCommand(server, `bash -lc ${escapeShellArg(buildScript)}`),
+      shortDockerCommandTimeout(DEPLOY_BUILD_TIMEOUT_MS),
     );
   } catch (error) {
     throw new Error(formatDeploymentErrorMessage(error));

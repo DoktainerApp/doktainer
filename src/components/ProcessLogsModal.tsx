@@ -5,6 +5,7 @@ import {
   Circle,
   ImageIcon,
   Loader2,
+  OctagonX,
   ScrollText,
   Terminal,
   X,
@@ -45,6 +46,13 @@ export type ProcessLogsModalState = {
   imageSlot?: ReactNode;
   initialTab?: ProcessLogsModalTab;
   statusLabel?: string;
+  cancelAction?: {
+    label?: string;
+    loadingLabel?: string;
+    isLoading?: boolean;
+    disabled?: boolean;
+    onClick: () => void;
+  };
 };
 
 export type ProcessLogsModalTab = "timeline" | "terminal";
@@ -157,6 +165,7 @@ export default function ProcessLogsModal({
   imageSlot,
   initialTab = "timeline",
   statusLabel,
+  cancelAction,
   closeOnOverlayClick = true,
   onClose,
 }: ProcessLogsModalProps) {
@@ -276,22 +285,59 @@ export default function ProcessLogsModal({
             </div>
           </div>
 
-          <button
-            type="button"
-            className="btn btn-ghost"
-            onClick={handleClose}
-            aria-label="Close process logs modal"
+          <div
             style={{
-              width: 25,
-              height: 25,
-              padding: 0,
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
               flex: "0 0 auto",
-              justifyContent: "center",
-              color: "var(--text-muted)",
             }}
           >
-            <X size={21} />
-          </button>
+            {cancelAction ? (
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={cancelAction.onClick}
+                disabled={cancelAction.disabled || cancelAction.isLoading}
+                aria-label={cancelAction.label ?? "Cancel process"}
+                style={{
+                  minHeight: 30,
+                  padding: "0 10px",
+                  justifyContent: "center",
+                  color: "#ef4444",
+                  border: "1px solid rgba(239,68,68,0.35)",
+                  background: "rgba(239,68,68,0.08)",
+                }}
+              >
+                {cancelAction.isLoading ? (
+                  <Loader2 size={14} className="animate-spin" />
+                ) : (
+                  <OctagonX size={14} />
+                )}
+                {cancelAction.isLoading
+                  ? (cancelAction.loadingLabel ?? "Cancelling")
+                  : (cancelAction.label ?? "Cancel")}
+              </button>
+            ) : null}
+            {!cancelAction ? (
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={handleClose}
+                aria-label="Close process logs modal"
+                style={{
+                  width: 25,
+                  height: 25,
+                  padding: 0,
+                  flex: "0 0 auto",
+                  justifyContent: "center",
+                  color: "var(--text-muted)",
+                }}
+              >
+                <X size={21} />
+              </button>
+            ) : null}
+          </div>
         </div>
 
         <div

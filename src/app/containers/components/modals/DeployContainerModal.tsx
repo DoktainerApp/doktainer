@@ -234,6 +234,8 @@ export default function DeployContainerModal({
   const [networksLoading, setNetworksLoading] = useState(false);
   const [networksError, setNetworksError] = useState("");
   const envFileInputRef = useRef<HTMLInputElement | null>(null);
+  const currentJobIdRef = useRef<string | null>(null);
+  const cancelRequestedRef = useRef(false);
   const [uploadTargetEnvId, setUploadTargetEnvId] = useState<string | null>(
     null,
   );
@@ -779,6 +781,8 @@ export default function DeployContainerModal({
     event.preventDefault();
     setError("");
     setLoading(true);
+    currentJobIdRef.current = null;
+    cancelRequestedRef.current = false;
     let processLogLines = [
       `[deploy] Starting deployment for ${form.name || "new container"}`,
     ];
@@ -946,6 +950,7 @@ export default function DeployContainerModal({
 
       const jobResponse = await containersApi.createDeployJob(payload);
       const job = jobResponse.data;
+      currentJobIdRef.current = job.id;
       let finalStatus = job.status;
       let finalError = job.error;
 
@@ -960,6 +965,33 @@ export default function DeployContainerModal({
           statusLabel: "Streaming",
         }),
       );
+
+      onProcessUpdate?.({
+        cancelAction: {
+          label: "Cancel",
+          loadingLabel: "Cancelling",
+          onClick: () => {
+            const jobId = currentJobIdRef.current;
+            if (!jobId || cancelRequestedRef.current) return;
+
+            cancelRequestedRef.current = true;
+            onProcessUpdate?.({
+              statusLabel: "Cancelling",
+              cancelAction: {
+                label: "Cancel",
+                loadingLabel: "Cancelling",
+                isLoading: true,
+                disabled: true,
+                onClick: () => undefined,
+              },
+            });
+
+            void containersApi
+              .cancelJob(jobId)
+              .catch(() => undefined);
+          },
+        },
+      });
 
       await containersApi.streamJob(job.id, {
         onLog: (entry) => {
@@ -977,8 +1009,23 @@ export default function DeployContainerModal({
         },
       });
 
+      if (cancelRequestedRef.current && finalStatus !== "cancelled") {
+        const cancelledJob = currentJobIdRef.current
+          ? await containersApi.getJob(currentJobIdRef.current)
+          : null;
+        finalStatus = cancelledJob?.data.status ?? "cancelled";
+        finalError =
+          cancelledJob?.data.error ??
+          cancelledJob?.data.cancelReason ??
+          "Deployment cancelled";
+      }
+
       if (finalStatus === "error") {
         throw new Error(finalError || "Deployment job failed");
+      }
+
+      if (finalStatus === "cancelled") {
+        throw new Error(finalError || "Deployment cancelled");
       }
 
       updateDeployTimelineModal({
@@ -1003,6 +1050,7 @@ export default function DeployContainerModal({
           "[deploy] Done",
         ].filter(Boolean),
       });
+      onProcessUpdate?.({ cancelAction: undefined });
 
       onClose();
     } catch (err: unknown) {
@@ -1013,7 +1061,9 @@ export default function DeployContainerModal({
         name: form.name,
         message,
       });
+      onProcessUpdate?.({ cancelAction: undefined });
     } finally {
+      currentJobIdRef.current = null;
       setLoading(false);
     }
   };
