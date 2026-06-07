@@ -1886,6 +1886,18 @@ function ensureLaravelRuntimeEnv(env: string | undefined): string {
   );
 }
 
+function resolveComposerPlatformPhpVersion(requirement?: string | null) {
+  const normalized = requirement?.trim();
+  if (!normalized) return null;
+
+  const phpEightMatch = normalized.match(/(^|[^0-9])8\.(\d+)([^0-9]|$)/);
+  if (phpEightMatch?.[2]) {
+    return `8.${phpEightMatch[2]}.0`;
+  }
+
+  return null;
+}
+
 async function ensureImageExists(
   server: Server,
   imageTag: string,
@@ -1928,11 +1940,13 @@ async function buildImageWithNixpacks(
     `START_CMD=${escapeShellArg(startCommand || "")}`,
     'if [ "$BUILD_PATH" = "." ]; then TARGET_PATH="$DEPLOY_PATH"; else TARGET_PATH="$DEPLOY_PATH/$BUILD_PATH"; fi',
     'if [ ! -d "$TARGET_PATH" ]; then echo "Build path not found: $BUILD_PATH"; exit 1; fi',
+    'echo "[doktainer] Preparing Nixpacks build for $TARGET_PATH"',
     'NIXPACKS_BIN="$(command -v nixpacks || true)"',
     'if [ -z "$NIXPACKS_BIN" ]; then',
     '  NIXPACKS_BIN_DIR="/opt/doktainer/bin"',
     '  mkdir -p "$NIXPACKS_BIN_DIR"',
     '  if [ ! -x "$NIXPACKS_BIN_DIR/nixpacks" ]; then',
+    '    echo "[doktainer] Nixpacks is not installed; installing to $NIXPACKS_BIN_DIR"',
     "    if command -v curl >/dev/null 2>&1; then",
     '      curl -fsSL https://raw.githubusercontent.com/railwayapp/nixpacks/main/install.sh | bash -s -- -b "$NIXPACKS_BIN_DIR"',
     "    elif command -v wget >/dev/null 2>&1; then",
@@ -1944,6 +1958,20 @@ async function buildImageWithNixpacks(
     "  fi",
     '  NIXPACKS_BIN="$NIXPACKS_BIN_DIR/nixpacks"',
     "fi",
+    'echo "[doktainer] Using Nixpacks binary: $NIXPACKS_BIN"',
+    '"$NIXPACKS_BIN" --version || true',
+    'if [ -f "$TARGET_PATH/composer.json" ]; then',
+    '  PHP_REQUIRE="$(tr -d \'\\n\' < "$TARGET_PATH/composer.json" | sed -n \'s/.*"require"[[:space:]]*:[[:space:]]*{[^}]*"php"[[:space:]]*:[[:space:]]*"\\([^"]*\\)".*/\\1/p\' | head -n1)"',
+    '  if [ -n "$PHP_REQUIRE" ]; then echo "[doktainer] composer.json requires php: $PHP_REQUIRE"; fi',
+    "fi",
+    ...(buildEnvs.length > 0
+      ? [
+          "echo \"[doktainer] Nixpacks build env overrides:\"",
+          ...buildEnvs.map(
+            (value) => `printf "  - %s\\n" ${escapeShellArg(value)}`,
+          ),
+        ]
+      : []),
     'NIXPACKS_CMD=("$NIXPACKS_BIN" build "$TARGET_PATH" --name "$IMAGE_TAG")',
     ...buildEnvs.map(
       (value) => `NIXPACKS_CMD+=(--env ${escapeShellArg(value)})`,
@@ -2036,6 +2064,7 @@ async function inspectSourceProject(
     'HAS_DOT_ENV_DIST=0; [ -f "$TARGET_PATH/.env.dist" ] && HAS_DOT_ENV_DIST=1',
     'HAS_ENV_TEMPLATE=0; [ -f "$TARGET_PATH/env" ] && HAS_ENV_TEMPLATE=1',
     'HAS_ARTISAN=0; [ -f "$TARGET_PATH/artisan" ] && HAS_ARTISAN=1',
+    'HAS_LARAVEL_FRAMEWORK=0; if [ -f "$TARGET_PATH/composer.json" ] && grep -q "\"laravel/framework\"" "$TARGET_PATH/composer.json"; then HAS_LARAVEL_FRAMEWORK=1; fi',
     'HAS_SPARK=0; [ -f "$TARGET_PATH/spark" ] && HAS_SPARK=1',
     'HAS_PACKAGE_JSON=0; [ -f "$TARGET_PATH/package.json" ] && HAS_PACKAGE_JSON=1',
     'HAS_PROCFILE=0; [ -f "$TARGET_PATH/Procfile" ] && HAS_PROCFILE=1',
@@ -2046,7 +2075,8 @@ async function inspectSourceProject(
     'HAS_NVMRC=0; [ -f "$TARGET_PATH/.nvmrc" ] && HAS_NVMRC=1',
     'PACKAGE_JSON_HAS_NODE_ENGINE=0; if [ -f "$TARGET_PATH/package.json" ] && grep -q "\"node\"" "$TARGET_PATH/package.json"; then PACKAGE_JSON_HAS_NODE_ENGINE=1; fi',
     'HAS_PHP_FILE=0; find "$TARGET_PATH" -maxdepth 2 -type f -name "*.php" -print -quit | grep -q . && HAS_PHP_FILE=1 || true',
-    'printf "HAS_COMPOSER_JSON=%s\nHAS_COMPOSER_LOCK=%s\nHAS_DOT_ENV=%s\nHAS_DOT_ENV_EXAMPLE=%s\nHAS_DOT_ENV_DIST=%s\nHAS_ENV_TEMPLATE=%s\nHAS_ARTISAN=%s\nHAS_SPARK=%s\nHAS_PACKAGE_JSON=%s\nHAS_PROCFILE=%s\nHAS_PUBLIC_INDEX=%s\nHAS_WRITABLE_DIR=%s\nHAS_STORAGE_DIR=%s\nHAS_BOOTSTRAP_CACHE_DIR=%s\nHAS_NVMRC=%s\nPACKAGE_JSON_HAS_NODE_ENGINE=%s\nHAS_PHP_FILE=%s\n" "$HAS_COMPOSER_JSON" "$HAS_COMPOSER_LOCK" "$HAS_DOT_ENV" "$HAS_DOT_ENV_EXAMPLE" "$HAS_DOT_ENV_DIST" "$HAS_ENV_TEMPLATE" "$HAS_ARTISAN" "$HAS_SPARK" "$HAS_PACKAGE_JSON" "$HAS_PROCFILE" "$HAS_PUBLIC_INDEX" "$HAS_WRITABLE_DIR" "$HAS_STORAGE_DIR" "$HAS_BOOTSTRAP_CACHE_DIR" "$HAS_NVMRC" "$PACKAGE_JSON_HAS_NODE_ENGINE" "$HAS_PHP_FILE"',
+    'PHP_REQUIRE=""; if [ -f "$TARGET_PATH/composer.json" ]; then PHP_REQUIRE="$(tr -d \'\\n\' < "$TARGET_PATH/composer.json" | sed -n \'s/.*"require"[[:space:]]*:[[:space:]]*{[^}]*"php"[[:space:]]*:[[:space:]]*"\\([^"]*\\)".*/\\1/p\' | head -n1)"; fi',
+    'printf "HAS_COMPOSER_JSON=%s\nHAS_COMPOSER_LOCK=%s\nHAS_DOT_ENV=%s\nHAS_DOT_ENV_EXAMPLE=%s\nHAS_DOT_ENV_DIST=%s\nHAS_ENV_TEMPLATE=%s\nHAS_ARTISAN=%s\nHAS_LARAVEL_FRAMEWORK=%s\nHAS_SPARK=%s\nHAS_PACKAGE_JSON=%s\nHAS_PROCFILE=%s\nHAS_PUBLIC_INDEX=%s\nHAS_WRITABLE_DIR=%s\nHAS_STORAGE_DIR=%s\nHAS_BOOTSTRAP_CACHE_DIR=%s\nHAS_NVMRC=%s\nPACKAGE_JSON_HAS_NODE_ENGINE=%s\nHAS_PHP_FILE=%s\nPHP_REQUIRE=%s\n" "$HAS_COMPOSER_JSON" "$HAS_COMPOSER_LOCK" "$HAS_DOT_ENV" "$HAS_DOT_ENV_EXAMPLE" "$HAS_DOT_ENV_DIST" "$HAS_ENV_TEMPLATE" "$HAS_ARTISAN" "$HAS_LARAVEL_FRAMEWORK" "$HAS_SPARK" "$HAS_PACKAGE_JSON" "$HAS_PROCFILE" "$HAS_PUBLIC_INDEX" "$HAS_WRITABLE_DIR" "$HAS_STORAGE_DIR" "$HAS_BOOTSTRAP_CACHE_DIR" "$HAS_NVMRC" "$PACKAGE_JSON_HAS_NODE_ENGINE" "$HAS_PHP_FILE" "$PHP_REQUIRE"',
   ].join("\n");
 
   const stdout = await execStrict(
@@ -2054,23 +2084,29 @@ async function inspectSourceProject(
     privilegedCommand(server, `bash -lc ${escapeShellArg(script)}`),
   );
 
-  const values = Object.fromEntries(
+  const rawValues = Object.fromEntries(
     stdout
       .split("\n")
       .map((line) => line.trim())
       .filter(Boolean)
       .map((line) => {
         const separatorIndex = line.indexOf("=");
+        const key = line.slice(0, separatorIndex);
+        const value = line.slice(separatorIndex + 1);
         return [
-          line.slice(0, separatorIndex),
-          line.slice(separatorIndex + 1) === "1",
+          key,
+          key === "PHP_REQUIRE" ? value : value === "1",
         ];
       }),
+  ) as Record<string, string | boolean>;
+
+  const values = Object.fromEntries(
+    Object.entries(rawValues).map(([key, value]) => [key, value === true]),
   ) as Record<string, boolean>;
 
   const likelyPhp =
     values.HAS_COMPOSER_JSON || values.HAS_ARTISAN || values.HAS_PHP_FILE;
-  const likelyLaravel = values.HAS_ARTISAN;
+  const likelyLaravel = values.HAS_ARTISAN && values.HAS_LARAVEL_FRAMEWORK;
   const likelyCodeIgniter = values.HAS_SPARK || values.HAS_ENV_TEMPLATE;
   const hasNodeVersionHints =
     values.HAS_NVMRC || values.PACKAGE_JSON_HAS_NODE_ENGINE;
@@ -2092,6 +2128,10 @@ async function inspectSourceProject(
     hasStorageDir: values.HAS_STORAGE_DIR,
     hasBootstrapCacheDir: values.HAS_BOOTSTRAP_CACHE_DIR,
     hasNodeVersionHints,
+    phpRequirement:
+      typeof rawValues.PHP_REQUIRE === "string" && rawValues.PHP_REQUIRE.trim()
+        ? rawValues.PHP_REQUIRE.trim()
+        : null,
   };
 }
 
@@ -2195,20 +2235,26 @@ async function generateComposerLockIfMissing(
   opts: {
     deploymentPath: string;
     buildPath?: string;
+    platformPhpVersion?: string | null;
   },
 ) {
   const buildPath = normalizeBuildSubdirectory(opts.buildPath);
+  const platformPhpVersion = opts.platformPhpVersion?.trim();
   const script = [
     "set -euo pipefail",
     `DEPLOY_PATH=${escapeShellArg(opts.deploymentPath)}`,
     `BUILD_PATH=${escapeShellArg(buildPath)}`,
+    `PLATFORM_PHP=${escapeShellArg(platformPhpVersion || "")}`,
     'if [ "$BUILD_PATH" = "." ]; then TARGET_PATH="$DEPLOY_PATH"; else TARGET_PATH="$DEPLOY_PATH/$BUILD_PATH"; fi',
     'if [ -f "$TARGET_PATH/composer.lock" ] || [ ! -f "$TARGET_PATH/composer.json" ]; then exit 0; fi',
+    'echo "[doktainer] composer.lock is missing; generating one before build"',
     'cd "$TARGET_PATH"',
+    'if [ -n "$PLATFORM_PHP" ]; then echo "[doktainer] Composer platform.php: $PLATFORM_PHP"; fi',
     "if command -v composer >/dev/null 2>&1; then",
-    "  composer update --no-interaction --no-install --no-scripts --prefer-dist",
+    '  if [ -n "$PLATFORM_PHP" ]; then composer config platform.php "$PLATFORM_PHP"; fi',
+    "  composer update --no-interaction --no-install --no-scripts --prefer-dist --ignore-platform-req=ext-*",
     "elif command -v docker >/dev/null 2>&1; then",
-    '  docker run --rm -v "$TARGET_PATH":/app -w /app composer:2 composer update --no-interaction --no-install --no-scripts --prefer-dist',
+    '  docker run --rm -e PLATFORM_PHP="$PLATFORM_PHP" -v "$TARGET_PATH":/app -w /app composer:2 sh -lc \'if [ -n "$PLATFORM_PHP" ]; then composer config platform.php "$PLATFORM_PHP"; fi; composer update --no-interaction --no-install --no-scripts --prefer-dist --ignore-platform-req=ext-*\'',
     "else",
     '  echo "composer.lock is missing and neither composer nor docker is available to generate it"',
     "  exit 1",
@@ -2455,6 +2501,20 @@ export async function deployContainerFromGitSource(
       buildPath,
       sourceProject,
     });
+    if (
+      sourceProject.likelyLaravel &&
+      sourceProject.hasComposerJson &&
+      !sourceProject.hasComposerLock
+    ) {
+      await generateComposerLockIfMissing(server, {
+        deploymentPath,
+        buildPath,
+        platformPhpVersion: resolveComposerPlatformPhpVersion(
+          sourceProject.phpRequirement,
+        ),
+      });
+    }
+
     const nixpacksBuildEnvs: string[] = [];
 
     if (
@@ -2474,6 +2534,10 @@ export async function deployContainerFromGitSource(
       !sourceProject.hasNodeVersionHints
     ) {
       nixpacksBuildEnvs.push("NIXPACKS_NODE_VERSION=22");
+    }
+
+    if (sourceProject.likelyLaravel) {
+      nixpacksBuildEnvs.push("COMPOSER_NO_DEV=1");
     }
 
     const nixpacksStartCommand = resolveNixpacksStartCommand({
