@@ -5,7 +5,11 @@ import prisma from "../lib/prisma";
 import { authenticate, requireApiKeyPermission } from "../middleware/auth";
 import { auditLog } from "../services/audit.service";
 import { dispatchRuntimeNotification } from "../services/notification.service";
-import { provisionDomainProxyConfig } from "../services/domain-provisioning";
+import {
+  provisionDomainProxyConfig,
+  resolveContainerUpstream,
+} from "../services/domain-provisioning";
+import { getDomainConfigAnchor } from "../services/domain-provisioning/names";
 import * as ssh from "../services/ssh.service";
 
 const IssueCertSchema = z.object({
@@ -45,6 +49,18 @@ type SharedSslGroupMember = {
   isPrimary: boolean;
   sslEnabled: boolean;
   autoRenew: boolean;
+  targetContainerId: string | null;
+  targetPort: number | null;
+  targetContainer: {
+    id: string;
+    name: string;
+    dockerId: string | null;
+    serverId: string;
+  } | null;
+};
+
+type SharedSslGroupCandidate = SharedSslGroupMember & {
+  configMode: "SHARED" | "ISOLATED";
 };
 
 type SslRenewOperation = {
@@ -84,6 +100,50 @@ function deriveSslStatus(
   if (expiresAt.getTime() <= Date.now()) return "EXPIRED";
   const thirtyDaysFromNow = Date.now() + 30 * 24 * 60 * 60 * 1000;
   return expiresAt.getTime() <= thirtyDaysFromNow ? "EXPIRING" : "VALID";
+}
+
+export type DiscoveredSslDomainCertificate = {
+  domainName: string;
+  certificate: ssh.DiscoveredSslCertificate;
+};
+
+function getCertificateExpiryTime(certificate: {
+  expiresAt: Date | null;
+}): number {
+  return certificate.expiresAt?.getTime() ?? 0;
+}
+
+function isBetterDiscoveredCertificate(
+  candidate: ssh.DiscoveredSslCertificate,
+  current: ssh.DiscoveredSslCertificate,
+): boolean {
+  const candidateExpiry = getCertificateExpiryTime(candidate);
+  const currentExpiry = getCertificateExpiryTime(current);
+
+  if (candidateExpiry !== currentExpiry) {
+    return candidateExpiry > currentExpiry;
+  }
+
+  return candidate.certName.localeCompare(current.certName) < 0;
+}
+
+export function selectBestDiscoveredSslCertificateByDomain(
+  certificates: ssh.DiscoveredSslCertificate[],
+): DiscoveredSslDomainCertificate[] {
+  const byDomain = new Map<string, ssh.DiscoveredSslCertificate>();
+
+  for (const certificate of certificates) {
+    for (const domainName of certificate.domainNames) {
+      const current = byDomain.get(domainName);
+      if (!current || isBetterDiscoveredCertificate(certificate, current)) {
+        byDomain.set(domainName, certificate);
+      }
+    }
+  }
+
+  return Array.from(byDomain.entries())
+    .map(([domainName, certificate]) => ({ domainName, certificate }))
+    .sort((left, right) => left.domainName.localeCompare(right.domainName));
 }
 
 function isSharedNginxDomain(domain: {
@@ -130,27 +190,51 @@ function choosePrimaryDomain(domainNames: string[]): string | null {
 async function listSharedSslGroupMembers(options: {
   organizationId: string;
   serverId: string;
-  targetContainerId: string;
-  targetPort: number;
+  rootDomain: string;
 }): Promise<SharedSslGroupMember[]> {
-  return prisma.domain.findMany({
+  const candidates = await prisma.domain.findMany({
     where: {
       organizationId: options.organizationId,
       serverId: options.serverId,
-      targetContainerId: options.targetContainerId,
-      targetPort: options.targetPort,
       proxy: "NGINX",
-      configMode: "SHARED",
     },
     select: {
       id: true,
       name: true,
+      configMode: true,
       isPrimary: true,
       sslEnabled: true,
       autoRenew: true,
+      targetContainerId: true,
+      targetPort: true,
+      targetContainer: {
+        select: {
+          id: true,
+          name: true,
+          dockerId: true,
+          serverId: true,
+        },
+      },
     },
     orderBy: [{ isPrimary: "desc" }, { name: "asc" }],
   });
+
+  return filterSharedSslGroupMembersByRoot(candidates, {
+    rootDomain: options.rootDomain,
+  });
+}
+
+export function filterSharedSslGroupMembersByRoot(
+  candidates: SharedSslGroupCandidate[],
+  options: {
+    rootDomain: string;
+  },
+): SharedSslGroupMember[] {
+  return candidates.filter(
+    (domain) =>
+      getDomainConfigAnchor([domain.name]) === options.rootDomain &&
+      (domain.configMode === "SHARED" || domain.name === options.rootDomain),
+  );
 }
 
 function resolveSharedGroupPrimaryDomain(
@@ -162,34 +246,10 @@ function resolveSharedGroupPrimaryDomain(
   );
 }
 
-async function fetchTargetContainer(options: {
-  organizationId: string;
-  targetContainerId: string;
-}): Promise<{
-  id: string;
-  name: string;
-  dockerId: string | null;
-  serverId: string;
-} | null> {
-  return prisma.container.findFirst({
-    where: {
-      id: options.targetContainerId,
-      server: { organizationId: options.organizationId },
-    },
-    select: {
-      id: true,
-      name: true,
-      dockerId: true,
-      serverId: true,
-    },
-  });
-}
-
 async function persistSharedSslCertificate(options: {
   organizationId: string;
   serverId: string;
-  targetContainerId: string;
-  targetPort: number;
+  rootDomain: string;
   autoRenew: boolean;
   issued: ssh.SslCertificateResult;
 }): Promise<void> {
@@ -236,8 +296,7 @@ async function persistSharedSslCertificate(options: {
 async function setSharedSslAutoRenew(options: {
   organizationId: string;
   serverId: string;
-  targetContainerId: string;
-  targetPort: number;
+  rootDomain: string;
   autoRenew: boolean;
 }): Promise<void> {
   const members = await listSharedSslGroupMembers(options);
@@ -260,8 +319,7 @@ async function setSharedSslAutoRenew(options: {
 async function clearSharedSslState(options: {
   organizationId: string;
   serverId: string;
-  targetContainerId: string;
-  targetPort: number;
+  rootDomain: string;
 }): Promise<void> {
   const members = await listSharedSslGroupMembers(options);
   if (members.length === 0) {
@@ -283,8 +341,7 @@ async function reprovisionSharedDomainProxyIfNeeded(options: {
   organizationId: string;
   server: Awaited<ReturnType<typeof prisma.server.findUnique>>;
   serverId: string;
-  targetContainerId: string;
-  targetPort: number;
+  rootDomain: string;
 }): Promise<void> {
   if (!options.server) {
     return;
@@ -293,15 +350,10 @@ async function reprovisionSharedDomainProxyIfNeeded(options: {
   const members = await listSharedSslGroupMembers({
     organizationId: options.organizationId,
     serverId: options.serverId,
-    targetContainerId: options.targetContainerId,
-    targetPort: options.targetPort,
-  });
-  const container = await fetchTargetContainer({
-    organizationId: options.organizationId,
-    targetContainerId: options.targetContainerId,
+    rootDomain: options.rootDomain,
   });
 
-  if (!container || members.length === 0) {
+  if (members.length === 0) {
     return;
   }
 
@@ -312,16 +364,44 @@ async function reprovisionSharedDomainProxyIfNeeded(options: {
     return;
   }
 
+  const provisionableMembers = members.filter(
+    (
+      member,
+    ): member is SharedSslGroupMember & {
+      targetContainer: NonNullable<SharedSslGroupMember["targetContainer"]>;
+      targetPort: number;
+    } => Boolean(member.targetContainer && member.targetPort),
+  );
+
+  const nginxServerEntries = await Promise.all(
+    provisionableMembers.map(async (member) => ({
+      domainName: member.name,
+      upstream: (
+        await resolveContainerUpstream(
+          options.server!,
+          member.targetContainer,
+          member.targetPort,
+        )
+      ).upstream,
+    })),
+  );
+  const fallbackTarget = provisionableMembers[0] ?? null;
+
+  if (!fallbackTarget) {
+    return;
+  }
+
   await provisionDomainProxyConfig({
     server: options.server,
     domainName: primaryDomainName,
     domainNames: members.map((member) => member.name),
+    nginxServerEntries,
     primaryDomainName,
     configMode: "SHARED",
     proxy: "NGINX",
     sslEnabled: members.some((member) => member.sslEnabled),
-    container,
-    targetPort: options.targetPort,
+    container: fallbackTarget.targetContainer,
+    targetPort: fallbackTarget.targetPort,
   });
 }
 
@@ -357,8 +437,7 @@ async function reprovisionDomainProxyIfNeeded(options: {
       organizationId: server.organizationId,
       server,
       serverId: server.id,
-      targetContainerId: domain.targetContainerId!,
-      targetPort: domain.targetPort!,
+      rootDomain: getDomainConfigAnchor([domain.name]),
     });
     return;
   }
@@ -582,11 +661,11 @@ function startSslRenewOperation(options: {
 
       const updateDatabaseStartedAt = Date.now();
       if (cert.domain.serverId && isSharedNginxDomain(cert.domain)) {
+        const rootDomain = getDomainConfigAnchor([cert.domain.name]);
         await persistSharedSslCertificate({
           organizationId,
           serverId: cert.domain.serverId,
-          targetContainerId: cert.domain.targetContainerId!,
-          targetPort: cert.domain.targetPort!,
+          rootDomain,
           autoRenew: cert.domain.autoRenew,
           issued: renewed,
         });
@@ -620,8 +699,7 @@ function startSslRenewOperation(options: {
           organizationId,
           server,
           serverId: cert.domain.serverId,
-          targetContainerId: cert.domain.targetContainerId!,
-          targetPort: cert.domain.targetPort!,
+          rootDomain: getDomainConfigAnchor([cert.domain.name]),
         });
       } else {
         await reloadDomainProxyAfterRenewIfNeeded({
@@ -741,8 +819,10 @@ export async function sslRoutes(app: FastifyInstance) {
         });
       }
 
-      const discoveredNames = Array.from(
-        new Set(certificates.flatMap((cert) => cert.domainNames)),
+      const discoveredDomainCertificates =
+        selectBestDiscoveredSslCertificateByDomain(certificates);
+      const discoveredNames = discoveredDomainCertificates.map(
+        (item) => item.domainName,
       );
 
       const existingDomains = discoveredNames.length
@@ -759,7 +839,8 @@ export async function sslRoutes(app: FastifyInstance) {
       );
 
       await prisma.$transaction(async (tx) => {
-        for (const cert of certificates) {
+        for (const item of discoveredDomainCertificates) {
+          const { domainName, certificate: cert } = item;
           const status = deriveSslStatus(cert.expiresAt);
 
           if (status === "EXPIRING") {
@@ -767,101 +848,97 @@ export async function sslRoutes(app: FastifyInstance) {
               ? cert.expiresAt.toISOString().slice(0, 10)
               : "unknown date";
 
-            for (const domainName of cert.domainNames) {
-              pendingNotifications.push(
-                dispatchRuntimeNotification({
-                  organizationId: req.organizationId!,
-                  action: "ssl_expiring",
-                  title: `SSL expiring for ${domainName}`,
-                  message: `SSL certificate for ${domainName} on server ${server.name} will expire on ${expiresAtLabel}.`,
+            pendingNotifications.push(
+              dispatchRuntimeNotification({
+                organizationId: req.organizationId!,
+                action: "ssl_expiring",
+                title: `SSL expiring for ${domainName}`,
+                message: `SSL certificate for ${domainName} on server ${server.name} will expire on ${expiresAtLabel}.`,
+                serverId: server.id,
+                resourceType: "domain",
+                resourceId: domainName,
+                metadata: {
+                  domainName,
                   serverId: server.id,
-                  resourceType: "domain",
-                  resourceId: domainName,
-                  metadata: {
-                    domainName,
-                    serverId: server.id,
-                    serverName: server.name,
-                    expiresAt: cert.expiresAt?.toISOString() ?? null,
-                    issuer: cert.issuer,
-                  },
-                }),
-              );
-            }
+                  serverName: server.name,
+                  expiresAt: cert.expiresAt?.toISOString() ?? null,
+                  issuer: cert.issuer,
+                },
+              }),
+            );
           }
 
-          for (const domainName of cert.domainNames) {
-            const existingDomain = existingByName.get(domainName);
+          const existingDomain = existingByName.get(domainName);
 
-            const domain = existingDomain
-              ? await tx.domain.update({
-                  where: { id: existingDomain.id },
-                  data: {
-                    serverId: server.id,
-                    sslEnabled: true,
-                    isActive: true,
-                    discoverySource:
-                      existingDomain.discoverySource === "MANUAL"
-                        ? "CERTBOT"
-                        : existingDomain.discoverySource,
-                    value: existingDomain.value?.trim()
-                      ? existingDomain.value
-                      : server.ip,
-                  },
-                })
-              : await tx.domain.create({
-                  data: {
-                    name: domainName,
-                    organizationId: req.organizationId!,
-                    type: "A",
-                    value: server.ip,
-                    serverId: server.id,
-                    proxy: "NONE",
-                    discoverySource: "CERTBOT",
-                    sslEnabled: true,
-                    autoRenew: true,
-                    isActive: true,
-                  },
-                });
-
-            existingByName.set(domainName, {
-              ...domain,
-              sslCert: existingDomain?.sslCert ?? null,
-            });
-
-            const existingCert = existingDomain?.sslCert;
-            if (existingCert) {
-              await tx.sslCert.update({
-                where: { id: existingCert.id },
+          const domain = existingDomain
+            ? await tx.domain.update({
+                where: { id: existingDomain.id },
                 data: {
-                  issuer: cert.issuer,
-                  certPem: cert.certPem,
-                  keyPem: cert.keyPem,
-                  issuedAt: cert.issuedAt,
-                  expiresAt: cert.expiresAt,
-                  status,
+                  serverId: server.id,
+                  sslEnabled: true,
+                  isActive: true,
+                  discoverySource:
+                    existingDomain.discoverySource === "MANUAL"
+                      ? "CERTBOT"
+                      : existingDomain.discoverySource,
+                  value: existingDomain.value?.trim()
+                    ? existingDomain.value
+                    : server.ip,
+                },
+              })
+            : await tx.domain.create({
+                data: {
+                  name: domainName,
+                  organizationId: req.organizationId!,
+                  type: "A",
+                  value: server.ip,
+                  serverId: server.id,
+                  proxy: "NONE",
+                  discoverySource: "CERTBOT",
+                  sslEnabled: true,
+                  autoRenew: true,
+                  isActive: true,
                 },
               });
-              continue;
-            }
 
-            const createdCert = await tx.sslCert.create({
+          existingByName.set(domainName, {
+            ...domain,
+            sslCert: existingDomain?.sslCert ?? null,
+          });
+
+          const existingCert = existingDomain?.sslCert;
+          if (existingCert) {
+            await tx.sslCert.update({
+              where: { id: existingCert.id },
               data: {
-                domainId: domain.id,
                 issuer: cert.issuer,
                 certPem: cert.certPem,
                 keyPem: cert.keyPem,
                 issuedAt: cert.issuedAt,
                 expiresAt: cert.expiresAt,
                 status,
-                autoRenew: existingDomain?.autoRenew ?? true,
               },
             });
-
-            existingByName.set(domainName, {
-              ...(existingByName.get(domainName) ?? domain),
-              sslCert: createdCert,
-            });
+            continue;
           }
+
+          const createdCert = await tx.sslCert.create({
+            data: {
+              domainId: domain.id,
+              issuer: cert.issuer,
+              certPem: cert.certPem,
+              keyPem: cert.keyPem,
+              issuedAt: cert.issuedAt,
+              expiresAt: cert.expiresAt,
+              status,
+              autoRenew: existingDomain?.autoRenew ?? true,
+            },
+          });
+
+          existingByName.set(domainName, {
+            ...(existingByName.get(domainName) ?? domain),
+            sslCert: createdCert,
+          });
         }
       });
 
@@ -1042,11 +1119,11 @@ export async function sslRoutes(app: FastifyInstance) {
     let issued;
     try {
       if (isSharedNginxDomain(domain)) {
+        const rootDomain = getDomainConfigAnchor([domain.name]);
         const members = await listSharedSslGroupMembers({
           organizationId: req.organizationId!,
           serverId: domain.serverId!,
-          targetContainerId: domain.targetContainerId!,
-          targetPort: domain.targetPort!,
+          rootDomain,
         });
         const primaryDomainName =
           resolveSharedGroupPrimaryDomain(members) ?? domain.name;
@@ -1059,8 +1136,7 @@ export async function sslRoutes(app: FastifyInstance) {
         await persistSharedSslCertificate({
           organizationId: req.organizationId!,
           serverId: domain.serverId!,
-          targetContainerId: domain.targetContainerId!,
-          targetPort: domain.targetPort!,
+          rootDomain,
           autoRenew: body.data.autoRenew,
           issued,
         });
@@ -1283,8 +1359,7 @@ export async function sslRoutes(app: FastifyInstance) {
         await setSharedSslAutoRenew({
           organizationId: req.organizationId!,
           serverId: existingCert.domain.serverId!,
-          targetContainerId: existingCert.domain.targetContainerId!,
-          targetPort: existingCert.domain.targetPort!,
+          rootDomain: getDomainConfigAnchor([existingCert.domain.name]),
           autoRenew: body.data.autoRenew,
         });
       } else {
@@ -1350,18 +1425,17 @@ export async function sslRoutes(app: FastifyInstance) {
     }
 
     if (isSharedNginxDomain(cert.domain)) {
+      const rootDomain = getDomainConfigAnchor([cert.domain.name]);
       await clearSharedSslState({
         organizationId: req.organizationId!,
         serverId: cert.domain.serverId!,
-        targetContainerId: cert.domain.targetContainerId!,
-        targetPort: cert.domain.targetPort!,
+        rootDomain,
       });
       await reprovisionSharedDomainProxyIfNeeded({
         organizationId: req.organizationId!,
         server,
         serverId: cert.domain.serverId!,
-        targetContainerId: cert.domain.targetContainerId!,
-        targetPort: cert.domain.targetPort!,
+        rootDomain,
       });
     } else {
       await prisma.sslCert.delete({ where: { id } });
