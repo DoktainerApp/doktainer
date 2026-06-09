@@ -36,6 +36,83 @@ function dockerPruneTimeout() {
   };
 }
 
+function buildAptDockerCeInstallCommands() {
+  return [
+    [
+      "set -euo pipefail",
+      ". /etc/os-release",
+      'DOCKER_REPO_OS="${ID:-}"',
+      'DOCKER_REPO_CODENAME="${UBUNTU_CODENAME:-${VERSION_CODENAME:-}}"',
+      'if [ "$DOCKER_REPO_OS" != "ubuntu" ] && [ "$DOCKER_REPO_OS" != "debian" ]; then',
+      '  if echo "${ID_LIKE:-}" | grep -qw ubuntu; then DOCKER_REPO_OS="ubuntu"; fi',
+      '  if [ "$DOCKER_REPO_OS" != "ubuntu" ] && echo "${ID_LIKE:-}" | grep -qw debian; then DOCKER_REPO_OS="debian"; fi',
+      "fi",
+      'if [ "$DOCKER_REPO_OS" != "ubuntu" ] && [ "$DOCKER_REPO_OS" != "debian" ]; then',
+      '  echo "Docker CE apt repository is only supported for Ubuntu or Debian hosts"; exit 1',
+      "fi",
+      'if [ -z "$DOCKER_REPO_CODENAME" ]; then',
+      '  echo "Unable to detect Debian/Ubuntu codename for Docker CE repository"; exit 1',
+      "fi",
+      "DEBIAN_FRONTEND=noninteractive apt-get update",
+      "DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl git",
+      "DEBIAN_FRONTEND=noninteractive apt-get remove -y docker.io docker-compose docker-compose-v2 docker-doc podman-docker containerd runc || true",
+      "install -m 0755 -d /etc/apt/keyrings",
+      'curl -fsSL "https://download.docker.com/linux/${DOCKER_REPO_OS}/gpg" -o /etc/apt/keyrings/docker.asc',
+      "chmod a+r /etc/apt/keyrings/docker.asc",
+      'printf "Types: deb\\nURIs: https://download.docker.com/linux/%s\\nSuites: %s\\nComponents: stable\\nArchitectures: %s\\nSigned-By: /etc/apt/keyrings/docker.asc\\n" "$DOCKER_REPO_OS" "$DOCKER_REPO_CODENAME" "$(dpkg --print-architecture)" > /etc/apt/sources.list.d/docker.sources',
+      "DEBIAN_FRONTEND=noninteractive apt-get update",
+      "DEBIAN_FRONTEND=noninteractive apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin",
+    ].join("\n"),
+    "systemctl enable --now docker",
+  ];
+}
+
+function buildRpmDockerCeInstallCommands(packageManager: "dnf" | "yum") {
+  return [
+    [
+      "set -euo pipefail",
+      ". /etc/os-release",
+      'DOCKER_REPO_OS=""',
+      'case "${ID:-}" in',
+      '  fedora) DOCKER_REPO_OS="fedora" ;;',
+      '  centos) DOCKER_REPO_OS="centos" ;;',
+      '  rhel) DOCKER_REPO_OS="rhel" ;;',
+      "esac",
+      'if [ -z "$DOCKER_REPO_OS" ]; then',
+      '  echo "Docker CE rpm repository is only supported for Fedora, CentOS, or RHEL hosts"; exit 1',
+      "fi",
+      `${packageManager} install -y ca-certificates curl git`,
+      `${packageManager} remove -y docker docker-client docker-client-latest docker-common docker-latest docker-latest-logrotate docker-logrotate docker-engine podman-docker containerd runc || true`,
+      'curl -fsSL "https://download.docker.com/linux/${DOCKER_REPO_OS}/docker-ce.repo" -o /etc/yum.repos.d/docker-ce.repo',
+      `${packageManager} install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin`,
+    ].join("\n"),
+    "systemctl enable --now docker",
+  ];
+}
+
+function buildDockerInstallCommands(platform: ServerPlatformInfo) {
+  switch (platform.packageManager) {
+    case "apt-get":
+      return buildAptDockerCeInstallCommands();
+    case "dnf":
+      return buildRpmDockerCeInstallCommands("dnf");
+    case "yum":
+      return buildRpmDockerCeInstallCommands("yum");
+    case "zypper":
+      throw new Error(
+        "Docker CE official repository provisioning is not supported for openSUSE/SLES hosts yet",
+      );
+    case "apk":
+      throw new Error(
+        "Docker CE official repository provisioning is not supported for Alpine hosts",
+      );
+    default:
+      throw new Error(
+        `Docker install is not supported on ${platform.distro ?? "this server"}: no supported package manager found`,
+      );
+  }
+}
+
 async function validateDockerProvisioning(server: Server) {
   for (const item of dockerProvisioningValidationCommands) {
     try {
@@ -193,57 +270,9 @@ export async function installDockerEngine(
     );
   }
 
-  const installCommands: Record<
-    NonNullable<ServerPlatformInfo["packageManager"]>,
-    string[]
-  > = {
-    // Ubuntu/Debian
-    "apt-get": [
-      [
-        "set -euo pipefail",
-        ". /etc/os-release",
-        'DOCKER_REPO_OS="${ID:-}"',
-        'DOCKER_REPO_CODENAME="${UBUNTU_CODENAME:-${VERSION_CODENAME:-}}"',
-        'if [ "$DOCKER_REPO_OS" != "ubuntu" ] && [ "$DOCKER_REPO_OS" != "debian" ]; then',
-        '  if echo "${ID_LIKE:-}" | grep -qw ubuntu; then DOCKER_REPO_OS="ubuntu"; fi',
-        '  if [ "$DOCKER_REPO_OS" != "ubuntu" ] && echo "${ID_LIKE:-}" | grep -qw debian; then DOCKER_REPO_OS="debian"; fi',
-        "fi",
-        'if [ "$DOCKER_REPO_OS" != "ubuntu" ] && [ "$DOCKER_REPO_OS" != "debian" ]; then',
-        '  echo "Docker CE apt repository is only supported for Ubuntu or Debian hosts"; exit 1',
-        "fi",
-        'if [ -z "$DOCKER_REPO_CODENAME" ]; then',
-        '  echo "Unable to detect Debian/Ubuntu codename for Docker CE repository"; exit 1',
-        "fi",
-        "DEBIAN_FRONTEND=noninteractive apt-get update",
-        "DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl git",
-        "DEBIAN_FRONTEND=noninteractive apt-get remove -y docker.io docker-compose docker-compose-v2 docker-doc podman-docker containerd runc || true",
-        "install -m 0755 -d /etc/apt/keyrings",
-        'curl -fsSL "https://download.docker.com/linux/${DOCKER_REPO_OS}/gpg" -o /etc/apt/keyrings/docker.asc',
-        "chmod a+r /etc/apt/keyrings/docker.asc",
-        'printf "Types: deb\\nURIs: https://download.docker.com/linux/%s\\nSuites: %s\\nComponents: stable\\nArchitectures: %s\\nSigned-By: /etc/apt/keyrings/docker.asc\\n" "$DOCKER_REPO_OS" "$DOCKER_REPO_CODENAME" "$(dpkg --print-architecture)" > /etc/apt/sources.list.d/docker.sources',
-        "DEBIAN_FRONTEND=noninteractive apt-get update",
-        "DEBIAN_FRONTEND=noninteractive apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin",
-      ].join("\n"),
-      "systemctl enable --now docker",
-    ],
-    // Fedora/CentOS/RHEL/Rocky 8+
-    dnf: ["dnf install -y docker git", "systemctl enable --now docker"],
-    // Old CentOS/RHEL
-    yum: ["yum install -y docker git", "systemctl enable --now docker"],
-    // Zypper (SUSE)
-    zypper: [
-      "zypper --non-interactive install docker git",
-      "systemctl enable --now docker",
-    ],
-    // Alpine
-    apk: [
-      "apk add docker git",
-      "rc-update add docker default",
-      "service docker start",
-    ],
-  };
+  const installCommands = buildDockerInstallCommands(platform);
 
-  for (const command of installCommands[platform.packageManager]) {
+  for (const command of installCommands) {
     await execStrict(
       server,
       privilegedCommand(server, `bash -lc ${escapeShellArg(command)}`),
