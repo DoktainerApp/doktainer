@@ -10,11 +10,49 @@ import { privilegedCommand } from "./internal/privilege";
 
 const DOCKER_PRUNE_TIMEOUT_MS = 60_000;
 
+const dockerProvisioningValidationCommands = [
+  {
+    command: "docker version",
+    missingMessage: "Missing Docker Engine",
+  },
+  {
+    command: "docker buildx version",
+    missingMessage: "Missing Docker Buildx Plugin",
+  },
+  {
+    command: "docker compose version",
+    missingMessage: "Missing Docker Compose Plugin",
+  },
+  {
+    command: "git --version",
+    missingMessage: "Missing Git",
+  },
+] as const;
+
 function dockerPruneTimeout() {
   return {
     timeoutMs: DOCKER_PRUNE_TIMEOUT_MS,
     queueTimeoutMs: DOCKER_PRUNE_TIMEOUT_MS,
   };
+}
+
+async function validateDockerProvisioning(server: Server) {
+  for (const item of dockerProvisioningValidationCommands) {
+    try {
+      await execStrict(server, privilegedCommand(server, item.command));
+    } catch (error) {
+      const details = error instanceof Error ? error.message.trim() : "";
+      throw new Error(
+        [
+          "Provisioning Failed:",
+          item.missingMessage,
+          details ? `\n${details}` : null,
+        ]
+          .filter(Boolean)
+          .join("\n"),
+      );
+    }
+  }
 }
 
 export interface DockerPruneOptions {
@@ -159,27 +197,60 @@ export async function installDockerEngine(
     NonNullable<ServerPlatformInfo["packageManager"]>,
     string[]
   > = {
+    // Ubuntu/Debian
     "apt-get": [
-      "DEBIAN_FRONTEND=noninteractive apt-get update",
-      "DEBIAN_FRONTEND=noninteractive apt-get install -y docker.io",
+      [
+        "set -euo pipefail",
+        ". /etc/os-release",
+        'DOCKER_REPO_OS="${ID:-}"',
+        'DOCKER_REPO_CODENAME="${UBUNTU_CODENAME:-${VERSION_CODENAME:-}}"',
+        'if [ "$DOCKER_REPO_OS" != "ubuntu" ] && [ "$DOCKER_REPO_OS" != "debian" ]; then',
+        '  if echo "${ID_LIKE:-}" | grep -qw ubuntu; then DOCKER_REPO_OS="ubuntu"; fi',
+        '  if [ "$DOCKER_REPO_OS" != "ubuntu" ] && echo "${ID_LIKE:-}" | grep -qw debian; then DOCKER_REPO_OS="debian"; fi',
+        "fi",
+        'if [ "$DOCKER_REPO_OS" != "ubuntu" ] && [ "$DOCKER_REPO_OS" != "debian" ]; then',
+        '  echo "Docker CE apt repository is only supported for Ubuntu or Debian hosts"; exit 1',
+        "fi",
+        'if [ -z "$DOCKER_REPO_CODENAME" ]; then',
+        '  echo "Unable to detect Debian/Ubuntu codename for Docker CE repository"; exit 1',
+        "fi",
+        "DEBIAN_FRONTEND=noninteractive apt-get update",
+        "DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl git",
+        "DEBIAN_FRONTEND=noninteractive apt-get remove -y docker.io docker-compose docker-compose-v2 docker-doc podman-docker containerd runc || true",
+        "install -m 0755 -d /etc/apt/keyrings",
+        'curl -fsSL "https://download.docker.com/linux/${DOCKER_REPO_OS}/gpg" -o /etc/apt/keyrings/docker.asc',
+        "chmod a+r /etc/apt/keyrings/docker.asc",
+        'printf "Types: deb\\nURIs: https://download.docker.com/linux/%s\\nSuites: %s\\nComponents: stable\\nArchitectures: %s\\nSigned-By: /etc/apt/keyrings/docker.asc\\n" "$DOCKER_REPO_OS" "$DOCKER_REPO_CODENAME" "$(dpkg --print-architecture)" > /etc/apt/sources.list.d/docker.sources',
+        "DEBIAN_FRONTEND=noninteractive apt-get update",
+        "DEBIAN_FRONTEND=noninteractive apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin",
+      ].join("\n"),
       "systemctl enable --now docker",
     ],
-    dnf: ["dnf install -y docker", "systemctl enable --now docker"],
-    yum: ["yum install -y docker", "systemctl enable --now docker"],
+    // Fedora/CentOS/RHEL/Rocky 8+
+    dnf: ["dnf install -y docker git", "systemctl enable --now docker"],
+    // Old CentOS/RHEL
+    yum: ["yum install -y docker git", "systemctl enable --now docker"],
+    // Zypper (SUSE)
     zypper: [
-      "zypper --non-interactive install docker",
+      "zypper --non-interactive install docker git",
       "systemctl enable --now docker",
     ],
+    // Alpine
     apk: [
-      "apk add docker",
+      "apk add docker git",
       "rc-update add docker default",
       "service docker start",
     ],
   };
 
   for (const command of installCommands[platform.packageManager]) {
-    await execStrict(server, privilegedCommand(server, command));
+    await execStrict(
+      server,
+      privilegedCommand(server, `bash -lc ${escapeShellArg(command)}`),
+    );
   }
+
+  await validateDockerProvisioning(server);
 
   return getDockerRuntimeStatus(server);
 }
