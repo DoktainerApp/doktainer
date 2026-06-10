@@ -47,6 +47,7 @@ import ServerConfigOverviewPanel from "@/app/servers/components/server-config/Se
 import ServerConfigServicesPanel from "@/app/servers/components/server-config/ServerConfigServicesPanel";
 import ServerConfigUsersPanel from "@/app/servers/components/server-config/ServerConfigUsersPanel";
 import ServerConfigWebServerPanel from "@/app/servers/components/server-config/ServerConfigWebServerPanel";
+import IssueDetailsSummary from "@/components/IssueDetailsSummary";
 
 interface ServerConfigModalProps {
   server: ServerType;
@@ -1098,18 +1099,11 @@ export default function ServerConfigModal({
         ) : null}
 
         {error ? (
-          <div
-            style={{
-              background: "rgba(239,68,68,0.1)",
-              border: "1px solid rgba(239,68,68,0.3)",
-              borderRadius: 10,
-              padding: "12px 14px",
-              color: "#ef4444",
-              fontSize: 13,
-            }}
-          >
-            {error}
-          </div>
+          <IssueDetailsSummary
+            label="Server Config"
+            message={error}
+            description="The latest server configuration action returned an error."
+          />
         ) : null}
 
         {snapshotLoadError ? (
@@ -1140,15 +1134,11 @@ export default function ServerConfigModal({
                 available, especially in the Actions tab.
               </p>
             </div>
-            <div
-              style={{
-                color: "#fbbf24",
-                fontSize: 12,
-                lineHeight: 1.6,
-              }}
-            >
-              Latest error: {snapshotLoadError}
-            </div>
+            <IssueDetailsSummary
+              label="Configuration Snapshot"
+              message={snapshotLoadError}
+              description="The server did not return a full live configuration snapshot."
+            />
           </div>
         ) : null}
 

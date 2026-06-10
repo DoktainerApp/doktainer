@@ -592,6 +592,8 @@ body {
   color: var(--text-danger);
   font-size: 12px;
   line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .server-config-component-actions {

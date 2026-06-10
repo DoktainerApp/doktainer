@@ -2,6 +2,7 @@
 
 import ConfirmActionDialog from "@/components/ConfirmActionDialog";
 import DashboardLayout from "@/components/DashboardLayout";
+import IssueDetailsSummary from "@/components/IssueDetailsSummary";
 import TablePagination from "@/components/TablePagination";
 import ToastViewport from "@/components/ToastViewport";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -15,7 +16,6 @@ import {
   ToggleRight,
   Loader2,
   Server as ServerIcon,
-  AlertTriangle,
 } from "lucide-react";
 import {
   security as securityApi,
@@ -464,21 +464,11 @@ export default function FirewallPage() {
         style={{ display: "flex", flexDirection: "column", gap: 16 }}
       >
         {error && (
-          <div
-            className="card"
-            style={{
-              padding: 14,
-              border: "1px solid rgba(239,68,68,0.25)",
-              background: "rgba(239,68,68,0.08)",
-              color: "#ef4444",
-              display: "flex",
-              alignItems: "center",
-              gap: 10,
-            }}
-          >
-            <AlertTriangle size={16} />
-            <span style={{ fontSize: 13 }}>{error}</span>
-          </div>
+          <IssueDetailsSummary
+            label="Firewall"
+            message={error}
+            description="Firewall data could not be loaded or refreshed."
+          />
         )}
 
         <div

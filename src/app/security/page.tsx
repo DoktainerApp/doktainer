@@ -2,9 +2,10 @@
 
 import ConfirmActionDialog from "@/components/ConfirmActionDialog";
 import DashboardLayout from "@/components/DashboardLayout";
+import IssueDetailsSummary from "@/components/IssueDetailsSummary";
 import ToastViewport from "@/components/ToastViewport";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Loader2, AlertTriangle } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import {
   security as securityApi,
   SecurityOverviewItem,
@@ -566,21 +567,11 @@ export default function SecurityPage() {
         style={{ display: "flex", flexDirection: "column", gap: 16 }}
       >
         {error && (
-          <div
-            className="card"
-            style={{
-              padding: 14,
-              border: "1px solid rgba(239,68,68,0.25)",
-              background: "rgba(239,68,68,0.08)",
-              color: "#ef4444",
-              display: "flex",
-              alignItems: "center",
-              gap: 10,
-            }}
-          >
-            <AlertTriangle size={16} />
-            <span style={{ fontSize: 13 }}>{error}</span>
-          </div>
+          <IssueDetailsSummary
+            label="Security"
+            message={error}
+            description="Security data could not be loaded or refreshed."
+          />
         )}
 
         <SecuritySummary summary={summary} />

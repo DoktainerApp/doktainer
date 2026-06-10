@@ -2,6 +2,7 @@
 
 import ConfirmActionDialog from "@/components/ConfirmActionDialog";
 import GuardedPage from "@/components/GuardedPage";
+import IssueDetailsSummary from "@/components/IssueDetailsSummary";
 import {
   apiKeys as apiKeysApi,
   type ApiKeyExpiryOption,
@@ -529,21 +530,11 @@ export default function ApiKeysPage() {
         </div>
 
         {error && (
-          <div
-            className="card"
-            style={{
-              padding: 14,
-              border: "1px solid rgba(239,68,68,0.25)",
-              background: "rgba(239,68,68,0.08)",
-              color: "#fca5a5",
-              display: "flex",
-              alignItems: "center",
-              gap: 10,
-            }}
-          >
-            <AlertCircle size={16} />
-            <span style={{ fontSize: 12 }}>{error}</span>
-          </div>
+          <IssueDetailsSummary
+            label="API Keys"
+            message={error}
+            description="API key data could not be loaded or updated."
+          />
         )}
 
         {loading ? (

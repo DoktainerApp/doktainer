@@ -2,8 +2,8 @@
 
 import ConfirmActionDialog from "@/components/ConfirmActionDialog";
 import GuardedPage from "@/components/GuardedPage";
+import IssueDetailsSummary from "@/components/IssueDetailsSummary";
 import ToastViewport from "@/components/ToastViewport";
-import { AlertCircle } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   CreateUserInvitationBody,
@@ -383,21 +383,11 @@ export default function UsersPage() {
         style={{ display: "flex", flexDirection: "column", gap: 16 }}
       >
         {error && (
-          <div
-            className="card"
-            style={{
-              padding: "12px 16px",
-              display: "flex",
-              alignItems: "center",
-              gap: 10,
-              color: "#ef4444",
-              border: "1px solid rgba(239,68,68,0.28)",
-              background: "rgba(239,68,68,0.08)",
-            }}
-          >
-            <AlertCircle size={15} />
-            <span style={{ fontSize: 12 }}>{error}</span>
-          </div>
+          <IssueDetailsSummary
+            label="Users"
+            message={error}
+            description="User data could not be loaded or updated."
+          />
         )}
 
         <UsersRoleSummary roleCounts={roleCounts} />

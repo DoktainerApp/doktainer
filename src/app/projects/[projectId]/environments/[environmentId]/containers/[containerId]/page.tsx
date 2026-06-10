@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import ConfirmActionDialog from "@/components/ConfirmActionDialog";
 import DashboardLayout from "@/components/DashboardLayout";
+import IssueDetailsSummary from "@/components/IssueDetailsSummary";
 import ProcessLogsModal, {
   type ProcessLogStep,
   useProcessLogsModal,
@@ -1214,41 +1215,26 @@ export default function AppContainerDetailPage() {
             Loading container detail...
           </section>
         ) : error ? (
-          <section
-            className="card"
-            style={{
-              padding: 16,
-              color: "var(--text-danger)",
-              borderColor: "rgba(239,68,68,0.35)",
-            }}
-          >
-            {error}
-          </section>
+          <IssueDetailsSummary
+            label="Container Detail"
+            message={error}
+            description="Container detail could not be loaded from the current project environment."
+          />
         ) : appDetail ? (
           <>
             {runtimeNotice ? (
-              <section
-                className="card"
-                style={{
-                  padding: 14,
-                  color: "var(--accent-yellow)",
-                  borderColor: "rgba(245,158,11,0.35)",
-                }}
-              >
-                Runtime stats are unavailable: {runtimeNotice}
-              </section>
+              <IssueDetailsSummary
+                label="Runtime Stats"
+                message={runtimeNotice}
+                description="Runtime stats are unavailable for this container."
+              />
             ) : null}
             {actionError ? (
-              <section
-                className="card"
-                style={{
-                  padding: 14,
-                  color: "var(--text-danger)",
-                  borderColor: "rgba(239,68,68,0.35)",
-                }}
-              >
-                {actionError}
-              </section>
+              <IssueDetailsSummary
+                label="Container Action"
+                message={actionError}
+                description="The latest container action returned an error."
+              />
             ) : null}
             <AppDetailHeader
               app={appDetail}

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import DashboardLayout from "@/components/DashboardLayout";
+import IssueDetailsSummary from "@/components/IssueDetailsSummary";
 import ProcessLogsModal, {
   useProcessLogsModal,
 } from "@/components/ProcessLogsModal";
@@ -275,16 +276,11 @@ export default function EnvironmentContainersPage() {
           <EnvironmentHeader projectId={params.projectId} summary={summary} />
         ) : null}
         {error ? (
-          <section
-            className="card"
-            style={{
-              padding: 16,
-              color: "var(--text-danger)",
-              borderColor: "rgba(239,68,68,0.35)",
-            }}
-          >
-            {error}
-          </section>
+          <IssueDetailsSummary
+            label="Environment Containers"
+            message={error}
+            description="Environment container data could not be loaded or synced."
+          />
         ) : null}
         <EnvironmentContainersSummary containers={environmentContainers} />
         <EnvironmentContainersToolbar

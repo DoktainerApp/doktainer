@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import DashboardLayout from "@/components/DashboardLayout";
 import ConfirmActionDialog from "@/components/ConfirmActionDialog";
+import IssueDetailsSummary from "@/components/IssueDetailsSummary";
 import ToastViewport from "@/components/ToastViewport";
 import {
   AppInstall,
@@ -1043,19 +1044,11 @@ function InstallOperationsModal({
                   </div>
 
                   {install.error ? (
-                    <div
-                      style={{
-                        background: "rgba(239,68,68,0.08)",
-                        border: "1px solid rgba(239,68,68,0.2)",
-                        borderRadius: 10,
-                        padding: "12px 14px",
-                        color: "#ef4444",
-                        fontSize: 12,
-                        lineHeight: 1.6,
-                      }}
-                    >
-                      {install.error}
-                    </div>
+                    <IssueDetailsSummary
+                      label={install.appName}
+                      message={install.error}
+                      description="Installation error returned by the app runtime."
+                    />
                   ) : null}
                 </div>
               ) : null}
@@ -1852,19 +1845,11 @@ export default function InstalledAppsPage() {
                   </div>
 
                   {install.error ? (
-                    <div
-                      style={{
-                        background: "rgba(239,68,68,0.08)",
-                        border: "1px solid rgba(239,68,68,0.2)",
-                        borderRadius: 8,
-                        padding: "10px 12px",
-                        color: "#ef4444",
-                        fontSize: 12,
-                        lineHeight: 1.5,
-                      }}
-                    >
-                      {install.error}
-                    </div>
+                    <IssueDetailsSummary
+                      label={install.appName}
+                      message={install.error}
+                      description="Installation error returned by the app runtime."
+                    />
                   ) : null}
 
                   <div
