@@ -6,6 +6,10 @@ import { decrypt, encrypt } from "../lib/crypto";
 import { authenticate } from "../middleware/auth";
 import { auditLog } from "../services/audit.service";
 import {
+  getPanelAccessCapabilities,
+  provisionPanelDomain,
+} from "../services/panel-access.service";
+import {
   verifyAwsS3Connection,
   verifyCloudflareConnection,
   verifyGithubConnection,
@@ -125,6 +129,12 @@ const NotificationProviderSchema = z.enum([
   "discord",
   "custom",
 ]);
+const PanelAccessProxySchema = z.enum(["NGINX", "CADDY", "TRAEFIK"]);
+const PanelAccessProvisionSchema = z.object({
+  domain: z.string().trim().min(3).max(253),
+  proxy: PanelAccessProxySchema,
+  autoSsl: z.boolean().default(true),
+});
 const INTEGRATION_PROVIDER_TO_DB = {
   cloudflare: "CLOUDFLARE",
   awsS3: "AWS_S3",
@@ -632,6 +642,83 @@ export async function settingsRoutes(app: FastifyInstance) {
     const bundle = await ensureModularSettings(req.userId!, req.organizationId);
     return reply.send({ success: true, data: serializeSettings(bundle) });
   });
+
+  app.get(
+    "/panel-access/capabilities",
+    { preHandler: [authenticate] },
+    async (_req, reply) => {
+      const capabilities = await getPanelAccessCapabilities();
+      return reply.send({ success: true, data: capabilities });
+    },
+  );
+
+  app.post(
+    "/panel-access/provision",
+    { preHandler: [authenticate] },
+    async (req, reply) => {
+      const body = PanelAccessProvisionSchema.safeParse(req.body);
+      if (!body.success) {
+        return reply
+          .status(400)
+          .send({ success: false, error: body.error.flatten() });
+      }
+
+      try {
+        const result = await provisionPanelDomain(body.data);
+        await prisma.userSettings.upsert({
+          where: { userId: req.userId! },
+          update: { panelUrl: result.panelUrl },
+          create: {
+            userId: req.userId!,
+            panelUrl: result.panelUrl,
+          },
+        });
+
+        const saved = await ensureModularSettings(
+          req.userId!,
+          req.organizationId,
+        );
+
+        await auditLog({
+          userId: req.userId,
+          organizationId: req.organizationId,
+          action: "PANEL_DOMAIN_PROVISION",
+          category: "SYSTEM",
+          level: "SUCCESS",
+          message: `Panel domain "${result.domain}" provisioned`,
+          meta: result,
+        });
+
+        return reply.send({
+          success: true,
+          data: {
+            settings: serializeSettings(saved),
+            provision: result,
+          },
+          message: result.message,
+        });
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Panel domain provisioning failed";
+        const statusCode =
+          typeof (error as { statusCode?: unknown })?.statusCode === "number"
+            ? (error as { statusCode: number }).statusCode
+            : 400;
+
+        await auditLog({
+          userId: req.userId,
+          organizationId: req.organizationId,
+          action: "PANEL_DOMAIN_PROVISION_FAILED",
+          category: "SYSTEM",
+          level: "ERROR",
+          message,
+          meta: body.data,
+        }).catch(() => undefined);
+
+        return reply.status(statusCode).send({ success: false, error: message });
+      }
+    },
+  );
 
   app.patch(
     "/",

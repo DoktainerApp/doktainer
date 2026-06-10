@@ -1,7 +1,7 @@
 import type { Dispatch, SetStateAction } from "react";
 import type { SettingsRecord } from "@/lib/api";
 
-export type SettingsTab = "general" | "security";
+export type SettingsTab = "general" | "panel-access" | "security";
 
 export type IntegrationProvider = "cloudflare" | "awsS3" | "github" | "gitlab";
 

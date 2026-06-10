@@ -39,12 +39,35 @@ export default function GeneralSettingsPanel({
           fontSize: 15,
           fontWeight: 700,
           color: "var(--text-primary)",
-          marginBottom: 20,
+          marginBottom: 4,
         }}
       >
         General Settings
       </h2>
+
       <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+        <div>
+          <div
+            style={{
+              fontSize: 12,
+              fontWeight: 700,
+              color: "var(--text-primary)",
+            }}
+          >
+            Panel Identity
+          </div>
+          <div
+            style={{
+              marginTop: 3,
+              fontSize: 12,
+              color: "var(--text-muted)",
+              lineHeight: 1.5,
+            }}
+          >
+            Name and workspace preferences
+          </div>
+        </div>
+
         <div
           style={{
             display: "grid",
@@ -65,26 +88,6 @@ export default function GeneralSettingsPanel({
             />
           </div>
           <div>
-            <FieldLabel>Panel URL</FieldLabel>
-            <input
-              className="input"
-              readOnly
-              disabled
-              value={settings.general.panelUrl}
-              onChange={(event) =>
-                updateGeneral("panelUrl", event.target.value)
-              }
-            />
-          </div>
-        </div>
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
-            gap: 16,
-          }}
-        >
-          <div>
             <FieldLabel>Timezone</FieldLabel>
             <select
               className="input"
@@ -101,6 +104,15 @@ export default function GeneralSettingsPanel({
               ))}
             </select>
           </div>
+        </div>
+
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
+            gap: 16,
+          }}
+        >
           <div>
             <FieldLabel>Session Timeout</FieldLabel>
             <select
@@ -122,6 +134,7 @@ export default function GeneralSettingsPanel({
             </select>
           </div>
         </div>
+
         <div>
           <FieldLabel>Theme</FieldLabel>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -153,6 +166,7 @@ export default function GeneralSettingsPanel({
           </div>
         </div>
       </div>
+
       <SettingsFooterActions
         saving={saving}
         resetting={resetting}

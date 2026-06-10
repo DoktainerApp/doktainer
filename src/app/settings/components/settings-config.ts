@@ -1,4 +1,4 @@
-import { Lock, Settings, type LucideIcon } from "lucide-react";
+import { Globe2, Lock, Settings, type LucideIcon } from "lucide-react";
 import type { SettingsTab } from "@/app/settings/components/settings-types";
 
 export const TIMEZONE_OPTIONS = [
@@ -25,10 +25,12 @@ export const SETTINGS_TABS: Array<{
   icon: LucideIcon;
 }> = [
   { id: "general", label: "General", icon: Settings },
+  { id: "panel-access", label: "Panel Access", icon: Globe2 },
   { id: "security", label: "Security", icon: Lock },
 ];
 
 export const ACTIVE_TAB_LABELS: Record<SettingsTab, string> = {
   general: "General",
+  "panel-access": "Panel Access",
   security: "Security",
 };

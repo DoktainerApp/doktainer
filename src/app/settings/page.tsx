@@ -5,6 +5,7 @@ import GuardedPage from "@/components/GuardedPage";
 import { auth, settingsApi, type SettingsRecord } from "@/lib/api";
 import { getStoredTheme, storeUiPreferences } from "@/lib/preferences";
 import GeneralSettingsPanel from "@/app/settings/components/GeneralSettingsPanel";
+import PanelAccessSettingsPanel from "@/app/settings/components/PanelAccessSettingsPanel";
 import SecuritySettingsPanel from "@/app/settings/components/SecuritySettingsPanel";
 import {
   Banner,
@@ -326,6 +327,16 @@ export default function SettingsPage() {
                   resetting={resetting}
                   onReset={() => void resetSettings()}
                   onSave={() => void saveSettings()}
+                />
+              ) : null}
+
+              {activeTab === "panel-access" ? (
+                <PanelAccessSettingsPanel
+                  settings={settings}
+                  onProvisioned={(nextSettings, message) => {
+                    syncSettingsFromServer(nextSettings);
+                    setSuccess(message || "Panel domain provisioned");
+                  }}
                 />
               ) : null}
 

@@ -406,6 +406,12 @@ export interface PanelAccessCapabilities {
   };
   defaultProxy: PanelAccessProxy | null;
   upstream: string;
+  target: {
+    type: "local";
+    label: string;
+    serverId: null;
+    diagnostic: string | null;
+  };
 }
 
 export interface PanelAccessProvisionResult {
@@ -1075,6 +1081,26 @@ export const apiKeys = {
 
 export const settingsApi = {
   get: () => get<{ success: boolean; data: SettingsRecord }>("/settings"),
+
+  getPanelAccessCapabilities: () =>
+    get<{ success: boolean; data: PanelAccessCapabilities }>(
+      "/settings/panel-access/capabilities",
+      { timeoutMs: 45000 },
+    ),
+
+  provisionPanelDomain: (body: {
+    domain: string;
+    proxy: PanelAccessProxy;
+    autoSsl: boolean;
+  }) =>
+    post<{
+      success: boolean;
+      data: {
+        settings: SettingsRecord;
+        provision: PanelAccessProvisionResult;
+      };
+      message?: string;
+    }>("/settings/panel-access/provision", body, { timeoutMs: 30000 }),
 
   update: (body: UpdateSettingsBody) =>
     patch<{ success: boolean; data: SettingsRecord; message?: string }>(
