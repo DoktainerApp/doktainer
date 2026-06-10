@@ -369,24 +369,27 @@ body {
 
 /* Status badges */
 .badge-online {
-  --badge-color: #10b981;
-  --badge-bg: rgba(16, 185, 129, 0.12);
-  --badge-border: rgba(16, 185, 129, 0.86);
+  --badge-color: #059669;
+  --badge-bg: rgba(16, 185, 129, 0.15);
+  --badge-border: rgba(16, 185, 129, 0.28);
 }
+
 .badge-offline {
-  --badge-color: #ef4444;
-  --badge-bg: rgba(239, 68, 68, 0.12);
-  --badge-border: rgba(239, 68, 68, 0.86);
+  --badge-color: #dc2626;
+  --badge-bg: rgba(239, 68, 68, 0.15);
+  --badge-border: rgba(239, 68, 68, 0.28);
 }
+
 .badge-warning {
-  --badge-color: #f59e0b;
-  --badge-bg: rgba(245, 158, 11, 0.12);
-  --badge-border: rgba(245, 158, 11, 0.88);
+  --badge-color: #d97706;
+  --badge-bg: rgba(245, 158, 11, 0.15);
+  --badge-border: rgba(245, 158, 11, 0.28);
 }
+
 .badge-info {
-  --badge-color: #3b82f6;
-  --badge-bg: rgba(59, 130, 246, 0.12);
-  --badge-border: rgba(59, 130, 246, 0.88);
+  --badge-color: #2563eb;
+  --badge-bg: rgba(59, 130, 246, 0.15);
+  --badge-border: rgba(59, 130, 246, 0.28);
 }
 
 .ui-badge {
