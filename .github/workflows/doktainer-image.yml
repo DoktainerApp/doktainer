@@ -117,7 +117,7 @@ jobs:
             NEXT_PUBLIC_API_PORT=${{ vars.NEXT_PUBLIC_API_PORT || '4000' }}
             NEXT_PUBLIC_PANEL_NAME=${{ vars.NEXT_PUBLIC_PANEL_NAME || 'DOKTAINER' }}
             # NEXT_PUBLIC_VERSION=${{ github.ref_type == 'tag' && github.ref_name || github.sha }}
-            # NEXT_PUBLIC_VERSION=${{ vars.NEXT_PUBLIC_VERSION | 'v0.1.0' }}
+            # NEXT_PUBLIC_VERSION=${{ vars.NEXT_PUBLIC_VERSION || 'v0.1.0' }}
             # NEXT_PUBLIC_BATCH=${{ vars.NEXT_PUBLIC_BATCH || 'Batch-20260606' }}
 
       - name: Post-push summary
