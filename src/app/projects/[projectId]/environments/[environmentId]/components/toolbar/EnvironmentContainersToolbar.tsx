@@ -161,7 +161,7 @@ export default function EnvironmentContainersToolbar({
                 type="button"
                 role="menuitem"
                 className="btn btn-ghost"
-                onClick={handleImportFromSync}
+                onClick={handleDeployDatabase}
                 style={{
                   justifyContent: "flex-start",
                   fontSize: 12,
@@ -175,7 +175,7 @@ export default function EnvironmentContainersToolbar({
                 type="button"
                 role="menuitem"
                 className="btn btn-ghost"
-                onClick={handleDeployDatabase}
+                onClick={handleImportFromSync}
                 style={{
                   justifyContent: "flex-start",
                   fontSize: 12,
