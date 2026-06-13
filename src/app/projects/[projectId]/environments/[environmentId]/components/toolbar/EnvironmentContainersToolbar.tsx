@@ -2,6 +2,7 @@ import SearchField from "@/components/SearchField";
 import {
   Box,
   ChevronDown,
+  CloudSyncIcon,
   Database,
   Loader2,
   Plus,
@@ -162,6 +163,23 @@ export default function EnvironmentContainersToolbar({
               >
                 <Database size={14} style={{ color: "var(--accent-green)" }} />
                 Deploy Database
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className="btn btn-ghost"
+                onClick={handleDeployDatabase}
+                style={{
+                  justifyContent: "flex-start",
+                  fontSize: 12,
+                  color: "var(--text-secondary)",
+                }}
+              >
+                <CloudSyncIcon
+                  size={14}
+                  style={{ color: "var(--accent-red)" }}
+                />
+                Import form Sync
               </button>
             </div>
           ) : null}

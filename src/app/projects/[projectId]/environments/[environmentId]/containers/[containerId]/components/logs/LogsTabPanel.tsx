@@ -28,21 +28,25 @@ const levelColor: Record<LogsStreamItem["level"], string> = {
   DEBUG: "#38bdf8",
 };
 
-const sourceStatusClass: Record<LogsTabData["sources"][number]["status"], string> =
-  {
-    Streaming: "badge-online",
-    Paused: "badge-warning",
-    Unavailable: "badge-danger",
-  };
+const sourceStatusClass: Record<
+  LogsTabData["sources"][number]["status"],
+  string
+> = {
+  Streaming: "badge-online",
+  Paused: "badge-warning",
+  Unavailable: "badge-danger",
+};
 
-const summaryToneColor: Record<LogsTabData["summaries"][number]["tone"], string> =
-  {
-    blue: "var(--accent-blue)",
-    green: "var(--accent-green)",
-    purple: "var(--accent-purple)",
-    amber: "var(--accent-yellow)",
-    cyan: "var(--accent-cyan)",
-  };
+const summaryToneColor: Record<
+  LogsTabData["summaries"][number]["tone"],
+  string
+> = {
+  blue: "var(--accent-blue)",
+  green: "var(--accent-green)",
+  purple: "var(--accent-purple)",
+  amber: "var(--accent-yellow)",
+  cyan: "var(--accent-cyan)",
+};
 
 export default function LogsTabPanel({
   logs,
@@ -198,8 +202,7 @@ export default function LogsTabPanel({
         <div
           style={{
             display: "grid",
-            gridTemplateColumns:
-              "minmax(min(360px, 100%), 1fr) auto auto auto",
+            gridTemplateColumns: "minmax(min(360px, 100%), 1fr) auto auto auto",
             gap: 8,
             alignItems: "center",
             marginBottom: 10,
@@ -295,7 +298,7 @@ export default function LogsTabPanel({
               key={line.id}
               style={{
                 display: "grid",
-                gridTemplateColumns: "72px 54px 110px minmax(360px, 1fr) auto",
+                gridTemplateColumns: "72px 54px 180px minmax(360px, 1fr) auto",
                 gap: 10,
                 whiteSpace: "nowrap",
               }}
@@ -306,9 +309,7 @@ export default function LogsTabPanel({
               <span style={{ color: levelColor[line.level], fontWeight: 800 }}>
                 {line.level}
               </span>
-              <span style={{ color: "var(--accent-cyan)" }}>
-                {line.source}
-              </span>
+              <span style={{ color: "var(--accent-cyan)" }}>{line.source}</span>
               <span>{line.message}</span>
               <span style={{ color: "var(--text-muted)" }}>
                 {line.traceId ?? ""}
@@ -356,7 +357,7 @@ export default function LogsTabPanel({
         </div>
       </PanelShell>
 
-      <div
+      {/* <div
         style={{
           display: "grid",
           gridTemplateColumns:
@@ -402,7 +403,9 @@ export default function LogsTabPanel({
                     {source.type} - {source.lines} lines - {source.retention}
                   </p>
                 </div>
-                <span className={`ui-badge ${sourceStatusClass[source.status]}`}>
+                <span
+                  className={`ui-badge ${sourceStatusClass[source.status]}`}
+                >
                   {source.status}
                 </span>
               </div>
@@ -455,7 +458,7 @@ export default function LogsTabPanel({
             ))}
           </div>
         </PanelShell>
-      </div>
+      </div> */}
     </section>
   );
 }

@@ -1,15 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  AlertTriangle,
-  History,
-  Loader2,
-  Play,
-  RotateCw,
-  ShieldAlert,
-  TerminalSquare,
-} from "lucide-react";
+import { Loader2, RotateCw, TerminalSquare } from "lucide-react";
 import { terminal as terminalApi } from "@/lib/api";
 import { createClientId } from "@/lib/random-id";
 import { sanitizeTerminalStreamChunk } from "@/lib/terminal-output";
@@ -541,7 +533,7 @@ export default function TerminalTabPanel({ terminal }: TerminalTabPanelProps) {
 
   return (
     <section style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <div
+      {/* <div
         style={{
           display: "grid",
           gridTemplateColumns:
@@ -608,7 +600,7 @@ export default function TerminalTabPanel({ terminal }: TerminalTabPanelProps) {
             </div>
           </div>
         ))}
-      </div>
+      </div> */}
 
       <PanelShell
         title="Container Terminal"
@@ -688,7 +680,7 @@ export default function TerminalTabPanel({ terminal }: TerminalTabPanelProps) {
         </div>
       </PanelShell>
 
-      <div
+      {/* <div
         style={{
           display: "grid",
           gridTemplateColumns:
@@ -803,9 +795,9 @@ export default function TerminalTabPanel({ terminal }: TerminalTabPanelProps) {
             ))}
           </div>
         </PanelShell>
-      </div>
+      </div> */}
 
-      <div
+      {/* <div
         style={{
           display: "grid",
           gridTemplateColumns:
@@ -884,7 +876,7 @@ export default function TerminalTabPanel({ terminal }: TerminalTabPanelProps) {
             ))}
           </div>
         </PanelShell>
-      </div>
+      </div> */}
     </section>
   );
 }

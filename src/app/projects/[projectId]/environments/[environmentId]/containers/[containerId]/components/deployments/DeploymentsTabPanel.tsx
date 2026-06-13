@@ -9,7 +9,6 @@ import {
   ExternalLink,
   GitBranch,
   GitCommit,
-  Package,
   Rocket,
   XCircle,
 } from "lucide-react";
@@ -242,7 +241,6 @@ export default function DeploymentsTabPanel({
                   <th>Branch</th>
                   <th>Duration</th>
                   <th>Deployed At</th>
-                  <th style={{ textAlign: "right" }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -269,16 +267,6 @@ export default function DeploymentsTabPanel({
                     </td>
                     <td>{deployment.duration}</td>
                     <td>{deployment.deployedAt}</td>
-                    <td style={{ textAlign: "right" }}>
-                      <button
-                        type="button"
-                        className="btn btn-ghost"
-                        style={{ padding: "4px 7px" }}
-                        aria-label={`Open deployment ${deployment.version}`}
-                      >
-                        <ExternalLink size={13} />
-                      </button>
-                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -356,27 +344,6 @@ export default function DeploymentsTabPanel({
           </div>
         </PanelShell>
       </div>
-
-      <PanelShell title="Release Notes">
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "auto minmax(0, 1fr)",
-            gap: 10,
-            alignItems: "start",
-            color: "var(--text-secondary)",
-            fontSize: 12,
-            lineHeight: 1.6,
-          }}
-        >
-          <Package size={16} style={{ color: "var(--accent-blue)" }} />
-          <p style={{ margin: 0 }}>
-            Deployment history is currently derived from the real container
-            record. A permanent deployment history API is not available yet, so
-            only the current deployment snapshot is shown here.
-          </p>
-        </div>
-      </PanelShell>
     </section>
   );
 }

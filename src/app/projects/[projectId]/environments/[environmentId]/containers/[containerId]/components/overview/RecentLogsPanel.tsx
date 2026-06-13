@@ -79,13 +79,13 @@ export default function RecentLogsPanel({
           </div>
         ))}
       </div>
-      <button
+      {/* <button
         type="button"
         className="btn btn-ghost"
         style={{ width: "100%", marginTop: 10, fontSize: 12 }}
       >
         View all logs
-      </button>
+      </button> */}
     </PanelShell>
   );
 }

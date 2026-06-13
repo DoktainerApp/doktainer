@@ -181,7 +181,7 @@ export default function RuntimeTabPanel({ runtime }: RuntimeTabPanelProps) {
           ) : (
             <div
               style={{
-                minHeight: 156,
+                minHeight: 210,
                 display: "flex",
                 flexDirection: "column",
                 alignItems: "center",

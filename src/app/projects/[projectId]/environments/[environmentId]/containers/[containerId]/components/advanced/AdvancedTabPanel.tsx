@@ -1,15 +1,11 @@
 import {
-  AlertTriangle,
   Clock3,
   Cpu,
   Database,
-  Loader2,
   RefreshCcw,
-  Settings2,
   ShieldCheck,
   ToggleLeft,
   ToggleRight,
-  Trash2,
 } from "lucide-react";
 import type {
   AdvancedAuditEvent,
@@ -231,7 +227,7 @@ export default function AdvancedTabPanel({
         </PanelShell>
       </div>
 
-      <div
+      {/* <div
         style={{
           display: "grid",
           gridTemplateColumns:
@@ -255,13 +251,13 @@ export default function AdvancedTabPanel({
             ))}
           </div>
         </PanelShell>
-      </div>
+      </div> */}
 
-      <div
+      {/* <div
         style={{
           display: "grid",
           gridTemplateColumns:
-            "minmax(min(620px, 100%), 1.2fr) minmax(min(360px, 100%), 0.8fr)",
+            "minmax(min(620px, 100%), 1.2fr) minmax(min(360px, 100%), 1.2fr)",
           gap: 12,
           alignItems: "start",
         }}
@@ -271,7 +267,7 @@ export default function AdvancedTabPanel({
             style={{
               display: "grid",
               gridTemplateColumns:
-                "repeat(auto-fit, minmax(min(180px, 100%), 1fr))",
+                "repeat(auto-fit, minmax(min(280px, 100%), 1fr))",
               gap: 10,
             }}
           >
@@ -355,90 +351,7 @@ export default function AdvancedTabPanel({
             ))}
           </div>
         </PanelShell>
-      </div>
-
-      <PanelShell title="Danger Zone">
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "auto minmax(0, 1fr) auto",
-            gap: 12,
-            alignItems: "center",
-            border: "1px solid rgba(239,68,68,0.35)",
-            borderRadius: 7,
-            background: "rgba(239,68,68,0.06)",
-            padding: 13,
-          }}
-        >
-          <span
-            style={{
-              width: 40,
-              height: 40,
-              borderRadius: 10,
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              color: "var(--text-danger)",
-              background: "rgba(239,68,68,0.1)",
-            }}
-          >
-            <AlertTriangle size={20} />
-          </span>
-          <div style={{ minWidth: 0 }}>
-            <p
-              style={{
-                margin: 0,
-                color: "var(--text-primary)",
-                fontSize: 13,
-                fontWeight: 800,
-              }}
-            >
-              Destructive actions require confirmation
-            </p>
-            <p
-              style={{
-                marginTop: 4,
-                color: "var(--text-muted)",
-                fontSize: 12,
-                lineHeight: 1.45,
-              }}
-            >
-              Remove, reset, and cleanup operations stay behind explicit
-              confirmation dialogs before they execute.
-            </p>
-          </div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button
-              type="button"
-              className="btn btn-ghost"
-              disabled={actionBusy}
-              aria-busy={activeAction === "rebuild"}
-              onClick={onReset}
-            >
-              {activeAction === "rebuild" ? (
-                <Loader2 size={14} className="animate-spin" />
-              ) : (
-                <Settings2 size={14} />
-              )}
-              Reset
-            </button>
-            <button
-              type="button"
-              className="btn btn-danger"
-              disabled={actionBusy}
-              aria-busy={activeAction === "remove"}
-              onClick={onRemove}
-            >
-              {activeAction === "remove" ? (
-                <Loader2 size={14} className="animate-spin" />
-              ) : (
-                <Trash2 size={14} />
-              )}
-              Remove
-            </button>
-          </div>
-        </div>
-      </PanelShell>
+      </div> */}
     </section>
   );
 }

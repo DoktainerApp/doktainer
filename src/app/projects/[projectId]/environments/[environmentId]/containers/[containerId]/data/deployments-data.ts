@@ -53,6 +53,16 @@ function getBranch(container: Container) {
   return "-";
 }
 
+function getImageTag(image: string) {
+  if (!image.trim()) return "-";
+  if (image.includes("@")) return "digest";
+
+  const lastSegment = image.split("/").at(-1) ?? image;
+  const tagIndex = lastSegment.lastIndexOf(":");
+
+  return tagIndex >= 0 ? lastSegment.slice(tagIndex + 1) || "latest" : "latest";
+}
+
 export function createDeploymentsData(
   container: Container,
   detail: ContainerDetails | null,
@@ -88,10 +98,10 @@ export function createDeploymentsData(
         tone: isSuccessful ? "green" : "amber",
       },
       {
-        label: "Success Rate",
-        value: isSuccessful ? "100%" : "0%",
-        subvalue: "Based on current container record",
-        tone: isSuccessful ? "green" : "amber",
+        label: "Image Tag",
+        value: getImageTag(container.image),
+        subvalue: container.image,
+        tone: "purple",
       },
       {
         label: "Deploy Mode",

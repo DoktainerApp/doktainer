@@ -40,7 +40,8 @@ function formatBytes(value: number | null) {
 }
 
 function formatCpu(nanoCpus: number | null, cpuQuota: number | null) {
-  if (nanoCpus && nanoCpus > 0) return `${(nanoCpus / 1_000_000_000).toFixed(2)} vCPU`;
+  if (nanoCpus && nanoCpus > 0)
+    return `${(nanoCpus / 1_000_000_000).toFixed(2)} vCPU`;
   if (cpuQuota && cpuQuota > 0) return `${cpuQuota} quota`;
   return "Unlimited";
 }
@@ -105,16 +106,16 @@ export function createAdvancedData(
         tone: restartName === "no" ? "amber" : "green",
       },
       {
-        label: "Runtime Guard",
-        value: runtimeLoaded ? "Loaded" : "Unavailable",
-        subvalue: runtimeLoaded ? "Docker inspect available" : "Using DB record",
-        tone: runtimeLoaded ? "cyan" : "amber",
+        label: "Root Filesystem",
+        value: readOnlyRootfs ? "Read-only" : "Writable",
+        subvalue: "Docker HostConfig.ReadonlyRootfs",
+        tone: readOnlyRootfs ? "green" : "amber",
       },
       {
-        label: "Danger Zone",
-        value: "Protected",
-        subvalue: "Confirmation required",
-        tone: "purple",
+        label: "Auto Remove",
+        value: autoRemove ? "Enabled" : "Disabled",
+        subvalue: "Docker HostConfig.AutoRemove",
+        tone: autoRemove ? "amber" : "blue",
       },
     ],
     metadata: [
@@ -134,7 +135,9 @@ export function createAdvancedData(
         label: "CPU Limit",
         value: formatCpu(nanoCpus, cpuQuota),
         usage: detail ? Math.min(100, Math.round(detail.stats.cpuPercent)) : 0,
-        helper: runtimeLoaded ? "Current Docker CPU sampling" : "Runtime unavailable",
+        helper: runtimeLoaded
+          ? "Current Docker CPU sampling"
+          : "Runtime unavailable",
       },
       {
         label: "Memory Limit",
@@ -147,7 +150,10 @@ export function createAdvancedData(
         value: pidsLimit && pidsLimit > 0 ? String(pidsLimit) : "Unlimited",
         usage:
           pidsLimit && pidsLimit > 0
-            ? Math.min(100, Math.round((detail?.stats.pids ?? 0) / pidsLimit * 100))
+            ? Math.min(
+                100,
+                Math.round(((detail?.stats.pids ?? 0) / pidsLimit) * 100),
+              )
             : 0,
         helper: `${detail?.stats.pids ?? 0} process ID(s) currently visible`,
       },
@@ -202,7 +208,8 @@ export function createAdvancedData(
       {
         id: "reconcile-runtime",
         label: "Reconcile runtime state",
-        description: "Stored metadata can be refreshed from Docker runtime data.",
+        description:
+          "Stored metadata can be refreshed from Docker runtime data.",
         enabled: true,
       },
     ],

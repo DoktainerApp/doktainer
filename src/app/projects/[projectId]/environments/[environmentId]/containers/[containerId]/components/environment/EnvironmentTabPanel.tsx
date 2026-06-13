@@ -1,14 +1,11 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import TablePagination from "@/components/TablePagination";
 import { useTablePagination } from "@/lib/use-table-pagination";
 import {
   CheckCircle2,
   ClipboardCheck,
-  KeyRound,
   Loader2,
-  LockKeyhole,
   RotateCcw,
   Save,
   ShieldAlert,
@@ -178,7 +175,7 @@ export default function EnvironmentTabPanel({
 
   return (
     <section style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <div
+      {/* <div
         style={{
           display: "grid",
           gridTemplateColumns:
@@ -189,7 +186,7 @@ export default function EnvironmentTabPanel({
         {environment.summaries.map((summary) => (
           <EnvironmentSummaryCard key={summary.label} item={summary} />
         ))}
-      </div>
+      </div> */}
 
       <PanelShell title="Project .env Editor">
         <div
@@ -215,7 +212,7 @@ export default function EnvironmentTabPanel({
               spellCheck={false}
               style={{
                 width: "100%",
-                minHeight: 260,
+                minHeight: 480,
                 resize: "vertical",
                 border: "1px solid var(--border)",
                 borderRadius: 7,
@@ -255,7 +252,8 @@ export default function EnvironmentTabPanel({
                     });
                     setEditorNotice({
                       tone: "info",
-                      message: "Editor content has been reset to the last loaded .env.",
+                      message:
+                        "Editor content has been reset to the last loaded .env.",
                     });
                   }}
                 >
@@ -444,245 +442,6 @@ export default function EnvironmentTabPanel({
           </div>
         </div>
       </PanelShell>
-
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns:
-            "minmax(min(660px, 100%), 1.35fr) minmax(min(340px, 100%), 0.65fr)",
-          gap: 12,
-          alignItems: "start",
-        }}
-      >
-        <PanelShell title={`Variables (${environment.variables.length})`}>
-          {environment.variables.length > 0 ? (
-            <>
-              <div style={{ overflowX: "auto" }}>
-                <table className="data-table" style={{ minWidth: 760 }}>
-                  <thead>
-                    <tr>
-                      <th>Key</th>
-                      <th>Value</th>
-                      <th>Scope</th>
-                      <th>Source</th>
-                      <th>Required</th>
-                      <th>Sensitive</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {pagination.paginatedItems.map((variable) => (
-                      <tr key={variable.id}>
-                        <td style={{ fontFamily: "var(--font--code)" }}>
-                          <KeyRound size={13} />
-                          {variable.key}
-                        </td>
-                        <td style={{ fontFamily: "var(--font--code)" }}>
-                          {variable.value}
-                        </td>
-                        <td>{variable.scope}</td>
-                        <td>{variable.source}</td>
-                        <td>
-                          <span
-                            className={`ui-badge ${
-                              variable.required ? "badge-warning" : ""
-                            }`}
-                          >
-                            {variable.required ? "Required" : "Optional"}
-                          </span>
-                        </td>
-                        <td>
-                          <span
-                            className={`ui-badge ${
-                              variable.sensitive ? "badge-online" : ""
-                            }`}
-                          >
-                            {variable.sensitive ? "Masked" : "Plain"}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <TablePagination
-                currentPage={pagination.currentPage}
-                totalPages={pagination.totalPages}
-                totalItems={pagination.totalItems}
-                startItem={pagination.startItem}
-                endItem={pagination.endItem}
-                itemLabel="variables"
-                onPageChange={pagination.setCurrentPage}
-              />
-            </>
-          ) : (
-            <div
-              style={{
-                minHeight: 180,
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: 10,
-                textAlign: "center",
-                color: "var(--text-muted)",
-                border: "1px dashed var(--border)",
-                borderRadius: 7,
-                background: "var(--bg-input)",
-                padding: 18,
-              }}
-            >
-              <KeyRound size={22} style={{ color: "var(--accent-blue)" }} />
-              <div>
-                <p
-                  style={{
-                    margin: 0,
-                    color: "var(--text-primary)",
-                    fontSize: 13,
-                    fontWeight: 700,
-                  }}
-                >
-                  No environment variables detected
-                </p>
-                <p style={{ marginTop: 4, fontSize: 12 }}>
-                  This container has no stored deploy variables or runtime
-                  inspect variables available.
-                </p>
-              </div>
-            </div>
-          )}
-        </PanelShell>
-
-        <PanelShell title="Validation">
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {environment.checks.map((check) => (
-              <div
-                key={check.label}
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "auto minmax(0, 1fr)",
-                  gap: 10,
-                  alignItems: "start",
-                  padding: "10px 11px",
-                  border: "1px solid var(--border)",
-                  borderRadius: 7,
-                  background: "var(--bg-input)",
-                }}
-              >
-                <span
-                  style={{
-                    color:
-                      check.status === "Ready"
-                        ? "var(--accent-green)"
-                        : check.status === "Missing"
-                          ? "var(--text-danger)"
-                          : "var(--accent-yellow)",
-                    display: "inline-flex",
-                    marginTop: 1,
-                  }}
-                >
-                  {check.status === "Ready" ? (
-                    <CheckCircle2 size={15} />
-                  ) : check.status === "Missing" ? (
-                    <ShieldAlert size={15} />
-                  ) : (
-                    <LockKeyhole size={15} />
-                  )}
-                </span>
-                <div style={{ minWidth: 0 }}>
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      gap: 8,
-                    }}
-                  >
-                    <p
-                      style={{
-                        margin: 0,
-                        color: "var(--text-primary)",
-                        fontSize: 12,
-                        fontWeight: 700,
-                      }}
-                    >
-                      {check.label}
-                    </p>
-                    <span className={`ui-badge ${checkClass[check.status]}`}>
-                      {check.status}
-                    </span>
-                  </div>
-                  <p
-                    style={{
-                      marginTop: 4,
-                      color: "var(--text-muted)",
-                      fontSize: 11,
-                      lineHeight: 1.45,
-                    }}
-                  >
-                    {check.description}
-                  </p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </PanelShell>
-      </div>
-
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns:
-            "repeat(auto-fit, minmax(min(360px, 100%), 1fr))",
-          gap: 12,
-          alignItems: "start",
-        }}
-      >
-        {environment.groups.map((group) => (
-          <PanelShell key={group.title} title={group.title}>
-            <p
-              style={{
-                marginBottom: 12,
-                color: "var(--text-muted)",
-                fontSize: 12,
-                lineHeight: 1.5,
-              }}
-            >
-              {group.description}
-            </p>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {group.items.map((item) => (
-                <div
-                  key={item.label}
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns:
-                      "minmax(120px, 0.45fr) minmax(0, 1fr)",
-                    gap: 12,
-                    alignItems: "center",
-                    fontSize: 12,
-                  }}
-                >
-                  <span style={{ color: "var(--text-muted)" }}>
-                    {item.label}
-                  </span>
-                  <span
-                    style={{
-                      color: "var(--text-primary)",
-                      fontFamily: "var(--font--code)",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                      textAlign: "right",
-                    }}
-                  >
-                    {item.value}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </PanelShell>
-        ))}
-      </div>
     </section>
   );
 }

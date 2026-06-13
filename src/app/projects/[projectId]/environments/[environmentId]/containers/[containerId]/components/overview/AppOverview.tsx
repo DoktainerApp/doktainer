@@ -22,13 +22,19 @@ export default function AppOverview({
     <section
       style={{
         display: "grid",
-        gridTemplateColumns:
-          "repeat(auto-fit, minmax(min(360px, 100%), 1fr))",
+        gridTemplateColumns: "repeat(auto-fit, minmax(min(360px, 100%), 1fr))",
         gap: 12,
         minWidth: 0,
       }}
     >
-      <div style={{ display: "flex", flexDirection: "column", gap: 12, minWidth: 0 }}>
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: 12,
+          minWidth: 0,
+        }}
+      >
         <div
           style={{
             display: "grid",
@@ -40,16 +46,16 @@ export default function AppOverview({
           <DeploymentPanel deployment={app.deployment} />
           <HealthPanel health={app.health} />
         </div>
-        <RuntimeContainersPanel containers={app.runtimeContainers} />
       </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 12, minWidth: 0 }}>
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: 12,
+          minWidth: 0,
+        }}
+      >
         <DomainsPanel domains={app.domains} />
-        <RecentLogsPanel
-          logs={app.logs}
-          autoRefresh={logsAutoRefresh}
-          refreshing={logsRefreshing}
-          onAutoRefreshChange={onLogsAutoRefreshChange}
-        />
       </div>
     </section>
   );

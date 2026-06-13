@@ -12,7 +12,9 @@ interface AdvancedSummaryCardProps {
   item: AdvancedSummary;
 }
 
-export default function AdvancedSummaryCard({ item }: AdvancedSummaryCardProps) {
+export default function AdvancedSummaryCard({
+  item,
+}: AdvancedSummaryCardProps) {
   return (
     <section
       className="card"
