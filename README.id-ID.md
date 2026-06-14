@@ -5,7 +5,7 @@
 
 ![GitHub forks](https://img.shields.io/github/forks/DoktainerApp/doktainer)
 ![GitHub forks](https://img.shields.io/github/stars/DoktainerApp/doktainer)<br>
-[![Discord](https://img.shields.io/discord/1497461926609948733?color=5865f2&label=Discord&style=flat-square)](https://discord.gg/tDUBDCYw9Q)
+[![Discord](https://img.shields.io/discord/1497461926609948733?color=5865f2&label=Discord&style=flat-square)](https://discord.gg/3HF85Cd6fp)
 [![Docker Pulls](https://img.shields.io/docker/pulls/doktainer/doktainer.svg?logo=docker&label=Docker%20pulls)](https://hub.docker.com/r/doktainer/doktainer)<br>
 [![GHCR](https://img.shields.io/badge/GHCR-doktainer%2Fdoktainer-blue?logo=github)](https://github.com/DoktainerApp/doktainer/pkgs/container/doktainer)
 [![License](https://img.shields.io/github/license/DoktainerApp/doktainer.svg)](https://github.com/DoktainerApp/doktainer/blob/main/LICENSE)
