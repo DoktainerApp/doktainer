@@ -1,11 +1,13 @@
 import { NodeSSH, SSHExecCommandResponse } from "node-ssh";
 import { Server } from "@prisma/client";
 import { decrypt } from "../../lib/crypto";
+import { randomBytes } from "crypto";
 
 // Pool: serverId → active SSH connection
 const pool = new Map<string, NodeSSH>();
 const connectionPromises = new Map<string, Promise<NodeSSH>>();
 const commandQueues = new Map<string, Promise<unknown>>();
+const CONTAINER_FILE_UPLOAD_CHUNK_SIZE = 48_000;
 
 function isRecoverableSshError(message: string): boolean {
   return (
@@ -3996,16 +3998,66 @@ export async function writeContainerFileBase64(
   filePath: string,
   contentBase64: string,
 ): Promise<{ path: string; size: number }> {
-  const script = [
+  const uploadId = randomBytes(8).toString("hex");
+  const tempBase64Path = `${filePath}.doktainer-upload-${uploadId}.b64`;
+  const tempFilePath = `${filePath}.doktainer-upload-${uploadId}.tmp`;
+  const prepareScript = [
     `TARGET=${escapeShellArg(filePath)}`,
+    `TEMP_B64=${escapeShellArg(tempBase64Path)}`,
+    `TEMP_FILE=${escapeShellArg(tempFilePath)}`,
     'PARENT=$(dirname "$TARGET")',
     'if [ ! -d "$PARENT" ]; then echo "__ERROR__\tParent directory not found"; exit 22; fi',
-    `printf %s ${escapeShellArg(contentBase64)} | base64 -d > "$TARGET"`,
+    'rm -f "$TEMP_B64" "$TEMP_FILE"',
+    ': > "$TEMP_B64"',
+    'printf "__OK__\tprepared\n"',
+  ].join("\n");
+
+  await execContainerShell(server, containerId, prepareScript);
+
+  try {
+    for (
+      let offset = 0;
+      offset < contentBase64.length;
+      offset += CONTAINER_FILE_UPLOAD_CHUNK_SIZE
+    ) {
+      const chunk = contentBase64.slice(
+        offset,
+        offset + CONTAINER_FILE_UPLOAD_CHUNK_SIZE,
+      );
+      const appendScript = [
+        `TEMP_B64=${escapeShellArg(tempBase64Path)}`,
+        `printf %s ${escapeShellArg(chunk)} >> "$TEMP_B64"`,
+        'printf "__OK__\tappended\n"',
+      ].join("\n");
+
+      await execContainerShell(server, containerId, appendScript);
+    }
+  } catch (error) {
+    const cleanupScript = [
+      `TEMP_B64=${escapeShellArg(tempBase64Path)}`,
+      `TEMP_FILE=${escapeShellArg(tempFilePath)}`,
+      'rm -f "$TEMP_B64" "$TEMP_FILE"',
+    ].join("\n");
+    try {
+      await execContainerShell(server, containerId, cleanupScript);
+    } catch {
+      // Best-effort cleanup; surface the original upload failure.
+    }
+    throw error;
+  }
+
+  const finalizeScript = [
+    `TARGET=${escapeShellArg(filePath)}`,
+    `TEMP_B64=${escapeShellArg(tempBase64Path)}`,
+    `TEMP_FILE=${escapeShellArg(tempFilePath)}`,
+    'trap \'rm -f "$TEMP_B64" "$TEMP_FILE"\' EXIT',
+    'base64 -d "$TEMP_B64" > "$TEMP_FILE"',
+    'mv "$TEMP_FILE" "$TARGET"',
     'SIZE=$(wc -c < "$TARGET" 2>/dev/null | tr -d " ")',
     'printf "__OK__\t%s\n" "$SIZE"',
   ].join("\n");
 
-  const stdout = await execContainerShell(server, containerId, script);
+  const stdout = await execContainerShell(server, containerId, finalizeScript);
   const okLine = stdout
     .split("\n")
     .map((line) => line.trim())
