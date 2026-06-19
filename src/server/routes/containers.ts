@@ -487,7 +487,11 @@ function extractComposePublishedHostPorts(composeContent?: string | null) {
     return [];
   }
 
-  if (typeof parsed !== "object" || parsed === null || !("services" in parsed)) {
+  if (
+    typeof parsed !== "object" ||
+    parsed === null ||
+    !("services" in parsed)
+  ) {
     return [];
   }
 
@@ -2853,8 +2857,9 @@ export async function containerRoutes(app: FastifyInstance) {
 
       const shouldValidateHostPorts =
         collectRequestedHostPorts(body.data).length > 0;
-      const shouldValidateContainerName =
-        shouldValidateRequestedContainerName(body.data);
+      const shouldValidateContainerName = shouldValidateRequestedContainerName(
+        body.data,
+      );
 
       if (shouldValidateHostPorts || shouldValidateContainerName) {
         try {
@@ -3283,6 +3288,23 @@ export async function containerRoutes(app: FastifyInstance) {
             },
             include: { server: { select: { name: true, ip: true } } },
           });
+
+          if (action === "start" || action === "restart") {
+            await syncContainersForServers(
+              [container.server],
+              req.userId,
+              (event) => recordDockerCommandTiming(app, event),
+            );
+
+            updatedContainer =
+              (await prisma.container.findFirst({
+                where: {
+                  id,
+                  server: { organizationId: req.organizationId! },
+                },
+                include: { server: { select: { name: true, ip: true } } },
+              })) ?? updatedContainer;
+          }
         }
 
         await auditLog({
@@ -3517,8 +3539,10 @@ export async function containerRoutes(app: FastifyInstance) {
           ),
         });
 
-        await syncContainersForServers([container.server], req.userId, (event) =>
-          recordDockerCommandTiming(app, event),
+        await syncContainersForServers(
+          [container.server],
+          req.userId,
+          (event) => recordDockerCommandTiming(app, event),
         );
 
         const serverContainers = await prisma.container.findMany({
@@ -3624,12 +3648,7 @@ export async function containerRoutes(app: FastifyInstance) {
             serverName: container.server.name,
             containerId: container.id,
           },
-          () =>
-            ssh.dockerLogs(
-              container.server,
-              runtimeId,
-              parseInt(lines),
-            ),
+          () => ssh.dockerLogs(container.server, runtimeId, parseInt(lines)),
         );
         return reply.send({
           success: true,
