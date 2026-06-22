@@ -43,8 +43,7 @@ const BASE_APP_TEMPLATES: AppTemplate[] = [
     category: "CMS",
     image: "wordpress:latest",
     defaultPort: "8080:80",
-    defaultEnv:
-      "WORDPRESS_DB_HOST=mysql:3306\nWORDPRESS_DB_NAME=wordpress\nWORDPRESS_DB_USER=wp\nWORDPRESS_DB_PASSWORD=changeme",
+    defaultEnv: "",
     defaultVolumes: "/srv/wordpress:/var/www/html",
     restartPolicy: "unless-stopped",
     popular: true,
