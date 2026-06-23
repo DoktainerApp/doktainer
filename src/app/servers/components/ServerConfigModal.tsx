@@ -1,19 +1,13 @@
 "use client";
 
-import { type ReactNode, useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   AlertTriangle,
   Eye,
   EyeOff,
-  Globe,
-  HardDrive,
   Loader2,
-  Power,
   RefreshCw,
-  Settings2,
-  Users,
-  Wrench,
   X,
 } from "lucide-react";
 import {
@@ -87,6 +81,14 @@ export default function ServerConfigModal({
   const deleteConfirmed = resetConfirmation.trim() === "DELETE";
   const hasSelectedDockerPruneOption =
     Object.values(dockerPruneOptions).some(Boolean);
+  const tabs: Array<{ id: ServerConfigTab; label: string }> = [
+    { id: "overview", label: "Overview" },
+    { id: "users", label: "Users" },
+    { id: "services", label: "Services" },
+    { id: "web-server", label: "Web Server" },
+    { id: "mounts", label: "Disk Mounts" },
+    { id: "actions", label: "Actions" },
+  ];
 
   const publishNotice = useCallback((nextNotice: ServerConfigNotice) => {
     setNotice(nextNotice);
@@ -602,26 +604,26 @@ export default function ServerConfigModal({
     }
   };
 
-  const tabButton = (id: ServerConfigTab, label: string, icon: ReactNode) => (
+  const tabButton = (id: ServerConfigTab, label: string) => (
     <button
+      type="button"
       key={id}
       onClick={() => setActiveTab(id)}
+      className="btn btn-ghost"
       style={{
-        padding: "9px 14px",
-        borderRadius: 10,
-        border: `1px solid ${activeTab === id ? "rgba(59,130,246,0.35)" : "var(--border)"}`,
-        background:
-          activeTab === id ? "rgba(59,130,246,0.12)" : "var(--bg-input)",
-        color: activeTab === id ? "#3b82f6" : "var(--text-secondary)",
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 8,
-        cursor: "pointer",
+        height: 28,
+        minHeight: 28,
+        padding: "5px 12px",
+        borderRadius: 4,
+        boxSizing: "border-box",
+        borderColor: activeTab === id ? "rgba(59,130,246,0.5)" : "transparent",
+        background: activeTab === id ? "rgba(59,130,246,0.16)" : "transparent",
+        color:
+          activeTab === id ? "var(--accent-blue)" : "var(--text-secondary)",
+        flex: "0 0 auto",
         fontSize: 12,
-        fontWeight: 600,
       }}
     >
-      {icon}
       {label}
     </button>
   );
@@ -637,523 +639,569 @@ export default function ServerConfigModal({
         >
           <X size={22} />
         </button>
-      <div
-        className="modal animate-slide-in"
-        style={{
-          position: "relative",
-          width: "100%",
-          maxWidth: 920,
-          padding: 24,
-          display: "flex",
-          flexDirection: "column",
-          gap: 18,
-        }}
-      >
-        {pendingConfirm && typeof document !== "undefined"
-          ? createPortal(
-              <div
-                style={{
-                  position: "fixed",
-                  inset: 0,
-                  background: "rgba(3,7,18,0.58)",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  padding: 20,
-                  zIndex: 1002,
-                }}
-              >
-            <div
-              className="card"
-              style={{
-                width: "100%",
-                maxWidth: 480,
-                padding: 22,
-                display: "grid",
-                gap: 14,
-                boxShadow: "0 20px 60px rgba(0,0,0,0.35)",
-              }}
-            >
-              <div>
-                <strong style={{ color: "var(--text-primary)", fontSize: 16 }}>
-                  {pendingConfirm.title}
-                </strong>
-                <p
-                  style={{
-                    marginTop: 8,
-                    color: "var(--text-muted)",
-                    fontSize: 13,
-                    lineHeight: 1.6,
-                  }}
-                >
-                  {pendingConfirm.description}
-                </p>
-              </div>
-              {pendingConfirm.kind === "server" &&
-              pendingConfirm.action === "prune-docker" ? (
-                <div
-                  style={{
-                    display: "grid",
-                    gap: 10,
-                    border: "1px solid var(--border)",
-                    borderRadius: 12,
-                    padding: 14,
-                    background: "rgba(59,130,246,0.08)",
-                  }}
-                >
-                  <strong
-                    style={{ color: "var(--text-primary)", fontSize: 13 }}
-                  >
-                    Select unused Docker artifacts to clean up
-                  </strong>
-                  {[
-                    {
-                      key: "images",
-                      label: "Unused images",
-                      description: "Equivalent to docker image prune -a.",
-                    },
-                    {
-                      key: "containers",
-                      label: "Stopped containers",
-                      description: "Equivalent to docker container prune.",
-                    },
-                    {
-                      key: "networks",
-                      label: "Unused networks",
-                      description: "Equivalent to docker network prune.",
-                    },
-                    {
-                      key: "volumes",
-                      label: "Unused volumes",
-                      description: "Equivalent to docker volume prune.",
-                    },
-                    {
-                      key: "buildCache",
-                      label: "Build cache",
-                      description: "Equivalent to docker builder prune.",
-                    },
-                  ].map((option) => {
-                    const checked =
-                      dockerPruneOptions[
-                        option.key as keyof typeof dockerPruneOptions
-                      ];
-
-                    return (
-                      <label
-                        key={option.key}
-                        style={{
-                          display: "flex",
-                          gap: 10,
-                          alignItems: "flex-start",
-                          cursor:
-                            activeActionKey !== null
-                              ? "not-allowed"
-                              : "pointer",
-                          opacity: activeActionKey !== null ? 0.6 : 1,
-                        }}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          disabled={activeActionKey !== null}
-                          onChange={(event) => {
-                            const nextOptions = {
-                              ...dockerPruneOptions,
-                              [option.key]: event.target.checked,
-                            };
-                            setDockerPruneOptions(nextOptions);
-                            setPendingConfirm((current) =>
-                              current &&
-                              current.kind === "server" &&
-                              current.action === "prune-docker"
-                                ? {
-                                    ...current,
-                                    description:
-                                      getDockerPruneSummary(nextOptions),
-                                    pruneOptions: nextOptions,
-                                  }
-                                : current,
-                            );
-                          }}
-                          style={{ marginTop: 2 }}
-                        />
-                        <span style={{ display: "grid", gap: 2 }}>
-                          <span
-                            style={{
-                              color: "var(--text-primary)",
-                              fontSize: 13,
-                              fontWeight: 600,
-                            }}
-                          >
-                            {option.label}
-                          </span>
-                          <span
-                            style={{
-                              color: "var(--text-muted)",
-                              fontSize: 12,
-                              lineHeight: 1.5,
-                            }}
-                          >
-                            {option.description}
-                          </span>
-                        </span>
-                      </label>
-                    );
-                  })}
-                </div>
-              ) : null}
-              <div
-                style={{
-                  borderRadius: 10,
-                  padding: "12px 14px",
-                  fontSize: 12,
-                  color:
-                    pendingConfirm.tone === "danger" ? "#ef4444" : "#b45309",
-                  background:
-                    pendingConfirm.tone === "danger"
-                      ? "rgba(239,68,68,0.08)"
-                      : "rgba(245,158,11,0.08)",
-                  border:
-                    pendingConfirm.tone === "danger"
-                      ? "1px solid rgba(239,68,68,0.24)"
-                      : "1px solid rgba(245,158,11,0.24)",
-                }}
-              >
-                Confirm this action only if you expect a brief service
-                interruption or cleanup change on the host.
-              </div>
-              <div
-                style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}
-              >
-                <button
-                  className="btn"
-                  onClick={() => setPendingConfirm(null)}
-                  disabled={activeActionKey !== null}
-                >
-                  Cancel
-                </button>
-                <button
-                  className="btn"
-                  onClick={() => {
-                    const currentConfirm = pendingConfirm;
-                    if (!currentConfirm) {
-                      return;
-                    }
-
-                    if (currentConfirm.kind === "server") {
-                      if (
-                        currentConfirm.action === "prune-docker" &&
-                        !hasSelectedDockerPruneOption
-                      ) {
-                        return;
-                      }
-
-                      setPendingConfirm(null);
-                      void handleServerAction(
-                        currentConfirm.action,
-                        currentConfirm.pruneOptions,
-                      );
-                      return;
-                    }
-
-                    setPendingConfirm(null);
-
-                    if (currentConfirm.kind === "docker") {
-                      void handleDockerAction(currentConfirm.action);
-                      return;
-                    }
-
-                    if (currentConfirm.kind === "service") {
-                      void handleServiceRestart(currentConfirm.serviceName);
-                      return;
-                    }
-
-                    void handleWebStackAction(
-                      currentConfirm.component,
-                      currentConfirm.action,
-                    );
-                  }}
-                  disabled={
-                    activeActionKey !== null ||
-                    (pendingConfirm.kind === "server" &&
-                      pendingConfirm.action === "prune-docker" &&
-                      !hasSelectedDockerPruneOption)
-                  }
-                  style={{
-                    background:
-                      pendingConfirm.tone === "danger"
-                        ? "rgba(239,68,68,0.12)"
-                        : "rgba(245,158,11,0.12)",
-                    color:
-                      pendingConfirm.tone === "danger" ? "#ef4444" : "#f59e0b",
-                    border:
-                      pendingConfirm.tone === "danger"
-                        ? "1px solid rgba(239,68,68,0.22)"
-                        : "1px solid rgba(245,158,11,0.22)",
-                    opacity:
-                      pendingConfirm.kind === "server" &&
-                      pendingConfirm.action === "prune-docker" &&
-                      !hasSelectedDockerPruneOption
-                        ? 0.6
-                        : 1,
-                  }}
-                >
-                  {activeActionKey !== null ? (
-                    <Loader2 size={14} className="animate-spin" />
-                  ) : (
-                    <AlertTriangle size={14} />
-                  )}
-                  {pendingConfirm.confirmLabel}
-                </button>
-              </div>
-            </div>
-              </div>,
-              document.body,
-            )
-          : null}
-
         <div
+          className="modal animate-slide-in"
           style={{
+            position: "relative",
+            width: "100%",
+            maxWidth: 920,
+            maxHeight: "90vh",
+            padding: 24,
             display: "flex",
-            justifyContent: "space-between",
-            alignItems: "flex-start",
-            gap: 12,
+            flexDirection: "column",
+            gap: 18,
+            overflow: "hidden",
           }}
         >
-          <div>
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 10,
-                flexWrap: "wrap",
-              }}
-            >
-              <h3
-                style={{
-                  color: "var(--text-primary)",
-                  fontWeight: 700,
-                  fontSize: 16,
-                }}
-              >
-                Server Config
-              </h3>
-              <UserBadge
-                label={server.status}
-                tone={server.status === "ONLINE" ? "success" : "neutral"}
-              />
-            </div>
-            <p
-              style={{ color: "var(--text-muted)", fontSize: 13, marginTop: 6 }}
-            >
-              {server.name} • {server.ip}:{server.sshPort}
-            </p>
-            <p
-              style={{ color: "var(--text-muted)", fontSize: 12, marginTop: 6 }}
-            >
-              Snapshot refresh runs only when this modal opens or when you click
-              Refresh.
-            </p>
-          </div>
-          <div style={{ display: "flex", gap: 8, paddingRight: 36 }}>
-            <button
-              className="btn btn-ghost btn-sm"
-              onClick={() => void loadSnapshot()}
-              disabled={loading}
-            >
-              <RefreshCw size={14} /> Refresh
-            </button>
-          </div>
-        </div>
-
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          {tabButton("overview", "Overview", <Settings2 size={14} />)}
-          {tabButton("users", "Users", <Users size={14} />)}
-          {tabButton("services", "Services", <Wrench size={14} />)}
-          {tabButton("web-server", "Web Server", <Globe size={14} />)}
-          {tabButton("mounts", "Disk Mounts", <HardDrive size={14} />)}
-          {tabButton("actions", "Actions", <Power size={14} />)}
-        </div>
-
-        {notice && notice.tab === activeTab ? (
-          <div
-            style={{
-              background:
-                notice.tone === "success"
-                  ? "rgba(16,185,129,0.1)"
-                  : notice.tone === "error"
-                    ? "rgba(239,68,68,0.1)"
-                    : "rgba(59,130,246,0.08)",
-              border:
-                notice.tone === "success"
-                  ? "1px solid rgba(16,185,129,0.25)"
-                  : notice.tone === "error"
-                    ? "1px solid rgba(239,68,68,0.25)"
-                    : "1px solid rgba(59,130,246,0.2)",
-              borderRadius: 10,
-              padding: "12px 14px",
-              color:
-                notice.tone === "success"
-                  ? "#10b981"
-                  : notice.tone === "error"
-                    ? "#ef4444"
-                    : "#3b82f6",
-              fontSize: 13,
-              display: "grid",
-              gap: 10,
-            }}
-          >
-            <div
-              style={{
-                display: "flex",
-                alignItems: "flex-start",
-                justifyContent: "space-between",
-                gap: 12,
-              }}
-            >
-              <div style={{ display: "grid", gap: 4 }}>
-                <strong style={{ fontSize: 14 }}>{notice.title}</strong>
-                <div style={{ color: "var(--text-primary)" }}>
-                  {notice.summary}
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setNotice(null);
-                  setNoticeExpanded(false);
-                }}
-                aria-label="Dismiss notice"
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  width: 28,
-                  height: 28,
-                  borderRadius: 8,
-                  border: "1px solid rgba(148,163,184,0.18)",
-                  background: "rgba(15,23,42,0.16)",
-                  color: "currentColor",
-                  cursor: "pointer",
-                  flexShrink: 0,
-                }}
-              >
-                <X size={14} />
-              </button>
-            </div>
-            {notice.details?.length || notice.detailText ? (
-              <div style={{ display: "grid", gap: 10 }}>
-                <button
-                  className="btn btn-ghost btn-sm"
-                  onClick={() => setNoticeExpanded((current) => !current)}
-                  style={{ width: "fit-content" }}
+          {pendingConfirm && typeof document !== "undefined"
+            ? createPortal(
+                <div
+                  style={{
+                    position: "fixed",
+                    inset: 0,
+                    background: "rgba(3,7,18,0.58)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    padding: 20,
+                    zIndex: 1002,
+                  }}
                 >
-                  {noticeExpanded ? <EyeOff size={12} /> : <Eye size={12} />}
-                  {noticeExpanded ? "Hide detail" : "More detail"}
-                </button>
-                {noticeExpanded ? (
                   <div
+                    className="card"
                     style={{
+                      width: "100%",
+                      maxWidth: 480,
+                      padding: 22,
                       display: "grid",
-                      gap: 10,
-                      padding: 12,
-                      borderRadius: 10,
-                      background: "rgba(15,23,42,0.28)",
-                      border: "1px solid rgba(148,163,184,0.16)",
+                      gap: 14,
+                      boxShadow: "0 20px 60px rgba(0,0,0,0.35)",
                     }}
                   >
-                    {notice.details?.length ? (
-                      <ul
+                    <div>
+                      <strong
+                        style={{ color: "var(--text-primary)", fontSize: 16 }}
+                      >
+                        {pendingConfirm.title}
+                      </strong>
+                      <p
                         style={{
-                          margin: 0,
-                          paddingLeft: 18,
-                          color: "var(--text-primary)",
+                          marginTop: 8,
+                          color: "var(--text-muted)",
+                          fontSize: 13,
+                          lineHeight: 1.6,
                         }}
                       >
-                        {notice.details.map((detail) => (
-                          <li key={detail}>{detail}</li>
-                        ))}
-                      </ul>
+                        {pendingConfirm.description}
+                      </p>
+                    </div>
+                    {pendingConfirm.kind === "server" &&
+                    pendingConfirm.action === "prune-docker" ? (
+                      <div
+                        style={{
+                          display: "grid",
+                          gap: 10,
+                          border: "1px solid var(--border)",
+                          borderRadius: 12,
+                          padding: 14,
+                          background: "rgba(59,130,246,0.08)",
+                        }}
+                      >
+                        <strong
+                          style={{ color: "var(--text-primary)", fontSize: 13 }}
+                        >
+                          Select unused Docker artifacts to clean up
+                        </strong>
+                        {[
+                          {
+                            key: "images",
+                            label: "Unused images",
+                            description: "Equivalent to docker image prune -a.",
+                          },
+                          {
+                            key: "containers",
+                            label: "Stopped containers",
+                            description:
+                              "Equivalent to docker container prune.",
+                          },
+                          {
+                            key: "networks",
+                            label: "Unused networks",
+                            description: "Equivalent to docker network prune.",
+                          },
+                          {
+                            key: "volumes",
+                            label: "Unused volumes",
+                            description: "Equivalent to docker volume prune.",
+                          },
+                          {
+                            key: "buildCache",
+                            label: "Build cache",
+                            description: "Equivalent to docker builder prune.",
+                          },
+                        ].map((option) => {
+                          const checked =
+                            dockerPruneOptions[
+                              option.key as keyof typeof dockerPruneOptions
+                            ];
+
+                          return (
+                            <label
+                              key={option.key}
+                              style={{
+                                display: "flex",
+                                gap: 10,
+                                alignItems: "flex-start",
+                                cursor:
+                                  activeActionKey !== null
+                                    ? "not-allowed"
+                                    : "pointer",
+                                opacity: activeActionKey !== null ? 0.6 : 1,
+                              }}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                disabled={activeActionKey !== null}
+                                onChange={(event) => {
+                                  const nextOptions = {
+                                    ...dockerPruneOptions,
+                                    [option.key]: event.target.checked,
+                                  };
+                                  setDockerPruneOptions(nextOptions);
+                                  setPendingConfirm((current) =>
+                                    current &&
+                                    current.kind === "server" &&
+                                    current.action === "prune-docker"
+                                      ? {
+                                          ...current,
+                                          description:
+                                            getDockerPruneSummary(nextOptions),
+                                          pruneOptions: nextOptions,
+                                        }
+                                      : current,
+                                  );
+                                }}
+                                style={{ marginTop: 2 }}
+                              />
+                              <span style={{ display: "grid", gap: 2 }}>
+                                <span
+                                  style={{
+                                    color: "var(--text-primary)",
+                                    fontSize: 13,
+                                    fontWeight: 600,
+                                  }}
+                                >
+                                  {option.label}
+                                </span>
+                                <span
+                                  style={{
+                                    color: "var(--text-muted)",
+                                    fontSize: 12,
+                                    lineHeight: 1.5,
+                                  }}
+                                >
+                                  {option.description}
+                                </span>
+                              </span>
+                            </label>
+                          );
+                        })}
+                      </div>
                     ) : null}
-                    {notice.detailText ? (
-                      <pre
+                    <div
+                      style={{
+                        borderRadius: 10,
+                        padding: "12px 14px",
+                        fontSize: 12,
+                        color:
+                          pendingConfirm.tone === "danger"
+                            ? "#ef4444"
+                            : "#b45309",
+                        background:
+                          pendingConfirm.tone === "danger"
+                            ? "rgba(239,68,68,0.08)"
+                            : "rgba(245,158,11,0.08)",
+                        border:
+                          pendingConfirm.tone === "danger"
+                            ? "1px solid rgba(239,68,68,0.24)"
+                            : "1px solid rgba(245,158,11,0.24)",
+                      }}
+                    >
+                      Confirm this action only if you expect a brief service
+                      interruption or cleanup change on the host.
+                    </div>
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: 10,
+                        justifyContent: "flex-end",
+                      }}
+                    >
+                      <button
+                        className="btn"
+                        onClick={() => setPendingConfirm(null)}
+                        disabled={activeActionKey !== null}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        className="btn"
+                        onClick={() => {
+                          const currentConfirm = pendingConfirm;
+                          if (!currentConfirm) {
+                            return;
+                          }
+
+                          if (currentConfirm.kind === "server") {
+                            if (
+                              currentConfirm.action === "prune-docker" &&
+                              !hasSelectedDockerPruneOption
+                            ) {
+                              return;
+                            }
+
+                            setPendingConfirm(null);
+                            void handleServerAction(
+                              currentConfirm.action,
+                              currentConfirm.pruneOptions,
+                            );
+                            return;
+                          }
+
+                          setPendingConfirm(null);
+
+                          if (currentConfirm.kind === "docker") {
+                            void handleDockerAction(currentConfirm.action);
+                            return;
+                          }
+
+                          if (currentConfirm.kind === "service") {
+                            void handleServiceRestart(
+                              currentConfirm.serviceName,
+                            );
+                            return;
+                          }
+
+                          void handleWebStackAction(
+                            currentConfirm.component,
+                            currentConfirm.action,
+                          );
+                        }}
+                        disabled={
+                          activeActionKey !== null ||
+                          (pendingConfirm.kind === "server" &&
+                            pendingConfirm.action === "prune-docker" &&
+                            !hasSelectedDockerPruneOption)
+                        }
                         style={{
-                          margin: 0,
-                          whiteSpace: "pre-wrap",
-                          wordBreak: "break-word",
-                          color: "var(--text-primary)",
-                          fontSize: 12,
-                          fontFamily: "var(--font-geist-mono, monospace)",
+                          background:
+                            pendingConfirm.tone === "danger"
+                              ? "rgba(239,68,68,0.12)"
+                              : "rgba(245,158,11,0.12)",
+                          color:
+                            pendingConfirm.tone === "danger"
+                              ? "#ef4444"
+                              : "#f59e0b",
+                          border:
+                            pendingConfirm.tone === "danger"
+                              ? "1px solid rgba(239,68,68,0.22)"
+                              : "1px solid rgba(245,158,11,0.22)",
+                          opacity:
+                            pendingConfirm.kind === "server" &&
+                            pendingConfirm.action === "prune-docker" &&
+                            !hasSelectedDockerPruneOption
+                              ? 0.6
+                              : 1,
                         }}
                       >
-                        {notice.detailText}
-                      </pre>
+                        {activeActionKey !== null ? (
+                          <Loader2 size={14} className="animate-spin" />
+                        ) : (
+                          <AlertTriangle size={14} />
+                        )}
+                        {pendingConfirm.confirmLabel}
+                      </button>
+                    </div>
+                  </div>
+                </div>,
+                document.body,
+              )
+            : null}
+
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "flex-start",
+              gap: 12,
+            }}
+          >
+            <div>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  flexWrap: "wrap",
+                }}
+              >
+                <h3
+                  style={{
+                    color: "var(--text-primary)",
+                    fontWeight: 700,
+                    fontSize: 16,
+                  }}
+                >
+                  Server Config
+                </h3>
+                <UserBadge
+                  label={server.status}
+                  tone={server.status === "ONLINE" ? "success" : "neutral"}
+                />
+              </div>
+              <p
+                style={{
+                  color: "var(--text-muted)",
+                  fontSize: 13,
+                  marginTop: 6,
+                }}
+              >
+                {server.name} • {server.ip}:{server.sshPort}
+              </p>
+              <p
+                style={{
+                  color: "var(--text-muted)",
+                  fontSize: 12,
+                  marginTop: 6,
+                }}
+              >
+                Snapshot refresh runs only when this modal opens or when you
+                click Refresh.
+              </p>
+            </div>
+            <div style={{ display: "flex", gap: 8, paddingRight: 36 }}>
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={() => void loadSnapshot()}
+                disabled={loading}
+              >
+                <RefreshCw size={14} /> Refresh
+              </button>
+            </div>
+          </div>
+
+          <nav
+            className="ui-tab-scroll no-scrollbar"
+            style={{
+              width: "100%",
+              borderRadius: 6,
+              background: "var(--bg-card)",
+              minWidth: 0,
+              minHeight: 38,
+              alignItems: "center",
+              overflowY: "hidden",
+              flex: "0 0 auto",
+            }}
+            aria-label="Server config sections"
+          >
+            {tabs.map((tab) => tabButton(tab.id, tab.label))}
+          </nav>
+
+          <div
+            style={{
+              display: "grid",
+              flex: "1 1 auto",
+              gap: 18,
+              minHeight: 0,
+              overflowY: "auto",
+              paddingRight: 2,
+            }}
+          >
+            {notice && notice.tab === activeTab ? (
+              <div
+                style={{
+                  background:
+                    notice.tone === "success"
+                      ? "rgba(16,185,129,0.1)"
+                      : notice.tone === "error"
+                        ? "rgba(239,68,68,0.1)"
+                        : "rgba(59,130,246,0.08)",
+                  border:
+                    notice.tone === "success"
+                      ? "1px solid rgba(16,185,129,0.25)"
+                      : notice.tone === "error"
+                        ? "1px solid rgba(239,68,68,0.25)"
+                        : "1px solid rgba(59,130,246,0.2)",
+                  borderRadius: 10,
+                  padding: "12px 14px",
+                  color:
+                    notice.tone === "success"
+                      ? "#10b981"
+                      : notice.tone === "error"
+                        ? "#ef4444"
+                        : "#3b82f6",
+                  fontSize: 13,
+                  display: "grid",
+                  gap: 10,
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "flex-start",
+                    justifyContent: "space-between",
+                    gap: 12,
+                  }}
+                >
+                  <div style={{ display: "grid", gap: 4 }}>
+                    <strong style={{ fontSize: 14 }}>{notice.title}</strong>
+                    <div style={{ color: "var(--text-primary)" }}>
+                      {notice.summary}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNotice(null);
+                      setNoticeExpanded(false);
+                    }}
+                    aria-label="Dismiss notice"
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      width: 28,
+                      height: 28,
+                      borderRadius: 8,
+                      border: "1px solid rgba(148,163,184,0.18)",
+                      background: "rgba(15,23,42,0.16)",
+                      color: "currentColor",
+                      cursor: "pointer",
+                      flexShrink: 0,
+                    }}
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+                {notice.details?.length || notice.detailText ? (
+                  <div style={{ display: "grid", gap: 10 }}>
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => setNoticeExpanded((current) => !current)}
+                      style={{ width: "fit-content" }}
+                    >
+                      {noticeExpanded ? (
+                        <EyeOff size={12} />
+                      ) : (
+                        <Eye size={12} />
+                      )}
+                      {noticeExpanded ? "Hide detail" : "More detail"}
+                    </button>
+                    {noticeExpanded ? (
+                      <div
+                        style={{
+                          display: "grid",
+                          gap: 10,
+                          padding: 12,
+                          borderRadius: 10,
+                          background: "rgba(15,23,42,0.28)",
+                          border: "1px solid rgba(148,163,184,0.16)",
+                        }}
+                      >
+                        {notice.details?.length ? (
+                          <ul
+                            style={{
+                              margin: 0,
+                              paddingLeft: 18,
+                              color: "var(--text-primary)",
+                            }}
+                          >
+                            {notice.details.map((detail) => (
+                              <li key={detail}>{detail}</li>
+                            ))}
+                          </ul>
+                        ) : null}
+                        {notice.detailText ? (
+                          <pre
+                            style={{
+                              margin: 0,
+                              whiteSpace: "pre-wrap",
+                              wordBreak: "break-word",
+                              color: "var(--text-primary)",
+                              fontSize: 12,
+                              fontFamily: "var(--font-geist-mono, monospace)",
+                            }}
+                          >
+                            {notice.detailText}
+                          </pre>
+                        ) : null}
+                      </div>
                     ) : null}
                   </div>
                 ) : null}
               </div>
             ) : null}
-          </div>
-        ) : null}
 
-        {error ? (
-          <IssueDetailsSummary
-            label="Server Config"
-            message={error}
-            description="The latest server configuration action returned an error."
-          />
-        ) : null}
+            {error ? (
+              <IssueDetailsSummary
+                label="Server Config"
+                message={error}
+                description="The latest server configuration action returned an error."
+              />
+            ) : null}
 
-        {snapshotLoadError ? (
-          <div
-            style={{
-              display: "grid",
-              gap: 10,
-              borderRadius: 12,
-              border: "1px solid rgba(245,158,11,0.3)",
-              background: "rgba(245,158,11,0.08)",
-              padding: "14px 16px",
-            }}
-          >
-            <div>
-              <strong style={{ color: "#f59e0b", fontSize: 14 }}>
-                Live configuration snapshot unavailable
-              </strong>
-              <p
+            {snapshotLoadError ? (
+              <div
                 style={{
-                  marginTop: 6,
-                  color: "var(--text-primary)",
-                  fontSize: 13,
-                  lineHeight: 1.6,
+                  display: "grid",
+                  gap: 10,
+                  borderRadius: 12,
+                  border: "1px solid rgba(245,158,11,0.3)",
+                  background: "rgba(245,158,11,0.08)",
+                  padding: "14px 16px",
                 }}
               >
-                The server did not return a full config snapshot, so this modal
-                is showing fallback information. Recovery actions remain
-                available, especially in the Actions tab.
-              </p>
-            </div>
-            <IssueDetailsSummary
-              label="Configuration Snapshot"
-              message={snapshotLoadError}
-              description="The server did not return a full live configuration snapshot."
-            />
-          </div>
-        ) : null}
+                <div>
+                  <strong style={{ color: "#f59e0b", fontSize: 14 }}>
+                    Live configuration snapshot unavailable
+                  </strong>
+                  <p
+                    style={{
+                      marginTop: 6,
+                      color: "var(--text-primary)",
+                      fontSize: 13,
+                      lineHeight: 1.6,
+                    }}
+                  >
+                    The server did not return a full config snapshot, so this
+                    modal is showing fallback information. Recovery actions
+                    remain available, especially in the Actions tab.
+                  </p>
+                </div>
+                <IssueDetailsSummary
+                  label="Configuration Snapshot"
+                  message={snapshotLoadError}
+                  description="The server did not return a full live configuration snapshot."
+                />
+              </div>
+            ) : null}
 
-        {loading ? (
-          <div style={{ padding: 36, textAlign: "center" }}>
-            <Loader2
-              size={26}
-              className="animate-spin"
-              style={{ color: "var(--accent)", margin: "0 auto 12px" }}
-            />
-            <p style={{ color: "var(--text-muted)", fontSize: 14 }}>
-              Loading configuration snapshot...
-            </p>
+            {loading ? (
+              <div style={{ padding: 36, textAlign: "center" }}>
+                <Loader2
+                  size={26}
+                  className="animate-spin"
+                  style={{ color: "var(--accent)", margin: "0 auto 12px" }}
+                />
+                <p style={{ color: "var(--text-muted)", fontSize: 14 }}>
+                  Loading configuration snapshot...
+                </p>
+              </div>
+            ) : (
+              renderActiveTab()
+            )}
           </div>
-        ) : (
-          renderActiveTab()
-        )}
         </div>
       </div>
     </div>
