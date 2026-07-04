@@ -536,7 +536,14 @@ function DashboardContent() {
         {/* Servers table + Activity */}
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
           {/* Servers table */}
-          <div className="card lg:col-span-3" style={{ overflow: "hidden" }}>
+          <div
+            className="card lg:col-span-3"
+            style={{
+              overflow: "hidden",
+              display: "flex",
+              flexDirection: "column",
+            }}
+          >
             <div
               style={{
                 padding: "16px 20px",
@@ -561,7 +568,7 @@ function DashboardContent() {
                 </p>
               </div>
             </div>
-            <div style={{ overflowX: "auto" }}>
+            <div style={{ overflowX: "auto", flex: 1 }}>
               <table className="data-table">
                 <thead>
                   <tr>
@@ -781,28 +788,6 @@ function DashboardContent() {
               itemLabel="servers"
               onPageChange={serverPagination.setCurrentPage}
             />
-            {/* <div
-              style={{
-                padding: "12px 20px",
-                borderTop: "1px solid var(--border)",
-                display: "flex",
-                justifyContent: "flex-end",
-              }}
-            >
-              <a
-                href="/servers"
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 6,
-                  fontSize: 12,
-                  color: "#3b82f6",
-                  textDecoration: "none",
-                }}
-              >
-                View all servers <ArrowRight size={12} />
-              </a>
-            </div> */}
           </div>
 
           {/* Activity log */}
@@ -933,97 +918,6 @@ function DashboardContent() {
                 </div>
               )}
             </div>
-          </div>
-        </div>
-
-        {/* Quick actions */}
-        <div className="card" style={{ padding: 20 }}>
-          <h2
-            style={{
-              fontSize: 14,
-              fontWeight: 600,
-              color: "var(--text-primary)",
-              marginBottom: 14,
-            }}
-          >
-            Quick Actions
-          </h2>
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            {[
-              {
-                label: "Deploy Container",
-                icon: Container,
-                color: "#10b981",
-                href: "/containers",
-              },
-              {
-                label: "Add Server",
-                icon: Server,
-                color: "#3b82f6",
-                href: "/servers",
-              },
-              {
-                label: "Setup SSL",
-                icon: Shield,
-                color: "#8b5cf6",
-                href: "/ssl",
-              },
-              {
-                label: "Open Terminal",
-                icon: Activity,
-                color: "#06b6d4",
-                href: "/terminal",
-              },
-              {
-                label: "Add Domain",
-                icon: Globe,
-                color: "#f59e0b",
-                href: "/domains",
-              },
-              {
-                label: "View Logs",
-                icon: Zap,
-                color: "#ef4444",
-                href: "/logs",
-              },
-            ].map((action) => {
-              const Icon = action.icon;
-              return (
-                <a
-                  key={action.label}
-                  href={action.href}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                    padding: "8px 14px",
-                    borderRadius: 8,
-                    background: `${action.color}10`,
-                    border: `1px solid ${action.color}25`,
-                    textDecoration: "none",
-                    color: action.color,
-                    fontSize: 13,
-                    fontWeight: 500,
-                    transition: "all 0.2s",
-                  }}
-                  onMouseEnter={(e) => {
-                    (e.currentTarget as HTMLElement).style.background =
-                      `${action.color}20`;
-                    (e.currentTarget as HTMLElement).style.transform =
-                      "translateY(-1px)";
-                  }}
-                  onMouseLeave={(e) => {
-                    (e.currentTarget as HTMLElement).style.background =
-                      `${action.color}10`;
-                    (e.currentTarget as HTMLElement).style.transform =
-                      "translateY(0)";
-                  }}
-                >
-                  <Icon size={14} />
-                  {action.label}
-                </a>
-              );
-            })}
           </div>
         </div>
       </div>
