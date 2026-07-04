@@ -2,6 +2,7 @@
 @import "tailwindcss";
 
 :root {
+  /* Dark theme variables */
   --bg-primary: #0c0e16;
   --bg-secondary: #0c0e16;
   --bg-card: #0c0e16;
@@ -22,6 +23,36 @@
   --accent-red: #ef4444;
   --accent-purple: #8b5cf6;
   --accent-cyan: #06b6d4;
+
+  /* Toast tones */
+  --toast-success-border: 1px solid rgba(16, 185, 129, 0.28);
+  --toast-success-bg: #0f2f28;
+  --toast-success-title: #d1fae5;
+  --toast-success-message: rgba(209, 250, 229, 0.82);
+  --toast-success-close: rgba(209, 250, 229, 0.65);
+  --toast-success-icon: #34d399;
+
+  --toast-error-border: 1px solid rgba(239, 68, 68, 0.28);
+  --toast-error-bg: #321717;
+  --toast-error-title: #fee2e2;
+  --toast-error-message: rgba(254, 226, 226, 0.82);
+  --toast-error-close: rgba(254, 226, 226, 0.65);
+  --toast-error-icon: #f87171;
+
+  --toast-warning-border: 1px solid rgba(245, 158, 11, 0.28);
+  --toast-warning-bg: #342714;
+  --toast-warning-title: #fef3c7;
+  --toast-warning-message: rgba(254, 243, 199, 0.82);
+  --toast-warning-close: rgba(254, 243, 199, 0.65);
+  --toast-warning-icon: #fbbf24;
+
+  --toast-info-border: 1px solid rgba(59, 130, 246, 0.28);
+  --toast-info-bg: #172c40;
+  --toast-info-title: #dbeafe;
+  --toast-info-message: rgba(219, 234, 254, 0.82);
+  --toast-info-close: rgba(219, 234, 254, 0.65);
+  --toast-info-icon: #60a5fa;
+
   --terminal-surface: #070b12;
   --terminal-header: #0d1224;
   --terminal-row-hover: rgba(59, 130, 246, 0.04);
@@ -66,6 +97,7 @@
 }
 
 html[data-theme="light"] {
+  /* Light theme variables */
   --bg-primary: #f4f7fb;
   --bg-secondary: #ffffff;
   --bg-card: #ffffff;
@@ -107,6 +139,35 @@ html[data-theme="light"] {
   --metrics-error-bg: rgba(254, 242, 242, 0.96);
   --scrollbar-track: #e2e8f0;
   --scrollbar-thumb: #cbd5e1;
+
+  /* Toast tones — light */
+  --toast-success-border: 1px solid rgba(16, 185, 129, 0.22);
+  --toast-success-bg: #ecfdf5;
+  --toast-success-title: #14532d;
+  --toast-success-message: rgba(20, 83, 45, 0.82);
+  --toast-success-close: rgba(20, 83, 45, 0.6);
+  --toast-success-icon: #10b981;
+
+  --toast-error-border: 1px solid rgba(239, 68, 68, 0.22);
+  --toast-error-bg: #fef2f2;
+  --toast-error-title: #7f1d1d;
+  --toast-error-message: rgba(127, 29, 29, 0.82);
+  --toast-error-close: rgba(127, 29, 29, 0.6);
+  --toast-error-icon: #ef4444;
+
+  --toast-warning-border: 1px solid rgba(245, 158, 11, 0.22);
+  --toast-warning-bg: #fffbeb;
+  --toast-warning-title: #78350f;
+  --toast-warning-message: rgba(120, 53, 15, 0.82);
+  --toast-warning-close: rgba(120, 53, 15, 0.6);
+  --toast-warning-icon: #f59e0b;
+
+  --toast-info-border: 1px solid rgba(59, 130, 246, 0.22);
+  --toast-info-bg: #eff6ff;
+  --toast-info-title: #1e3a8a;
+  --toast-info-message: rgba(30, 58, 138, 0.82);
+  --toast-info-close: rgba(30, 58, 138, 0.6);
+  --toast-info-icon: #3b82f6;
 }
 
 * {
