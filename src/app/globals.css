@@ -802,8 +802,8 @@ body {
 }
 .btn-primary:disabled,
 .btn-primary[aria-disabled="true"] {
-  background: rgba(59, 130, 246, 0.18);
-  color: rgba(255, 255, 255, 0.52);
+  background: #022ab1;
+  color: var(--text-muted);
 }
 .btn-ghost {
   background: transparent;
