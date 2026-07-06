@@ -310,7 +310,7 @@ export default function LogsPage() {
     <>
       <DashboardLayout
         title="Live Logs"
-        subtitle="Audit log nyata dengan refresh berkala dan export CSV"
+        subtitle="Real audit logs with periodic refresh and CSV export"
       >
         <div
           className="animate-slide-in"
