@@ -406,6 +406,7 @@ export async function restartNginx(server: Server): Promise<void> {
       server,
       'bash -lc "systemctl restart nginx || systemctl restart apache2 || systemctl restart httpd"',
     ),
+    { timeoutMs: 60000 },
   );
 }
 
@@ -455,6 +456,8 @@ export async function restartManagedService(
       server,
       `bash -lc ${escapeShellArg(`systemctl restart ${normalized}`)}`,
     ),
+    // ponytail: 5m matches frontend; lower if service restart is always fast
+    { timeoutMs: 300000 },
   );
 }
 

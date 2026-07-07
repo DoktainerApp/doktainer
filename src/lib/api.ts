@@ -1466,13 +1466,13 @@ export const servers = {
     post<{ success: boolean; message: string }>(
       `/servers/${id}/nginx/restart`,
       {},
-      { timeoutMs: 15000 },
+      { timeoutMs: 60000 },
     ),
   restartService: (id: string, service: string) =>
     post<{ success: boolean; message: string }>(
       `/servers/${id}/services/${encodeURIComponent(service)}/restart`,
       {},
-      { timeoutMs: 15000 },
+      { timeoutMs: 300000 },
     ),
   manageWebStack: (
     id: string,

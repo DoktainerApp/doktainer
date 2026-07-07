@@ -50,7 +50,7 @@ function buildTrackedCommand(command: string, runId: string) {
     'wait "$child"',
     "code=$?",
     "set -e",
-    "exit \"$code\"",
+    'exit "$code"',
   ].join("\n");
 
   return `bash -lc ${shellQuote(script)}`;
