@@ -1213,22 +1213,6 @@ const BASE_APP_TEMPLATES: AppTemplate[] = [
   },
 
   {
-    id: "genieacs",
-    name: "GenieACS",
-    desc: "TR-069 remote management server for CPE devices",
-    category: "DevOps",
-    image: "genieacs/genieacs:latest",
-    defaultPort: "7547:7547,7557:7557,7567:7567,3000:3000",
-    defaultEnv:
-      "GENIEACS_MONGODB_CONNECTION_URL=mongodb://mongo/genieacs\nGENIEACS_CWMP_ACCESS_LOG_FILE=/var/log/genieacs/cwmp-access.log\nGENIEACS_NBI_ACCESS_LOG_FILE=/var/log/genieacs/nbi-access.log\nGENIEACS_UI_JWT_SECRET=super-secret-key\nGENIEACS_CWMP_PORT=7547\nGENIEACS_NBI_PORT=7557\nGENIEACS_FS_PORT=7567\nGENIEACS_UI_PORT=3000",
-    defaultVolumes:
-      "/srv/genieacs/logs:/var/log/genieacs\n/srv/genieacs/ext:/opt/genieacs/ext",
-    restartPolicy: "unless-stopped",
-    popular: false,
-    tags: ["TR-069", "CPE", "Network"],
-  },
-
-  {
     id: "wuzapi",
     name: "WuzAPI",
     desc: "WuzAPI multi user and multi device REST API Service for Whatsapp.",
