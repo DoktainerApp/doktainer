@@ -70,7 +70,7 @@ Or if using a dedicated image registry:
 
 ```bash
 curl -fsSL https://doktainer.com/install.sh | \
-  DOKTAINER_IMAGE=ghcr.io/organisasi/doktainer:v0.1.4 sh -s -- update
+  DOKTAINER_IMAGE=ghcr.io/DoktainerApp/doktainer:v0.1.4 sh -s -- update
 ```
 
 Before updating, it is recommended to back up the configuration:
