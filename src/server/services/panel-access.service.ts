@@ -9,8 +9,8 @@ const execFileAsync = promisify(execFile);
 const PANEL_PROBE_TIMEOUT_MS = 12000;
 const PANEL_HOST_ROOT = (process.env.PANEL_HOST_ROOT || "").replace(/\/+$/, "");
 const PANEL_HOST_EXECUTION = process.env.PANEL_ACCESS_HOST_EXECUTION === "1";
-const PANEL_PROXY_NETWORK = process.env.PANEL_PROXY_NETWORK || "doktainer-proxy";
-const DOCKER_SOCKET_PATH = process.env.DOCKER_SOCKET_PATH || "/var/run/docker.sock";
+const PANEL_PROXY_NETWORK = (process.env.PANEL_PROXY_NETWORK || "doktainer-proxy").trim();
+const DEFAULT_DOCKER_SOCKET_PATH = "/var/run/docker.sock";
 
 export type PanelProxyType = "NGINX" | "CADDY" | "TRAEFIK";
 
@@ -110,6 +110,16 @@ function panelHostPath(path: string) {
   return PANEL_HOST_ROOT && path.startsWith("/")
     ? `${PANEL_HOST_ROOT}${path}`
     : path;
+}
+
+function resolveDockerSocketPath() {
+  const candidates = [
+    process.env.DOCKER_SOCKET_PATH,
+    DEFAULT_DOCKER_SOCKET_PATH,
+    "/run/docker.sock",
+  ].filter((value): value is string => Boolean(value));
+
+  return candidates.find((path) => existsSync(path)) ?? candidates[0];
 }
 
 function resolvePanelUpstream() {
@@ -523,22 +533,34 @@ async function probeDockerBridgeProxyStack(): Promise<DockerProxyStackProbe> {
     traefik: emptyDockerProxyProbe(null),
   });
 
-  if (!existsSync(DOCKER_SOCKET_PATH)) return unavailable();
-
   try {
-    const docker = new Dockerode({ socketPath: DOCKER_SOCKET_PATH });
+    const socketPath = resolveDockerSocketPath();
+    if (!socketPath || !existsSync(socketPath)) {
+      const requested = process.env.DOCKER_SOCKET_PATH || DEFAULT_DOCKER_SOCKET_PATH;
+      throw new Error(`Docker socket is not available at ${requested}.`);
+    }
+
+    const docker = new Dockerode({ socketPath });
     const containers = await docker.listContainers({ all: true });
     const result = unavailable();
 
     for (const type of ["NGINX", "CADDY", "TRAEFIK"] as const) {
-      const container = containers.find((candidate) => {
+      const candidates = containers.filter((candidate) => {
         const name = candidate.Names?.[0]?.replace(/^\//, "") || "";
-        const onProxyNetwork = Boolean(candidate.NetworkSettings?.Networks?.[PANEL_PROXY_NETWORK]);
-        return onProxyNetwork && proxyMatchesContainer(type, name, candidate.Image || "");
+        return proxyMatchesContainer(type, name, candidate.Image || "");
       });
-      if (!container) continue;
+      const inspected = await Promise.all(
+        candidates.map(async (candidate) => ({
+          candidate,
+          details: await docker.getContainer(candidate.Id).inspect(),
+        })),
+      );
+      const match = inspected.find(({ details }) =>
+        Boolean(details.NetworkSettings.Networks?.[PANEL_PROXY_NETWORK]),
+      );
+      if (!match) continue;
 
-      const details = await docker.getContainer(container.Id).inspect();
+      const { candidate: container, details } = match;
       const key = type.toLowerCase() as Lowercase<PanelProxyType>;
       result[key] = {
         installed: true,
@@ -567,7 +589,11 @@ async function runDockerContainerShell(
   timeoutMs = 20000,
 ): Promise<ShellResult> {
   try {
-    const docker = new Dockerode({ socketPath: DOCKER_SOCKET_PATH });
+    const socketPath = resolveDockerSocketPath();
+    if (!socketPath || !existsSync(socketPath)) {
+      throw new Error("Docker socket is not available to the Doktainer app.");
+    }
+    const docker = new Dockerode({ socketPath });
     const execution = await docker.getContainer(containerId).exec({
       AttachStdout: true,
       AttachStderr: true,
