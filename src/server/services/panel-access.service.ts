@@ -508,13 +508,13 @@ function emptyDockerProxyProbe(error: string | null): DockerProxyProbe {
   };
 }
 
-function proxyMatchesContainer(type: PanelProxyType, name: string, image: string) {
-  const haystack = `${name} ${image}`.toLowerCase();
-  return type === "NGINX"
-    ? /(^|[/:_-])nginx(?:[/:_-]|$)/.test(haystack)
+export function proxyMatchesContainer(type: PanelProxyType, name: string, image: string) {
+  const pattern = type === "NGINX"
+    ? /(^|[/:_-])nginx(?:[/:_-]|$)/
     : type === "CADDY"
-      ? /(^|[/:_-])caddy(?:[/:_-]|$)/.test(haystack)
-      : /(^|[/:_-])traefik(?:[/:_-]|$)/.test(haystack);
+      ? /(^|[/:_-])caddy(?:[/:_-]|$)/
+      : /(^|[/:_-])traefik(?:[/:_-]|$)/;
+  return [name, image].some((value) => pattern.test(value.toLowerCase()));
 }
 
 function proxyConfigMounts(type: PanelProxyType, mounts: Array<{ Destination?: string }>) {
