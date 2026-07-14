@@ -18,8 +18,8 @@ import {
   type ProjectRecord,
   type Server,
 } from "@/lib/api";
-import DeployContainerModal from "@/app/containers/components/modals/DeployContainerModal";
-import AddDatabaseModal from "@/app/databases/components/AddDatabaseModal";
+import DeployContainerModal from "@/components/containers/modals/DeployContainerModal";
+import AddDatabaseModal from "./components/database/AddDatabaseModal";
 import EnvironmentContainersTable from "./components/containers/EnvironmentContainersTable";
 import EnvironmentHeader from "./components/header/EnvironmentHeader";
 import ImportFromSyncModal from "./components/import/ImportFromSyncModal";

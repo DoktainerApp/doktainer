@@ -4,8 +4,6 @@ import {
   Bell,
   Boxes,
   CloudBackup,
-  Container,
-  Database,
   FileText,
   FolderArchive,
   GitBranch,
@@ -71,19 +69,6 @@ export const navigation: NavSection[] = [
         label: "Servers",
         keywords: ["hosts", "vps", "instances", "ssh"],
       },
-      // Temporarily hiding containers and databases until we have a more robust implementation and UI for these features. We want to avoid showing broken or incomplete features in the navigation.
-      /* {
-        href: "/containers",
-        icon: Container,
-        label: "Containers",
-        keywords: ["docker", "runtime"],
-      },
-      {
-        href: "/databases",
-        icon: Database,
-        label: "Databases",
-        keywords: ["mysql", "postgres", "mongodb", "redis"],
-      }, */
       {
         href: "/networks",
         icon: Network,

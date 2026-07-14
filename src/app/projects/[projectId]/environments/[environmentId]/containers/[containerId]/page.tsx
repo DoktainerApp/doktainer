@@ -22,7 +22,7 @@ import {
   type ProjectEnvironmentRecord,
   type ProjectRecord,
 } from "@/lib/api";
-import ContainerFileManagerModal from "@/app/containers/components/modals/ContainerFileManagerModal";
+import ContainerFileManagerModal from "@/components/containers/modals/ContainerFileManagerModal";
 import AdvancedTabPanel from "./components/advanced/AdvancedTabPanel";
 import DeploymentsTabPanel from "./components/deployments/DeploymentsTabPanel";
 import EnvironmentTabPanel from "./components/environment/EnvironmentTabPanel";

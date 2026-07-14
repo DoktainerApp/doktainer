@@ -35,7 +35,7 @@ import {
   formatBytes,
   formatTimestamp,
   joinContainerPath,
-} from "../../utils/container-utils";
+} from "../utils/container-utils";
 
 interface ContainerFileManagerModalProps {
   container: Container;
