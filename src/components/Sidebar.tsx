@@ -135,8 +135,8 @@ export default function Sidebar({
         {/* App icon */}
         <div
           style={{
-            width: 32,
-            height: 32,
+            width: 34,
+            height: 34,
             borderRadius: 8,
             background: "linear-gradient(135deg, #3b82f6, #8b5cf6)",
             display: "flex",
@@ -146,12 +146,12 @@ export default function Sidebar({
             boxShadow: "0 0 12px rgba(59, 130, 246, 0.4)",
           }}
         >
-          {/* <Cpu size={16} color="white" /> */}
           <Image
-            src="/assets/images/favicon.png"
+            src="/assets/images/favicon.svg"
             alt="Logo"
-            width={30}
-            height={30}
+            width={32}
+            height={32}
+            style={{ borderRadius: 8 }}
           />
         </div>
 
