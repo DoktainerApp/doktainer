@@ -1,19 +1,31 @@
 import { FastifyInstance } from "fastify";
 import AdmZip from "adm-zip";
-import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import {
+  GetObjectCommand,
+  HeadObjectCommand,
+  PutObjectCommand,
+  S3Client,
+  type HeadObjectCommandOutput,
+} from "@aws-sdk/client-s3";
+import { mkdtemp, rm, writeFile } from "fs/promises";
+import { tmpdir } from "os";
 import { posix as pathPosix } from "path";
+import { randomUUID } from "crypto";
 import { gunzipSync } from "zlib";
 import { z } from "zod";
 import prisma from "../lib/prisma";
-import { decrypt } from "../lib/crypto";
 import { authenticate, requireApiKeyPermission } from "../middleware/auth";
 import { auditLog } from "../services/audit.service";
 import { dispatchRuntimeNotification } from "../services/notification.service";
+import {
+  buildS3ObjectKey,
+  createS3Client,
+} from "../services/s3-storage.service";
 import * as ssh from "../services/ssh.service";
 
 const backupsAccess = [authenticate, requireApiKeyPermission("write:backups")];
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /**
  * Parse "du -sb <path>" output and return size in MB
@@ -47,6 +59,7 @@ const DATABASE_IMAGE_HINTS = [
   "valkey",
 ];
 const DOCKER_VOLUMES_BASE_PATH = "/var/lib/docker/volumes";
+const BACKUP_DIR = "/var/backups/vps-panel";
 const DOCKER_VOLUME_LIST_TIMEOUT_MS = 10_000;
 
 function dockerVolumeListTimeout() {
@@ -54,6 +67,10 @@ function dockerVolumeListTimeout() {
     timeoutMs: DOCKER_VOLUME_LIST_TIMEOUT_MS,
     queueTimeoutMs: DOCKER_VOLUME_LIST_TIMEOUT_MS,
   };
+}
+
+function getErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
 }
 
 type DatabaseEngine = "POSTGRESQL" | "MYSQL" | "MARIADB" | "MONGODB" | "REDIS";
@@ -77,6 +94,7 @@ type StorageDestinationRecord = {
   bucket: string;
   endpoint: string | null;
   additionalFlags: string[];
+  objectPrefix?: string | null;
 };
 
 const prismaStorage = prisma as typeof prisma & {
@@ -168,26 +186,6 @@ async function readRemoteFileBase64(
   return Buffer.from(payload, "base64");
 }
 
-function createS3Client(destination: StorageDestinationRecord) {
-  if (!destination.secretAccessKeyEnc) {
-    throw new Error("Storage destination secret key is missing");
-  }
-
-  return new S3Client({
-    region: destination.region ?? "auto",
-    endpoint: destination.endpoint || undefined,
-    forcePathStyle:
-      Boolean(destination.endpoint) ||
-      destination.additionalFlags.some((flag) =>
-        flag.toLowerCase().includes("forcepathstyle=true"),
-      ),
-    credentials: {
-      accessKeyId: destination.accessKeyId,
-      secretAccessKey: decrypt(destination.secretAccessKeyEnc),
-    },
-  });
-}
-
 async function uploadBackupToS3(args: {
   server: Parameters<typeof ssh.exec>[0];
   filePath: string;
@@ -196,20 +194,117 @@ async function uploadBackupToS3(args: {
 }) {
   const body = await readRemoteFileBase64(args.server, args.filePath);
   const client = createS3Client(args.destination);
+  const objectKey = buildS3ObjectKey(args.destination, args.filename);
 
-  await client.send(
+  const result = await client.send(
     new PutObjectCommand({
       Bucket: args.destination.bucket,
-      Key: args.filename,
+      Key: objectKey,
       Body: body,
       ContentType: "application/gzip",
     }),
   );
 
+  const verification = await verifyUploadedS3Object({
+    client,
+    bucket: args.destination.bucket,
+    key: objectKey,
+    expectedSize: body.length,
+    uploadedEtag: result.ETag,
+  });
+
   return {
     bucket: args.destination.bucket,
-    key: args.filename,
+    key: objectKey,
+    etag: verification.etag,
   };
+}
+
+async function verifyUploadedS3Object(args: {
+  client: S3Client;
+  bucket: string;
+  key: string;
+  expectedSize: number;
+  uploadedEtag?: string;
+}) {
+  let metadata: HeadObjectCommandOutput;
+
+  try {
+    metadata = await args.client.send(
+      new HeadObjectCommand({ Bucket: args.bucket, Key: args.key }),
+    );
+  } catch (error) {
+    throw new Error(
+      `S3 object verification failed for ${args.bucket}/${args.key}: ${getErrorMessage(error)}`,
+    );
+  }
+
+  if (typeof metadata.ContentLength !== "number") {
+    throw new Error(
+      `S3 object verification failed for ${args.bucket}/${args.key}: object size is unavailable`,
+    );
+  }
+
+  if (metadata.ContentLength !== args.expectedSize) {
+    throw new Error(
+      `S3 object verification failed for ${args.bucket}/${args.key}: expected ${args.expectedSize} bytes, received ${metadata.ContentLength} bytes`,
+    );
+  }
+
+  return {
+    etag: metadata.ETag ?? args.uploadedEtag ?? null,
+    size: metadata.ContentLength,
+  };
+}
+
+async function downloadBackupFromS3(
+  destination: StorageDestinationRecord,
+  bucket: string,
+  key: string,
+) {
+  const response = await createS3Client(destination).send(
+    new GetObjectCommand({ Bucket: bucket, Key: key }),
+  );
+
+  if (!response.Body) {
+    throw new Error("S3 object was returned without a body");
+  }
+
+  return Buffer.from(await response.Body.transformToByteArray());
+}
+
+async function writeRemoteFileFromBuffer(
+  server: Parameters<typeof ssh.exec>[0],
+  filePath: string,
+  content: Buffer,
+) {
+  const tempDirectory = await mkdtemp(`${tmpdir()}/doktainer-restore-`);
+  const localPath = `${tempDirectory}/${randomUUID()}.backup`;
+
+  try {
+    await writeFile(localPath, content);
+    await ssh.execStrict(
+      server,
+      `mkdir -p ${escapeShellArg(pathPosix.dirname(filePath))}`,
+    );
+    await ssh.withIsolatedConnection(server, (connection) =>
+      connection.putFile(localPath, filePath),
+    );
+  } finally {
+    await rm(tempDirectory, { recursive: true, force: true });
+  }
+}
+
+async function removeRemoteBackupFile(
+  server: Parameters<typeof ssh.exec>[0],
+  filePath: string,
+) {
+  try {
+    await ssh.execStrict(server, `rm -f ${escapeShellArg(filePath)}`);
+  } catch {
+    // The S3 copy is already durable; cleanup failure must not turn a
+    // successful upload into a failed backup.
+  }
 }
 
 function getBackupBaseName(name: string) {
@@ -455,7 +550,7 @@ function buildDatabaseBackupCommand(args: {
   ].join(" && ");
 }
 
-// ─── Routes ──────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Routes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export async function backupsRoutes(app: FastifyInstance) {
   app.get("/options", { preHandler: backupsAccess }, async (req, reply) => {
@@ -545,7 +640,7 @@ export async function backupsRoutes(app: FastifyInstance) {
     });
   });
 
-  // GET /backups — list backups (optionally filter by serverId)
+  // GET /backups â€” list backups (optionally filter by serverId)
   app.get("/", { preHandler: backupsAccess }, async (req, reply) => {
     const { serverId } = req.query as { serverId?: string };
 
@@ -605,20 +700,47 @@ export async function backupsRoutes(app: FastifyInstance) {
           .send({ success: false, error: "Backup not found" });
       }
 
-      if (!backup.filePath) {
-        return reply
-          .status(400)
-          .send({ success: false, error: "Backup has no file path recorded" });
-      }
-
       try {
-        const content = await readRemoteFileBase64(
-          backup.server,
-          backup.filePath,
-        );
+        let content: Buffer;
+
+        if (backup.storageBucket && backup.storageKey) {
+          const destination = backup.storageDestinationId
+            ? await prismaStorage.userStorageDestination.findFirst({
+                where: {
+                  id: backup.storageDestinationId,
+                  userId: req.userId!,
+                  organizationId: req.organizationId!,
+                },
+              })
+            : null;
+
+          if (!destination) {
+            return reply.status(400).send({
+              success: false,
+              error: "The S3 destination for this backup is no longer available",
+            });
+          }
+
+          content = await downloadBackupFromS3(
+            destination,
+            backup.storageBucket,
+            backup.storageKey,
+          );
+        } else {
+          if (!backup.filePath) {
+            return reply.status(400).send({
+              success: false,
+              error: "Backup has no local file or S3 object recorded",
+            });
+          }
+
+          content = await readRemoteFileBase64(backup.server, backup.filePath);
+        }
+
         let payload = content;
         let fileName =
-          backup.filePath.split("/").pop() ||
+          backup.storageKey?.split("/").pop() ||
+          backup.filePath?.split("/").pop() ||
           getDownloadArchiveName(backup.name, ".bak");
         let contentType = "application/octet-stream";
 
@@ -689,7 +811,7 @@ export async function backupsRoutes(app: FastifyInstance) {
     },
   );
 
-  // POST /backups — trigger a new backup
+  // POST /backups â€” trigger a new backup
   app.post("/", { preHandler: backupsAccess }, async (req, reply) => {
     const body = z
       .object({
@@ -790,6 +912,7 @@ export async function backupsRoutes(app: FastifyInstance) {
             ? `S3: ${storageDestination.name}`
             : body.data.target,
         filePath,
+        storageDestinationId: storageDestination?.id ?? null,
         status: "RUNNING",
       },
     });
@@ -858,7 +981,7 @@ export async function backupsRoutes(app: FastifyInstance) {
           }
           case "FULL":
           default: {
-            // Backup common paths: /etc, /var/www, /home, /opt — skip /proc /sys /dev
+            // Backup common paths: /etc, /var/www, /home, /opt â€” skip /proc /sys /dev
             backupCmd = `tar czf ${filePath} --exclude=/proc --exclude=/sys --exclude=/dev --exclude=/run --exclude=/tmp --one-file-system /etc /var/www /home /opt 2>/dev/null || true`;
             break;
           }
@@ -866,21 +989,7 @@ export async function backupsRoutes(app: FastifyInstance) {
 
         await ssh.execStrict(server, backupCmd);
 
-        let uploadedObject: {
-          bucket: string;
-          key: string;
-        } | null = null;
-
-        if (storageDestination) {
-          uploadedObject = await uploadBackupToS3({
-            server,
-            filePath,
-            filename,
-            destination: storageDestination,
-          });
-        }
-
-        // Get file size
+        // Capture the local size before an S3-targeted backup is cleaned up.
         const sizeOut = await ssh.execStrict(
           server,
           `test -s ${escapeShellArg(filePath)} && wc -c < ${escapeShellArg(filePath)}`,
@@ -891,9 +1000,31 @@ export async function backupsRoutes(app: FastifyInstance) {
           throw new Error("Backup file was created but is empty");
         }
 
+        let uploadedObject: {
+          bucket: string;
+          key: string;
+          etag: string | null;
+        } | null = null;
+
+        if (storageDestination) {
+          uploadedObject = await uploadBackupToS3({
+            server,
+            filePath,
+            filename,
+            destination: storageDestination,
+          });
+          await removeRemoteBackupFile(server, filePath);
+        }
+
         await prisma.backup.update({
           where: { id: backup.id },
-          data: { status: "COMPLETED", sizeMb },
+          data: {
+            status: "COMPLETED",
+            sizeMb,
+            storageBucket: uploadedObject?.bucket ?? null,
+            storageKey: uploadedObject?.key ?? null,
+            storageEtag: uploadedObject?.etag ?? null,
+          },
         });
 
         await auditLog({
@@ -940,13 +1071,15 @@ export async function backupsRoutes(app: FastifyInstance) {
               filePath,
               storageBucket: uploadedObject?.bucket,
               storageKey: uploadedObject?.key,
+              storageEtag: uploadedObject?.etag,
             },
           });
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
+        const errorMessage = getErrorMessage(err);
         await prisma.backup.update({
           where: { id: backup.id },
-          data: { status: "FAILED", error: err.message },
+          data: { status: "FAILED", error: errorMessage },
         });
 
         await auditLog({
@@ -956,7 +1089,7 @@ export async function backupsRoutes(app: FastifyInstance) {
           action: "BACKUP_FAILED",
           category: "SYSTEM",
           level: "ERROR",
-          message: `Backup "${body.data.name}" failed on "${server.name}": ${err.message}`,
+          message: `Backup "${body.data.name}" failed on "${server.name}": ${errorMessage}`,
         });
 
         if (req.organizationId) {
@@ -990,7 +1123,7 @@ export async function backupsRoutes(app: FastifyInstance) {
               serverName: server.name,
               serverIp: server.ip,
               filePath,
-              error: err.message,
+              error: errorMessage,
             },
           });
         }
@@ -1004,7 +1137,7 @@ export async function backupsRoutes(app: FastifyInstance) {
     });
   });
 
-  // POST /backups/:id/restore — trigger restore from backup file
+  // POST /backups/:id/restore â€” trigger restore from backup file
   app.post(
     "/:id/restore",
     { preHandler: backupsAccess },
@@ -1025,30 +1158,72 @@ export async function backupsRoutes(app: FastifyInstance) {
           error: "Only completed backups can be restored",
         });
       }
-      if (!backup.filePath) {
+      if (!backup.filePath && !(backup.storageBucket && backup.storageKey)) {
         return reply
           .status(400)
-          .send({ success: false, error: "Backup has no file path recorded" });
+          .send({
+            success: false,
+            error: "Backup has no local file or S3 object recorded",
+          });
       }
 
       // Restore in background
       setImmediate(async () => {
+        let hydratedFilePath: string | null = null;
         try {
+          let restoreFilePath = backup.filePath;
+
+          if (backup.storageBucket && backup.storageKey) {
+            const destination = backup.storageDestinationId
+              ? await prismaStorage.userStorageDestination.findFirst({
+                  where: {
+                    id: backup.storageDestinationId,
+                    userId: req.userId!,
+                    organizationId: req.organizationId!,
+                  },
+                })
+              : null;
+
+            if (!destination) {
+              throw new Error(
+                "The S3 destination for this backup is no longer available",
+              );
+            }
+
+            restoreFilePath = `${BACKUP_DIR}/.doktainer-restore-${backup.id}.${
+              backup.type === "DATABASE" ? "sql.gz" : "tar.gz"
+            }`;
+            await writeRemoteFileFromBuffer(
+              backup.server,
+              restoreFilePath,
+              await downloadBackupFromS3(
+                destination,
+                backup.storageBucket,
+                backup.storageKey,
+              ),
+            );
+            hydratedFilePath = restoreFilePath;
+          }
+
+          if (!restoreFilePath) {
+            throw new Error("Backup restore path is unavailable");
+          }
+
           let restoreCmd: string;
 
           switch (backup.type) {
             case "FULL":
             case "VOLUME":
-              restoreCmd = `tar xzf ${backup.filePath} -C / 2>/dev/null || true`;
+              restoreCmd = `tar xzf ${escapeShellArg(restoreFilePath)} -C / 2>/dev/null`;
               break;
             case "DATABASE":
             default:
-              // Pipe unzipped dump back to psql — DBA should supervise this
-              restoreCmd = `zcat ${backup.filePath} | psql -U postgres 2>/dev/null || zcat ${backup.filePath} | mysql -u root 2>/dev/null || true`;
+              // Pipe unzipped dump back to psql â€” DBA should supervise this
+              restoreCmd = `zcat ${escapeShellArg(restoreFilePath)} | psql -U postgres 2>/dev/null || zcat ${escapeShellArg(restoreFilePath)} | mysql -u root 2>/dev/null`;
               break;
           }
 
-          await ssh.exec(backup.server, restoreCmd);
+          await ssh.execStrict(backup.server, restoreCmd);
 
           await auditLog({
             userId: req.userId,
@@ -1059,7 +1234,8 @@ export async function backupsRoutes(app: FastifyInstance) {
             level: "WARNING",
             message: `Backup "${backup.name}" restored on "${backup.server.name}"`,
           });
-        } catch (err: any) {
+        } catch (err: unknown) {
+          const errorMessage = getErrorMessage(err);
           await auditLog({
             userId: req.userId,
             organizationId: req.organizationId,
@@ -1067,8 +1243,12 @@ export async function backupsRoutes(app: FastifyInstance) {
             action: "BACKUP_RESTORE_FAILED",
             category: "SYSTEM",
             level: "ERROR",
-            message: `Backup restore failed for "${backup.name}" on "${backup.server.name}": ${err.message}`,
+            message: `Backup restore failed for "${backup.name}" on "${backup.server.name}": ${errorMessage}`,
           });
+        } finally {
+          if (hydratedFilePath) {
+            await removeRemoteBackupFile(backup.server, hydratedFilePath);
+          }
         }
       });
 
@@ -1076,7 +1256,7 @@ export async function backupsRoutes(app: FastifyInstance) {
     },
   );
 
-  // DELETE /backups/:id — delete backup record and file on server
+  // DELETE /backups/:id â€” delete backup record and file on server
   app.delete("/:id", { preHandler: backupsAccess }, async (req, reply) => {
     const { id } = req.params as { id: string };
 
@@ -1094,7 +1274,7 @@ export async function backupsRoutes(app: FastifyInstance) {
       try {
         await ssh.exec(backup.server, `rm -f ${backup.filePath}`);
       } catch {
-        // Ignore SSH errors — still delete the DB record
+        // Ignore SSH errors â€” still delete the DB record
       }
     }
 
@@ -1113,7 +1293,7 @@ export async function backupsRoutes(app: FastifyInstance) {
     return reply.send({ success: true, message: "Backup deleted" });
   });
 
-  // GET /backups/stats — aggregate stats for dashboard
+  // GET /backups/stats â€” aggregate stats for dashboard
   app.get("/stats", { preHandler: backupsAccess }, async (req, reply) => {
     const [total, completed, running, failed] = await Promise.all([
       prisma.backup.count({
@@ -1145,3 +1325,4 @@ export async function backupsRoutes(app: FastifyInstance) {
     });
   });
 }
+

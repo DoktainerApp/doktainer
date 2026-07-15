@@ -54,6 +54,9 @@ const StorageDestinationSchema = z.object({
   bucket: z.string().trim().min(1).max(128),
   endpoint: z.string().trim().url().max(2048).optional().or(z.literal("")),
   additionalFlags: z.array(z.string().trim().min(1).max(255)).max(12),
+  retentionDays: z.number().int().min(1).max(3650).nullable().optional(),
+  maxBackupCount: z.number().int().min(1).max(10000).nullable().optional(),
+  objectPrefix: z.string().trim().max(255).optional().or(z.literal("")),
   serverId: z.string().trim().max(64).optional().or(z.literal("")),
 });
 
@@ -78,6 +81,9 @@ type StorageDestinationRecord = {
   bucket: string;
   endpoint: string | null;
   additionalFlags: string[];
+  retentionDays: number | null;
+  maxBackupCount: number | null;
+  objectPrefix: string | null;
   createdAt: Date;
   updatedAt: Date;
   server?: {
@@ -114,6 +120,9 @@ function serializeDestination(destination: StorageDestinationRecord) {
     bucket: destination.bucket,
     endpoint: destination.endpoint ?? "",
     additionalFlags: destination.additionalFlags,
+    retentionDays: destination.retentionDays,
+    maxBackupCount: destination.maxBackupCount,
+    objectPrefix: destination.objectPrefix ?? "",
     serverId: destination.serverId,
     targetServer: destination.server ?? null,
     createdAt: destination.createdAt.toISOString(),
@@ -131,6 +140,10 @@ function validateDestinationInput(
 
   if (!toTrimmedValue(input.secretAccessKey) && !hasStoredSecret) {
     return "Secret access key is required";
+  }
+
+  if ((input.retentionDays || input.maxBackupCount) && !toTrimmedValue(input.objectPrefix)) {
+    return "Object prefix is required when retention or maximum backup count is enabled";
   }
 
   return null;
@@ -172,6 +185,9 @@ function buildDestinationWriteData(
     region: toTrimmedValue(input.region),
     bucket: toTrimmedValue(input.bucket),
     endpoint: toTrimmedValue(input.endpoint) || null,
+    retentionDays: input.retentionDays ?? null,
+    maxBackupCount: input.maxBackupCount ?? null,
+    objectPrefix: toTrimmedValue(input.objectPrefix) || null,
     additionalFlags: [
       ...new Set(
         input.additionalFlags.map((entry) => entry.trim()).filter(Boolean),
@@ -201,6 +217,9 @@ async function getDestinationById(
       bucket: true,
       endpoint: true,
       additionalFlags: true,
+      retentionDays: true,
+      maxBackupCount: true,
+      objectPrefix: true,
       createdAt: true,
       updatedAt: true,
       server: {
@@ -244,6 +263,9 @@ export async function storageDestinationRoutes(app: FastifyInstance) {
         bucket: true,
         endpoint: true,
         additionalFlags: true,
+        retentionDays: true,
+        maxBackupCount: true,
+        objectPrefix: true,
         createdAt: true,
         updatedAt: true,
         server: {
@@ -322,6 +344,9 @@ export async function storageDestinationRoutes(app: FastifyInstance) {
           bucket: true,
           endpoint: true,
           additionalFlags: true,
+          retentionDays: true,
+          maxBackupCount: true,
+          objectPrefix: true,
           createdAt: true,
           updatedAt: true,
           server: {
@@ -442,6 +467,9 @@ export async function storageDestinationRoutes(app: FastifyInstance) {
           bucket: true,
           endpoint: true,
           additionalFlags: true,
+          retentionDays: true,
+          maxBackupCount: true,
+          objectPrefix: true,
           createdAt: true,
           updatedAt: true,
           server: {
@@ -616,3 +644,4 @@ export async function storageDestinationRoutes(app: FastifyInstance) {
     },
   );
 }
+

@@ -26,6 +26,7 @@ import { projectsRoutes } from "./routes/projects";
 import { gitProviderRoutes } from "./routes/git-providers";
 import { storageDestinationRoutes } from "./routes/storage-destinations";
 import { commitHistoryRoutes } from "./routes/commit-history";
+import { startS3StorageRetentionScheduler } from "./services/s3-storage-retention.service";
 
 const PORT = parseInt(process.env.PORT || "4000");
 const HOST = process.env.HOST || "0.0.0.0";
@@ -111,7 +112,7 @@ async function start() {
   await ensureDatabaseConnection();
   setDefaultSecurityHeaders();
 
-  // ── Plugins ──────────────────────────────────────────
+  // â”€â”€ Plugins â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   await app.register(cors, {
     origin: getCorsOrigins(),
     credentials: true,
@@ -142,7 +143,7 @@ async function start() {
 
   await app.register(websocket);
 
-  // ── Health check ──────────────────────────────────────
+  // â”€â”€ Health check â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   app.get("/health", { config: { rateLimit: false } }, async () => ({
     status: "ok",
     uptime: process.uptime(),
@@ -150,7 +151,7 @@ async function start() {
     version: process.env.NEXT_PUBLIC_VERSION || "unknown",
   }));
 
-  // ── API Routes ────────────────────────────────────────
+  // â”€â”€ API Routes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const API_PREFIX = "/api/v1";
 
   await app.register(authRoutes, { prefix: `${API_PREFIX}/auth` });
@@ -182,7 +183,7 @@ async function start() {
     prefix: `${API_PREFIX}/notifications`,
   });
 
-  // ── Error handler ─────────────────────────────────────
+  // â”€â”€ Error handler â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   app.setErrorHandler((error: FastifyError, _req, reply) => {
     app.log.error(error);
     const code = error.statusCode || 500;
@@ -193,13 +194,14 @@ async function start() {
     });
   });
 
-  // ── Start ─────────────────────────────────────────────
+  // â”€â”€ Start â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   try {
     await app.listen({ port: PORT, host: HOST });
+    startS3StorageRetentionScheduler();
     console.log(
-      `\n🚀 Doktainer Server Backend running on http://${HOST}:${PORT}`,
+      `\nðŸš€ Doktainer Server Backend running on http://${HOST}:${PORT}`,
     );
-    console.log(`📋 Health Check: http://localhost:${PORT}/health\n`);
+    console.log(`ðŸ“‹ Health Check: http://localhost:${PORT}/health\n`);
   } catch (err) {
     const error = err as NodeJS.ErrnoException;
     if (error.code === "EADDRINUSE") {
@@ -225,3 +227,4 @@ if (require.main === module) {
 }
 
 export { app, start };
+

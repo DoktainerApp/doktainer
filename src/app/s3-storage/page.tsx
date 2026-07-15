@@ -48,6 +48,10 @@ function toDestinationInput(
     additionalFlags: overrides?.additionalFlags ?? [
       ...destination.additionalFlags,
     ],
+    retentionDays: overrides?.retentionDays ?? destination.retentionDays,
+    maxBackupCount:
+      overrides?.maxBackupCount ?? destination.maxBackupCount,
+    objectPrefix: overrides?.objectPrefix ?? destination.objectPrefix,
     serverId: overrides?.serverId ?? destination.serverId,
   };
 }
@@ -123,6 +127,10 @@ export default function S3StoragePage() {
       !draft.region && "Region",
       !draft.bucket && "Bucket",
       !draft.name && "Destination Name",
+      draft.provider !== "awsS3" && !draft.endpoint && "Endpoint",
+      (draft.retentionDays || draft.maxBackupCount) &&
+        !draft.objectPrefix &&
+        "Object Prefix",
     ].filter(Boolean) as string[];
 
     if (missing.length > 0) {
@@ -175,6 +183,10 @@ export default function S3StoragePage() {
       !draft.region && "Region",
       !draft.bucket && "Bucket",
       !draft.name && "Destination Name",
+      draft.provider !== "awsS3" && !draft.endpoint && "Endpoint",
+      (draft.retentionDays || draft.maxBackupCount) &&
+        !draft.objectPrefix &&
+        "Object Prefix",
     ].filter(Boolean) as string[];
 
     if (missing.length > 0) {
@@ -333,3 +345,4 @@ export default function S3StoragePage() {
     </GuardedPage>
   );
 }
+

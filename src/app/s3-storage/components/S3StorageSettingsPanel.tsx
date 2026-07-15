@@ -136,6 +136,9 @@ function createDraft(): DestinationDraft {
     bucket: "",
     endpoint: "",
     additionalFlags: [],
+    retentionDays: null,
+    maxBackupCount: null,
+    objectPrefix: "",
     serverId: null,
   };
 }
@@ -157,7 +160,7 @@ function getDestinationSummary(destination: DestinationDraft) {
   }
 
   return parts.length > 0
-    ? parts.join(" • ")
+    ? parts.join(" â€¢ ")
     : "Bucket dan region belum lengkap";
 }
 
@@ -241,6 +244,9 @@ export default function S3StorageSettingsPanel({
       bucket: destination.bucket,
       endpoint: destination.endpoint,
       additionalFlags: [...destination.additionalFlags],
+      retentionDays: destination.retentionDays,
+      maxBackupCount: destination.maxBackupCount,
+      objectPrefix: destination.objectPrefix,
       serverId: destination.serverId,
     });
   };
@@ -612,379 +618,618 @@ export default function S3StorageSettingsPanel({
             >
               <X size={22} />
             </button>
-          <div
-            className="modal animate-slide-in"
-            style={{
-              width: "min(780px, 100%)",
-              maxHeight: "calc(100vh - 40px)",
-              maxWidth: 1100,
-              overflowY: "auto",
-              padding: 24,
-            }}
-          >
-            <div
-              style={{
-                display: "flex",
-                gap: 12,
-                alignItems: "flex-start",
-                marginBottom: 22,
-                paddingRight: 36,
-              }}
-            >
-              <div>
-                <h3
-                  style={{
-                    fontSize: 16,
-                    fontWeight: 700,
-                    color: "var(--text-primary)",
-                  }}
-                >
-                  {editingId ? "Update Destination" : "Add Destination"}
-                </h3>
-                <p
-                  style={{
-                    fontSize: 12,
-                    color: "var(--text-muted)",
-                    marginTop: 6,
-                  }}
-                >
-                  Set the destination name, bucket, and target server that will
-                  use it.
-                </p>
+            <div className="modal modal-wide animate-slide-in">
+              <div
+                style={{
+                  display: "flex",
+                  gap: 12,
+                  alignItems: "flex-start",
+                  marginBottom: 22,
+                  paddingRight: 36,
+                }}
+              >
+                <div>
+                  <h3
+                    style={{
+                      fontSize: 16,
+                      fontWeight: 700,
+                      color: "var(--text-primary)",
+                    }}
+                  >
+                    {editingId ? "Update Destination" : "Add Destination"}
+                  </h3>
+                  <p
+                    style={{
+                      fontSize: 12,
+                      color: "var(--text-muted)",
+                      marginTop: 6,
+                    }}
+                  >
+                    Set the destination name, bucket, and target server that
+                    will use it.
+                  </p>
+                </div>
               </div>
-            </div>
 
-            <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-              <section>
-                <p
-                  style={{
-                    fontSize: 13,
-                    fontWeight: 700,
-                    color: "var(--text-primary)",
-                    marginBottom: 12,
-                  }}
-                >
-                  Provider Type
-                </p>
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-                    gap: 10,
-                  }}
-                >
-                  {PROVIDER_OPTIONS.map((option) => {
-                    const Icon = option.icon;
-                    const selected = draft.provider === option.value;
+              <div
+                style={{ display: "flex", flexDirection: "column", gap: 20 }}
+              >
+                <section>
+                  <p
+                    style={{
+                      fontSize: 13,
+                      fontWeight: 700,
+                      color: "var(--text-primary)",
+                      marginBottom: 12,
+                    }}
+                  >
+                    Provider Type
+                  </p>
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns:
+                        "repeat(auto-fit, minmax(180px, 1fr))",
+                      gap: 10,
+                    }}
+                  >
+                    {PROVIDER_OPTIONS.map((option) => {
+                      const Icon = option.icon;
+                      const selected = draft.provider === option.value;
 
-                    return (
-                      <button
-                        key={option.value}
-                        type="button"
-                        onClick={() =>
+                      return (
+                        <button
+                          key={option.value}
+                          type="button"
+                          onClick={() =>
+                            setDraft((current) =>
+                              current
+                                ? {
+                                    ...current,
+                                    provider: option.value,
+                                    endpoint:
+                                      option.value === "awsS3"
+                                        ? ""
+                                        : current.endpoint,
+                                  }
+                                : current,
+                            )
+                          }
+                          style={{
+                            textAlign: "left",
+                            padding: 14,
+                            borderRadius: 14,
+                            border: selected
+                              ? `1px solid ${option.color}`
+                              : "1px solid var(--border)",
+                            background: selected
+                              ? `${option.color}12`
+                              : "var(--bg-card)",
+                            display: "flex",
+                            gap: 12,
+                            alignItems: "flex-start",
+                            cursor: "pointer",
+                          }}
+                        >
+                          <div
+                            style={{
+                              width: 36,
+                              height: 36,
+                              borderRadius: 10,
+                              background: `${option.color}18`,
+                              border: `1px solid ${option.color}33`,
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              flexShrink: 0,
+                            }}
+                          >
+                            <Icon size={15} style={{ color: option.color }} />
+                          </div>
+                          <div>
+                            <p
+                              style={{
+                                fontSize: 13,
+                                fontWeight: 600,
+                                color: "var(--text-primary)",
+                              }}
+                            >
+                              {option.label}
+                            </p>
+                            <p
+                              style={{
+                                fontSize: 11,
+                                color: "var(--text-muted)",
+                                marginTop: 4,
+                              }}
+                            >
+                              {option.description}
+                            </p>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </section>
+
+                <section>
+                  <div
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 6,
+                      marginBottom: 12,
+                    }}
+                  >
+                    <p
+                      style={{
+                        fontSize: 13,
+                        fontWeight: 700,
+                        color: "var(--text-primary)",
+                      }}
+                    >
+                      Lifecycle & Retention
+                    </p>
+                    <p
+                      style={{
+                        fontSize: 11,
+                        color: "var(--text-muted)",
+                      }}
+                    >
+                      Automatically remove old objects from this destination.
+                      Retention is disabled when both limits are empty.
+                    </p>
+                  </div>
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns:
+                        "repeat(auto-fit, minmax(min(100%, 280px), 1fr))",
+                      gap: 14,
+                    }}
+                  >
+                    <div>
+                      <FieldLabel>Retention days</FieldLabel>
+                      <input
+                        className="input"
+                        type="number"
+                        min={1}
+                        max={3650}
+                        value={draft.retentionDays ?? ""}
+                        onChange={(event) =>
                           setDraft((current) =>
                             current
                               ? {
                                   ...current,
-                                  provider: option.value,
-                                  endpoint:
-                                    option.value === "awsS3"
-                                      ? ""
-                                      : current.endpoint,
+                                  retentionDays: event.target.value
+                                    ? Number(event.target.value)
+                                    : null,
                                 }
                               : current,
                           )
                         }
-                        style={{
-                          textAlign: "left",
-                          padding: 14,
-                          borderRadius: 14,
-                          border: selected
-                            ? `1px solid ${option.color}`
-                            : "1px solid var(--border)",
-                          background: selected
-                            ? `${option.color}12`
-                            : "var(--bg-card)",
-                          display: "flex",
-                          gap: 12,
-                          alignItems: "flex-start",
-                          cursor: "pointer",
-                        }}
-                      >
-                        <div
-                          style={{
-                            width: 36,
-                            height: 36,
-                            borderRadius: 10,
-                            background: `${option.color}18`,
-                            border: `1px solid ${option.color}33`,
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            flexShrink: 0,
-                          }}
-                        >
-                          <Icon size={15} style={{ color: option.color }} />
-                        </div>
-                        <div>
-                          <p
-                            style={{
-                              fontSize: 13,
-                              fontWeight: 600,
-                              color: "var(--text-primary)",
-                            }}
-                          >
-                            {option.label}
-                          </p>
-                          <p
-                            style={{
-                              fontSize: 11,
-                              color: "var(--text-muted)",
-                              marginTop: 4,
-                            }}
-                          >
-                            {option.description}
-                          </p>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              </section>
-
-              <section>
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    gap: 12,
-                    marginBottom: 12,
-                  }}
-                >
-                  <div>
-                    <p
-                      style={{
-                        fontSize: 13,
-                        fontWeight: 700,
-                        color: "var(--text-primary)",
-                      }}
-                    >
-                      Basic Information
-                    </p>
-                    <p
-                      style={{
-                        fontSize: 11,
-                        color: "var(--text-muted)",
-                        marginTop: 4,
-                      }}
-                    >
-                      Set the destination name, bucket, and target server that
-                      will use it.
-                    </p>
-                  </div>
-                  <StatusButton
-                    active={draft.enabled}
-                    onClick={() =>
-                      setDraft((current) =>
-                        current
-                          ? { ...current, enabled: !current.enabled }
-                          : current,
-                      )
-                    }
-                  />
-                </div>
-
-                <div
-                  style={{ display: "flex", flexDirection: "column", gap: 14 }}
-                >
-                  <div>
-                    <FieldLabel>Destination name</FieldLabel>
-                    <input
-                      className="input"
-                      value={draft.name}
-                      onChange={(event) =>
-                        setDraft((current) =>
-                          current
-                            ? { ...current, name: event.target.value }
-                            : current,
-                        )
-                      }
-                      placeholder="Example: Backup Singapore, R2 Europe, Archive Internal"
-                    />
-                  </div>
-
-                  <div>
-                    <FieldLabel>Target server</FieldLabel>
-                    <select
-                      className="input"
-                      value={draft.serverId ?? ""}
-                      onChange={(event) =>
-                        setDraft((current) =>
-                          current
-                            ? {
-                                ...current,
-                                serverId: event.target.value || null,
-                              }
-                            : current,
-                        )
-                      }
-                    >
-                      <option value="">All accessible servers</option>
-                      {servers.map((server) => (
-                        <option key={server.id} value={server.id}>
-                          {server.name} ({server.ip})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-              </section>
-
-              <section>
-                <p
-                  style={{
-                    fontSize: 13,
-                    fontWeight: 700,
-                    color: "var(--text-primary)",
-                    marginBottom: 12,
-                  }}
-                >
-                  Connection Settings
-                </p>
-                <div
-                  style={{ display: "flex", flexDirection: "column", gap: 14 }}
-                >
-                  <div>
-                    <FieldLabel>Access Key ID</FieldLabel>
-                    <div style={{ position: "relative" }}>
+                        placeholder="30"
+                      />
+                    </div>
+                    <div>
+                      <FieldLabel>Maximum backup count</FieldLabel>
                       <input
                         className="input"
-                        autoComplete="off"
-                        value={draft.accessKeyId}
+                        type="number"
+                        min={1}
+                        max={10000}
+                        value={draft.maxBackupCount ?? ""}
                         onChange={(event) =>
                           setDraft((current) =>
                             current
-                              ? { ...current, accessKeyId: event.target.value }
+                              ? {
+                                  ...current,
+                                  maxBackupCount: event.target.value
+                                    ? Number(event.target.value)
+                                    : null,
+                                }
                               : current,
                           )
                         }
-                        placeholder="AKIA... or provider interoperability key"
+                        placeholder="10"
                       />
-                      <Key
-                        size={14}
+                    </div>
+                    <div style={{ gridColumn: "1 / -1" }}>
+                      <FieldLabel>Object prefix / folder</FieldLabel>
+                      <input
+                        className="input"
+                        value={draft.objectPrefix ?? ""}
+                        onChange={(event) =>
+                          setDraft((current) =>
+                            current
+                              ? { ...current, objectPrefix: event.target.value }
+                              : current,
+                          )
+                        }
+                        placeholder="doktainer/backups/production"
+                      />
+                      <p
                         style={{
-                          position: "absolute",
-                          right: 12,
-                          top: 12,
+                          fontSize: 11,
                           color: "var(--text-muted)",
+                          marginTop: 5,
                         }}
+                      >
+                        Required when retention or maximum count is enabled.
+                      </p>
+                    </div>
+                  </div>
+                </section>
+
+                <section>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      gap: 12,
+                      marginBottom: 12,
+                    }}
+                  >
+                    <div>
+                      <p
+                        style={{
+                          fontSize: 13,
+                          fontWeight: 700,
+                          color: "var(--text-primary)",
+                        }}
+                      >
+                        Basic Information
+                      </p>
+                      <p
+                        style={{
+                          fontSize: 11,
+                          color: "var(--text-muted)",
+                          marginTop: 4,
+                        }}
+                      >
+                        Set the destination name, bucket, and target server that
+                        will use it.
+                      </p>
+                    </div>
+                    <StatusButton
+                      active={draft.enabled}
+                      onClick={() =>
+                        setDraft((current) =>
+                          current
+                            ? { ...current, enabled: !current.enabled }
+                            : current,
+                        )
+                      }
+                    />
+                  </div>
+
+                  <div
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 14,
+                    }}
+                  >
+                    <div>
+                      <FieldLabel>Destination name</FieldLabel>
+                      <input
+                        className="input"
+                        value={draft.name}
+                        onChange={(event) =>
+                          setDraft((current) =>
+                            current
+                              ? { ...current, name: event.target.value }
+                              : current,
+                          )
+                        }
+                        placeholder="Example: Backup Singapore, R2 Europe, Archive Internal"
+                      />
+                    </div>
+
+                    <div>
+                      <FieldLabel>Target server</FieldLabel>
+                      <select
+                        className="input"
+                        value={draft.serverId ?? ""}
+                        onChange={(event) =>
+                          setDraft((current) =>
+                            current
+                              ? {
+                                  ...current,
+                                  serverId: event.target.value || null,
+                                }
+                              : current,
+                          )
+                        }
+                      >
+                        <option value="">All accessible servers</option>
+                        {servers.map((server) => (
+                          <option key={server.id} value={server.id}>
+                            {server.name} ({server.ip})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                </section>
+
+                <section>
+                  <p
+                    style={{
+                      fontSize: 13,
+                      fontWeight: 700,
+                      color: "var(--text-primary)",
+                      marginBottom: 12,
+                    }}
+                  >
+                    Connection Settings
+                  </p>
+                  <div
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 14,
+                    }}
+                  >
+                    <div>
+                      <FieldLabel>Access Key ID</FieldLabel>
+                      <div style={{ position: "relative" }}>
+                        <input
+                          className="input"
+                          autoComplete="off"
+                          value={draft.accessKeyId}
+                          onChange={(event) =>
+                            setDraft((current) =>
+                              current
+                                ? {
+                                    ...current,
+                                    accessKeyId: event.target.value,
+                                  }
+                                : current,
+                            )
+                          }
+                          placeholder="AKIA... or provider interoperability key"
+                        />
+                        <Key
+                          size={14}
+                          style={{
+                            position: "absolute",
+                            right: 12,
+                            top: 12,
+                            color: "var(--text-muted)",
+                          }}
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <FieldLabel>
+                        Secret Access Key
+                        {draft.hasSecretAccessKey
+                          ? " (leave blank to keep existing key)"
+                          : ""}
+                      </FieldLabel>
+                      <input
+                        className="input"
+                        type="password"
+                        autoComplete="new-password"
+                        value={draft.secretAccessKey ?? ""}
+                        onChange={(event) =>
+                          setDraft((current) =>
+                            current
+                              ? {
+                                  ...current,
+                                  secretAccessKey: event.target.value,
+                                  hasSecretAccessKey:
+                                    current.hasSecretAccessKey ||
+                                    Boolean(event.target.value.trim()),
+                                }
+                              : current,
+                          )
+                        }
+                      />
+                    </div>
+
+                    <div>
+                      <FieldLabel>Bucket</FieldLabel>
+                      <input
+                        className="input"
+                        value={draft.bucket}
+                        onChange={(event) =>
+                          setDraft((current) =>
+                            current
+                              ? { ...current, bucket: event.target.value }
+                              : current,
+                          )
+                        }
+                        placeholder="doktainer-backups"
+                      />
+                    </div>
+
+                    <div>
+                      <FieldLabel>Region</FieldLabel>
+                      <input
+                        className="input"
+                        value={draft.region}
+                        onChange={(event) =>
+                          setDraft((current) =>
+                            current
+                              ? { ...current, region: event.target.value }
+                              : current,
+                          )
+                        }
+                        placeholder="ap-southeast-1"
+                      />
+                    </div>
+
+                    <div>
+                      <FieldLabel>
+                        Endpoint
+                        {draft.provider === "awsS3"
+                          ? " (optional for AWS S3)"
+                          : " (required for S3-compatible providers)"}
+                      </FieldLabel>
+                      <input
+                        className="input"
+                        value={draft.endpoint ?? ""}
+                        onChange={(event) =>
+                          setDraft((current) =>
+                            current
+                              ? { ...current, endpoint: event.target.value }
+                              : current,
+                          )
+                        }
+                        placeholder="https://<account>.r2.cloudflarestorage.com"
                       />
                     </div>
                   </div>
+                </section>
 
-                  <div>
-                    <FieldLabel>
-                      Secret Access Key
-                      {draft.hasSecretAccessKey
-                        ? " (leave blank to keep existing key)"
-                        : ""}
-                    </FieldLabel>
-                    <input
-                      className="input"
-                      type="password"
-                      autoComplete="new-password"
-                      value={draft.secretAccessKey ?? ""}
-                      onChange={(event) =>
+                <section>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      gap: 12,
+                      marginBottom: 12,
+                    }}
+                  >
+                    <div>
+                      <p
+                        style={{
+                          fontSize: 13,
+                          fontWeight: 700,
+                          color: "var(--text-primary)",
+                        }}
+                      >
+                        Additional Flags
+                      </p>
+                      <p
+                        style={{
+                          fontSize: 11,
+                          color: "var(--text-muted)",
+                          marginTop: 4,
+                        }}
+                      >
+                        Save additional flags for runtime backup needs or
+                        provider compatibility.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      onClick={() =>
                         setDraft((current) =>
                           current
                             ? {
                                 ...current,
-                                secretAccessKey: event.target.value,
-                                hasSecretAccessKey:
-                                  current.hasSecretAccessKey ||
-                                  Boolean(event.target.value.trim()),
+                                additionalFlags: [
+                                  ...current.additionalFlags,
+                                  "",
+                                ],
                               }
                             : current,
                         )
                       }
-                    />
+                      style={{ padding: "7px 12px", fontSize: 12 }}
+                    >
+                      <Plus size={13} /> Add Flag
+                    </button>
                   </div>
 
-                  <div>
-                    <FieldLabel>Bucket</FieldLabel>
-                    <input
-                      className="input"
-                      value={draft.bucket}
-                      onChange={(event) =>
-                        setDraft((current) =>
-                          current
-                            ? { ...current, bucket: event.target.value }
-                            : current,
-                        )
-                      }
-                      placeholder="doktainer-backups"
-                    />
-                  </div>
+                  <div
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 10,
+                    }}
+                  >
+                    {draft.additionalFlags.length === 0 ? (
+                      <div
+                        style={{
+                          padding: 14,
+                          borderRadius: 12,
+                          border: "1px dashed var(--border)",
+                          background: "var(--bg-input)",
+                          fontSize: 12,
+                          color: "var(--text-muted)",
+                        }}
+                      >
+                        No additional flags.
+                      </div>
+                    ) : null}
 
-                  <div>
-                    <FieldLabel>Region</FieldLabel>
-                    <input
-                      className="input"
-                      value={draft.region}
-                      onChange={(event) =>
-                        setDraft((current) =>
-                          current
-                            ? { ...current, region: event.target.value }
-                            : current,
-                        )
-                      }
-                      placeholder="ap-southeast-1"
-                    />
-                  </div>
+                    {draft.additionalFlags.map((flag, index) => (
+                      <div
+                        key={`flag-${index}`}
+                        style={{
+                          display: "flex",
+                          gap: 10,
+                          alignItems: "center",
+                        }}
+                      >
+                        <input
+                          className="input"
+                          value={flag}
+                          onChange={(event) =>
+                            setDraft((current) => {
+                              if (!current) return current;
 
-                  <div>
-                    <FieldLabel>
-                      Endpoint
-                      {draft.provider === "awsS3"
-                        ? " (optional for AWS S3)"
-                        : " (required for S3-compatible providers)"}
-                    </FieldLabel>
-                    <input
-                      className="input"
-                      value={draft.endpoint ?? ""}
-                      onChange={(event) =>
-                        setDraft((current) =>
-                          current
-                            ? { ...current, endpoint: event.target.value }
-                            : current,
-                        )
-                      }
-                      placeholder="https://<account>.r2.cloudflarestorage.com"
-                    />
+                              const nextFlags = [...current.additionalFlags];
+                              nextFlags[index] = event.target.value;
+                              return { ...current, additionalFlags: nextFlags };
+                            })
+                          }
+                          placeholder="Contoh: forcePathStyle=true"
+                        />
+                        <button
+                          type="button"
+                          className="btn btn-ghost"
+                          onClick={() =>
+                            setDraft((current) => {
+                              if (!current) return current;
+                              return {
+                                ...current,
+                                additionalFlags: current.additionalFlags.filter(
+                                  (_, flagIndex) => flagIndex !== index,
+                                ),
+                              };
+                            })
+                          }
+                          style={{
+                            padding: "7px 12px",
+                            fontSize: 12,
+                            color: "#ef4444",
+                          }}
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    ))}
                   </div>
-                </div>
-              </section>
+                </section>
 
-              <section>
                 <div
                   style={{
                     display: "flex",
                     justifyContent: "space-between",
-                    alignItems: "center",
                     gap: 12,
-                    marginBottom: 12,
+                    alignItems: "center",
+                    flexWrap: "wrap",
+                    paddingTop: 6,
                   }}
                 >
                   <div>
                     <p
                       style={{
-                        fontSize: 13,
-                        fontWeight: 700,
+                        fontSize: 12,
+                        fontWeight: 600,
                         color: "var(--text-primary)",
                       }}
                     >
-                      Additional Flags
+                      {getProviderMeta(draft.provider).label}
                     </p>
                     <p
                       style={{
@@ -993,156 +1238,45 @@ export default function S3StorageSettingsPanel({
                         marginTop: 4,
                       }}
                     >
-                      Save additional flags for runtime backup needs or provider
-                      compatibility.
+                      {getDestinationSummary(draft)}
                     </p>
                   </div>
-                  <button
-                    type="button"
-                    className="btn btn-ghost"
-                    onClick={() =>
-                      setDraft((current) =>
-                        current
-                          ? {
-                              ...current,
-                              additionalFlags: [...current.additionalFlags, ""],
-                            }
-                          : current,
-                      )
-                    }
-                    style={{ padding: "7px 12px", fontSize: 12 }}
-                  >
-                    <Plus size={13} /> Add Flag
-                  </button>
-                </div>
 
-                <div
-                  style={{ display: "flex", flexDirection: "column", gap: 10 }}
-                >
-                  {draft.additionalFlags.length === 0 ? (
-                    <div
-                      style={{
-                        padding: 14,
-                        borderRadius: 12,
-                        border: "1px dashed var(--border)",
-                        background: "var(--bg-input)",
-                        fontSize: 12,
-                        color: "var(--text-muted)",
-                      }}
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      onClick={() => void onVerifyDestination(draft)}
+                      disabled={
+                        actionLoading === `verify-${draft.id ?? "draft"}`
+                      }
+                      style={{ padding: "8px 14px", fontSize: 12 }}
                     >
-                      No additional flags.
-                    </div>
-                  ) : null}
-
-                  {draft.additionalFlags.map((flag, index) => (
-                    <div
-                      key={`flag-${index}`}
-                      style={{ display: "flex", gap: 10, alignItems: "center" }}
+                      {actionLoading === `verify-${draft.id ?? "draft"}` ? (
+                        <Loader2 size={13} className="animate-spin" />
+                      ) : (
+                        <TestTube2 size={13} />
+                      )}
+                      Verify Connection
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      onClick={() => void saveDraft()}
+                      disabled={
+                        savingDestinationId === (draft.id ?? "new-destination")
+                      }
+                      style={{ padding: "8px 14px", fontSize: 12 }}
                     >
-                      <input
-                        className="input"
-                        value={flag}
-                        onChange={(event) =>
-                          setDraft((current) => {
-                            if (!current) return current;
-
-                            const nextFlags = [...current.additionalFlags];
-                            nextFlags[index] = event.target.value;
-                            return { ...current, additionalFlags: nextFlags };
-                          })
-                        }
-                        placeholder="Contoh: forcePathStyle=true"
-                      />
-                      <button
-                        type="button"
-                        className="btn btn-ghost"
-                        onClick={() =>
-                          setDraft((current) => {
-                            if (!current) return current;
-                            return {
-                              ...current,
-                              additionalFlags: current.additionalFlags.filter(
-                                (_, flagIndex) => flagIndex !== index,
-                              ),
-                            };
-                          })
-                        }
-                        style={{
-                          padding: "7px 12px",
-                          fontSize: 12,
-                          color: "#ef4444",
-                        }}
-                      >
-                        <Trash2 size={13} />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </section>
-
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  gap: 12,
-                  alignItems: "center",
-                  flexWrap: "wrap",
-                  paddingTop: 6,
-                }}
-              >
-                <div>
-                  <p
-                    style={{
-                      fontSize: 12,
-                      fontWeight: 600,
-                      color: "var(--text-primary)",
-                    }}
-                  >
-                    {getProviderMeta(draft.provider).label}
-                  </p>
-                  <p
-                    style={{
-                      fontSize: 11,
-                      color: "var(--text-muted)",
-                      marginTop: 4,
-                    }}
-                  >
-                    {getDestinationSummary(draft)}
-                  </p>
-                </div>
-
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <button
-                    type="button"
-                    className="btn btn-ghost"
-                    onClick={() => void onVerifyDestination(draft)}
-                    disabled={actionLoading === `verify-${draft.id ?? "draft"}`}
-                    style={{ padding: "8px 14px", fontSize: 12 }}
-                  >
-                    {actionLoading === `verify-${draft.id ?? "draft"}` ? (
-                      <Loader2 size={13} className="animate-spin" />
-                    ) : (
-                      <TestTube2 size={13} />
-                    )}
-                    Verify Connection
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-primary"
-                    onClick={() => void saveDraft()}
-                    disabled={
-                      savingDestinationId === (draft.id ?? "new-destination")
-                    }
-                    style={{ padding: "8px 14px", fontSize: 12 }}
-                  >
-                    {savingDestinationId === (draft.id ?? "new-destination") ? (
-                      <Loader2 size={13} className="animate-spin" />
-                    ) : null}
-                    {editingId ? "Update Destination" : "Create Destination"}
-                  </button>
+                      {savingDestinationId ===
+                      (draft.id ?? "new-destination") ? (
+                        <Loader2 size={13} className="animate-spin" />
+                      ) : null}
+                      {editingId ? "Update Destination" : "Create Destination"}
+                    </button>
+                  </div>
                 </div>
               </div>
-            </div>
             </div>
           </div>
         </div>
@@ -1150,3 +1284,4 @@ export default function S3StorageSettingsPanel({
     </>
   );
 }
+

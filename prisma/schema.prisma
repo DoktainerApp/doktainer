@@ -219,6 +219,9 @@ model UserStorageDestination {
   bucket             String
   endpoint           String?
   additionalFlags    String[]          @default([])
+  retentionDays      Int?
+  maxBackupCount     Int?
+  objectPrefix       String?
   createdAt          DateTime          @default(now())
   updatedAt          DateTime          @updatedAt
 
@@ -746,6 +749,10 @@ model Backup {
   target    String       @default("Local")
   sizeMb    Float?
   filePath  String?
+  storageBucket String?
+  storageKey String?
+  storageEtag String?
+  storageDestinationId String?
   status    BackupStatus @default(PENDING)
   error     String?
   createdAt DateTime     @default(now())
@@ -774,3 +781,4 @@ enum BackupStatus {
   COMPLETED
   FAILED
 }
+
