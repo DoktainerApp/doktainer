@@ -1001,16 +1001,14 @@ function InstallModal({
   if (!mounted) return null;
 
   return createPortal(
-    <div className="modal-overlay">
-      <div
-        className="modal-shell"
-        style={{ width: "min(1100px, calc(100% - 48px))", maxWidth: 1100 }}
-      >
+    <div className="modal-overlay modal-overlay-wide">
+      <div className="modal-shell modal-shell-wide">
         <button
           type="button"
           onClick={onClose}
           className="modal-close"
-          aria-label="Close install modal"
+          aria-label="Close modal"
+          title="Close"
         >
           <X size={22} />
         </button>
@@ -1057,624 +1055,645 @@ function InstallModal({
             </div>
           </div>
 
-        <div
-          style={{
-            display: "flex",
-            gap: 8,
-            flexWrap: "wrap",
-            marginBottom: 18,
-          }}
-        >
-          <button
-            type="button"
-            onClick={() => setMode("template")}
-            disabled={!hasTemplate}
-            className="btn"
+          <div
             style={{
-              background:
-                mode === "template"
-                  ? "rgba(59,130,246,0.12)"
-                  : "var(--bg-card)",
-              color: mode === "template" ? "#3b82f6" : "var(--text-muted)",
-              borderColor:
-                mode === "template" ? "rgba(59,130,246,0.35)" : "var(--border)",
-              opacity: hasTemplate ? 1 : 0.5,
+              display: "flex",
+              gap: 8,
+              flexWrap: "wrap",
+              marginBottom: 18,
             }}
           >
-            <Boxes size={14} /> Template Install
-          </button>
-          <button
-            type="button"
-            onClick={() => setMode("custom")}
-            className="btn"
-            style={{
-              background:
-                mode === "custom" ? "rgba(15,118,110,0.12)" : "var(--bg-card)",
-              color: mode === "custom" ? "#0f766e" : "var(--text-muted)",
-              borderColor:
-                mode === "custom" ? "rgba(15,118,110,0.35)" : "var(--border)",
-            }}
-          >
-            <Settings2 size={14} /> Custom Install
-          </button>
+            <button
+              type="button"
+              onClick={() => setMode("template")}
+              disabled={!hasTemplate}
+              className="btn"
+              style={{
+                background:
+                  mode === "template"
+                    ? "rgba(59,130,246,0.12)"
+                    : "var(--bg-card)",
+                color: mode === "template" ? "#3b82f6" : "var(--text-muted)",
+                borderColor:
+                  mode === "template"
+                    ? "rgba(59,130,246,0.35)"
+                    : "var(--border)",
+                opacity: hasTemplate ? 1 : 0.5,
+              }}
+            >
+              <Boxes size={14} /> Template Install
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode("custom")}
+              className="btn"
+              style={{
+                background:
+                  mode === "custom"
+                    ? "rgba(15,118,110,0.12)"
+                    : "var(--bg-card)",
+                color: mode === "custom" ? "#0f766e" : "var(--text-muted)",
+                borderColor:
+                  mode === "custom" ? "rgba(15,118,110,0.35)" : "var(--border)",
+              }}
+            >
+              <Settings2 size={14} /> Custom Install
+            </button>
+            {template &&
+              template.presets &&
+              template.presets.length > 0 &&
+              mode === "template" && (
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    marginLeft: "auto",
+                    minWidth: 260,
+                  }}
+                >
+                  <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                    Preset
+                  </span>
+                  <select
+                    className="input"
+                    value={presetId}
+                    onChange={(e) => setPresetId(e.target.value)}
+                    style={{ flex: 1 }}
+                  >
+                    <option value="">Default Template</option>
+                    {template.presets.map((preset) => (
+                      <option key={preset.id} value={preset.id}>
+                        {preset.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+          </div>
+
           {template &&
-            template.presets &&
-            template.presets.length > 0 &&
-            mode === "template" && (
+            mode === "template" &&
+            presetId &&
+            getTemplatePreset(template, presetId) && (
               <div
                 style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                  marginLeft: "auto",
-                  minWidth: 260,
+                  marginBottom: 16,
+                  padding: "10px 14px",
+                  borderRadius: 10,
+                  background: `${visual.color}10`,
+                  border: `1px solid ${visual.color}25`,
+                  fontSize: 12,
+                  color: "var(--text-secondary)",
                 }}
               >
-                <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                  Preset
+                {getTemplatePreset(template, presetId)?.desc}
+              </div>
+            )}
+
+          {error && (
+            <div
+              style={{
+                background: "rgba(239,68,68,0.1)",
+                border: "1px solid rgba(239,68,68,0.3)",
+                borderRadius: 8,
+                padding: "10px 14px",
+                marginBottom: 14,
+                fontSize: 13,
+                color: "#ef4444",
+              }}
+            >
+              {error}
+            </div>
+          )}
+
+          {serverId && (
+            <div
+              style={{
+                marginBottom: 14,
+                padding: "12px 14px",
+                borderRadius: 10,
+                background: dockerStatusLoading
+                  ? "rgba(59,130,246,0.1)"
+                  : dockerStatus?.available
+                    ? "rgba(16,185,129,0.1)"
+                    : dockerStatus
+                      ? "rgba(245,158,11,0.1)"
+                      : "rgba(100,116,139,0.1)",
+                border: dockerStatusLoading
+                  ? "1px solid rgba(59,130,246,0.25)"
+                  : dockerStatus?.available
+                    ? "1px solid rgba(16,185,129,0.25)"
+                    : dockerStatus
+                      ? "1px solid rgba(245,158,11,0.25)"
+                      : "1px solid rgba(100,116,139,0.25)",
+                fontSize: 12,
+                color: "var(--text-secondary)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 12,
+                flexWrap: "wrap",
+              }}
+            >
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                <span style={{ fontWeight: 700, color: "var(--text-primary)" }}>
+                  {dockerStatusLoading
+                    ? "Checking Docker runtime..."
+                    : dockerStatus?.available
+                      ? // ? `Docker ready${dockerStatus.version ? ` · v${dockerStatus.version}` : ""}`
+                        `Yeay! Docker ready installed on this server.`
+                      : dockerStatus
+                        ? "Docker not ready"
+                        : "Docker not checked yet"}
                 </span>
+                <span>
+                  {dockerStatusLoading
+                    ? "Verifying whether this server can run Docker app installs."
+                    : dockerNotice ||
+                      dockerStatus?.reason ||
+                      "App Installer will validate Docker on the target server when you submit the install."}
+                </span>
+              </div>
+              {!dockerStatusLoading &&
+                !dockerStatus?.available &&
+                dockerStatus?.canInstall && (
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={() => void handleInstallDocker()}
+                    disabled={dockerInstallLoading}
+                    style={{
+                      fontSize: 12,
+                      background: "#0f766e",
+                      borderColor: "#0f766e",
+                    }}
+                  >
+                    {dockerInstallLoading ? (
+                      <Loader2 size={12} className="animate-spin" />
+                    ) : (
+                      <Download size={12} />
+                    )}
+                    Install Docker
+                  </button>
+                )}
+            </div>
+          )}
+
+          <form
+            onSubmit={submit}
+            style={{ display: "flex", flexDirection: "column", gap: 18 }}
+          >
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
+                gap: 14,
+              }}
+            >
+              <div>
+                <InputLabel>Target Server *</InputLabel>
                 <select
                   className="input"
-                  value={presetId}
-                  onChange={(e) => setPresetId(e.target.value)}
-                  style={{ flex: 1 }}
+                  value={serverId}
+                  onChange={(e) => {
+                    setServerId(e.target.value);
+                    setEnvironmentId("");
+                    setNetworkId("");
+                    setDockerNotice("");
+                  }}
+                  required
+                  style={{ width: "100%" }}
                 >
-                  <option value="">Default Template</option>
-                  {template.presets.map((preset) => (
-                    <option key={preset.id} value={preset.id}>
-                      {preset.name}
+                  <option value="">Select server</option>
+                  {serverList.map((server) => (
+                    <option key={server.id} value={server.id}>
+                      {server.name} ({server.ip})
                     </option>
                   ))}
                 </select>
               </div>
-            )}
-        </div>
+              <div>
+                <InputLabel>Project Environment *</InputLabel>
+                <SearchableSelect
+                  value={environmentId}
+                  options={environmentSelectOptions}
+                  onChange={setEnvironmentId}
+                  placeholder={
+                    projectsLoading
+                      ? "Loading environments..."
+                      : availableEnvironments.length > 0
+                        ? "No environment selected"
+                        : "No environment mapped to this server"
+                  }
+                  searchPlaceholder="Search environment..."
+                  emptyText="No environment found"
+                  disabled={!serverId || projectsLoading}
+                />
+              </div>
+            </div>
 
-        {template &&
-          mode === "template" &&
-          presetId &&
-          getTemplatePreset(template, presetId) && (
             <div
               style={{
-                marginBottom: 16,
-                padding: "10px 14px",
-                borderRadius: 10,
-                background: `${visual.color}10`,
-                border: `1px solid ${visual.color}25`,
-                fontSize: 12,
-                color: "var(--text-secondary)",
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
+                gap: 14,
               }}
             >
-              {getTemplatePreset(template, presetId)?.desc}
+              <div>
+                <InputLabel>App Name *</InputLabel>
+                <input
+                  className="input"
+                  value={appName}
+                  onChange={(e) => setAppName(e.target.value)}
+                  placeholder="Example: n8n workflow"
+                  style={{ width: "100%" }}
+                />
+              </div>
+              <div>
+                <InputLabel>Container Name</InputLabel>
+                <input
+                  className="input"
+                  value={containerName}
+                  onChange={(e) => setContainerName(e.target.value)}
+                  placeholder="Leave blank to auto-generate"
+                  style={{ width: "100%" }}
+                />
+              </div>
+              <div>
+                <InputLabel>Docker Network</InputLabel>
+                <SearchableSelect
+                  value={networkId}
+                  options={networkSelectOptions}
+                  onChange={setNetworkId}
+                  placeholder={
+                    networksLoading
+                      ? "Loading networks..."
+                      : network.trim()
+                        ? `Template/default network (${network.trim()})`
+                        : "Bridge default / no explicit network"
+                  }
+                  searchPlaceholder="Search network..."
+                  emptyText="No network found"
+                  disabled={!serverId || networksLoading}
+                />
+                {networksError ? (
+                  <p
+                    style={{
+                      marginTop: 6,
+                      fontSize: 11,
+                      color: "#fca5a5",
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    {networksError}
+                  </p>
+                ) : null}
+              </div>
+              <div>
+                <InputLabel>Docker Image *</InputLabel>
+                <input
+                  className="input"
+                  value={imageName}
+                  onChange={(e) => setImageName(e.target.value)}
+                  placeholder="n8nio/n8n"
+                  style={{ width: "100%" }}
+                />
+              </div>
+              <div>
+                <InputLabel>Tag</InputLabel>
+                <input
+                  className="input"
+                  value={imageTag}
+                  onChange={(e) => setImageTag(e.target.value)}
+                  placeholder="latest"
+                  style={{ width: "100%" }}
+                />
+              </div>
+              <div>
+                <InputLabel>Restart Policy</InputLabel>
+                <select
+                  className="input"
+                  value={restartPolicy}
+                  onChange={(e) => setRestartPolicy(e.target.value)}
+                  style={{ width: "100%" }}
+                >
+                  <option value="no">no</option>
+                  <option value="always">always</option>
+                  <option value="unless-stopped">unless-stopped</option>
+                  <option value="on-failure">on-failure</option>
+                </select>
+              </div>
+              <div>
+                <InputLabel>Command Override</InputLabel>
+                <input
+                  className="input"
+                  value={command}
+                  onChange={(e) => setCommand(e.target.value)}
+                  placeholder="Optional custom command"
+                  style={{ width: "100%" }}
+                />
+              </div>
             </div>
-          )}
 
-        {error && (
-          <div
-            style={{
-              background: "rgba(239,68,68,0.1)",
-              border: "1px solid rgba(239,68,68,0.3)",
-              borderRadius: 8,
-              padding: "10px 14px",
-              marginBottom: 14,
-              fontSize: 13,
-              color: "#ef4444",
-            }}
-          >
-            {error}
-          </div>
-        )}
-
-        {serverId && (
-          <div
-            style={{
-              marginBottom: 14,
-              padding: "12px 14px",
-              borderRadius: 10,
-              background: dockerStatusLoading
-                ? "rgba(59,130,246,0.1)"
-                : dockerStatus?.available
-                  ? "rgba(16,185,129,0.1)"
-                  : dockerStatus
-                    ? "rgba(245,158,11,0.1)"
-                    : "rgba(100,116,139,0.1)",
-              border: dockerStatusLoading
-                ? "1px solid rgba(59,130,246,0.25)"
-                : dockerStatus?.available
-                  ? "1px solid rgba(16,185,129,0.25)"
-                  : dockerStatus
-                    ? "1px solid rgba(245,158,11,0.25)"
-                    : "1px solid rgba(100,116,139,0.25)",
-              fontSize: 12,
-              color: "var(--text-secondary)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: 12,
-              flexWrap: "wrap",
-            }}
-          >
-            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              <span style={{ fontWeight: 700, color: "var(--text-primary)" }}>
-                {dockerStatusLoading
-                  ? "Checking Docker runtime..."
-                  : dockerStatus?.available
-                    ? // ? `Docker ready${dockerStatus.version ? ` · v${dockerStatus.version}` : ""}`
-                      `Yeay! Docker ready installed on this server.`
-                    : dockerStatus
-                      ? "Docker not ready"
-                      : "Docker not checked yet"}
-              </span>
-              <span>
-                {dockerStatusLoading
-                  ? "Verifying whether this server can run Docker app installs."
-                  : dockerNotice ||
-                    dockerStatus?.reason ||
-                    "App Installer will validate Docker on the target server when you submit the install."}
-              </span>
-            </div>
-            {!dockerStatusLoading &&
-              !dockerStatus?.available &&
-              dockerStatus?.canInstall && (
+            <div className="card" style={{ padding: 18 }}>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  marginBottom: 12,
+                }}
+              >
+                <div>
+                  <p
+                    style={{
+                      fontSize: 14,
+                      fontWeight: 700,
+                      color: "var(--text-primary)",
+                    }}
+                  >
+                    Port Mappings
+                  </p>
+                  <p style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                    Map host ports to container ports. Use UDP only when needed.
+                  </p>
+                </div>
                 <button
                   type="button"
-                  className="btn btn-primary"
-                  onClick={() => void handleInstallDocker()}
-                  disabled={dockerInstallLoading}
-                  style={{
-                    fontSize: 12,
-                    background: "#0f766e",
-                    borderColor: "#0f766e",
-                  }}
+                  className="btn"
+                  onClick={() =>
+                    setPorts((current) => [
+                      ...current,
+                      { host: "", container: "", protocol: "tcp" },
+                    ])
+                  }
                 >
-                  {dockerInstallLoading ? (
-                    <Loader2 size={12} className="animate-spin" />
-                  ) : (
-                    <Download size={12} />
-                  )}
-                  Install Docker
+                  <Plus size={13} /> Add Port
                 </button>
-              )}
-          </div>
-        )}
-
-        <form
-          onSubmit={submit}
-          style={{ display: "flex", flexDirection: "column", gap: 18 }}
-        >
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
-              gap: 14,
-            }}
-          >
-            <div>
-              <InputLabel>Target Server *</InputLabel>
-              <select
-                className="input"
-                value={serverId}
-                onChange={(e) => {
-                  setServerId(e.target.value);
-                  setEnvironmentId("");
-                  setNetworkId("");
-                  setDockerNotice("");
-                }}
-                required
-                style={{ width: "100%" }}
+              </div>
+              <div
+                style={{ display: "flex", flexDirection: "column", gap: 10 }}
               >
-                <option value="">Select server</option>
-                {serverList.map((server) => (
-                  <option key={server.id} value={server.id}>
-                    {server.name} ({server.ip})
-                  </option>
+                {ports.length === 0 && (
+                  <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                    No port mappings yet.
+                  </div>
+                )}
+                {ports.map((row, index) => (
+                  <div
+                    key={`port-${index}`}
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "1fr 1fr 140px auto",
+                      gap: 10,
+                    }}
+                  >
+                    <input
+                      className="input"
+                      value={row.host}
+                      onChange={(e) =>
+                        updatePort(index, "host", e.target.value)
+                      }
+                      placeholder="Host port"
+                    />
+                    <input
+                      className="input"
+                      value={row.container}
+                      onChange={(e) =>
+                        updatePort(index, "container", e.target.value)
+                      }
+                      placeholder="Container port"
+                    />
+                    <select
+                      className="input"
+                      value={row.protocol}
+                      onChange={(e) =>
+                        updatePort(
+                          index,
+                          "protocol",
+                          e.target.value as "tcp" | "udp",
+                        )
+                      }
+                    >
+                      <option value="tcp">tcp</option>
+                      <option value="udp">udp</option>
+                    </select>
+                    <button
+                      type="button"
+                      className="btn"
+                      onClick={() =>
+                        setPorts((current) =>
+                          current.filter((_, itemIndex) => itemIndex !== index),
+                        )
+                      }
+                    >
+                      Remove
+                    </button>
+                  </div>
                 ))}
-              </select>
-            </div>
-            <div>
-              <InputLabel>Project Environment *</InputLabel>
-              <SearchableSelect
-                value={environmentId}
-                options={environmentSelectOptions}
-                onChange={setEnvironmentId}
-                placeholder={
-                  projectsLoading
-                    ? "Loading environments..."
-                    : availableEnvironments.length > 0
-                      ? "No environment selected"
-                      : "No environment mapped to this server"
-                }
-                searchPlaceholder="Search environment..."
-                emptyText="No environment found"
-                disabled={!serverId || projectsLoading}
-              />
-            </div>
-          </div>
-
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
-              gap: 14,
-            }}
-          >
-            <div>
-              <InputLabel>App Name *</InputLabel>
-              <input
-                className="input"
-                value={appName}
-                onChange={(e) => setAppName(e.target.value)}
-                placeholder="Example: n8n workflow"
-                style={{ width: "100%" }}
-              />
-            </div>
-            <div>
-              <InputLabel>Container Name</InputLabel>
-              <input
-                className="input"
-                value={containerName}
-                onChange={(e) => setContainerName(e.target.value)}
-                placeholder="Leave blank to auto-generate"
-                style={{ width: "100%" }}
-              />
-            </div>
-            <div>
-              <InputLabel>Docker Network</InputLabel>
-              <SearchableSelect
-                value={networkId}
-                options={networkSelectOptions}
-                onChange={setNetworkId}
-                placeholder={
-                  networksLoading
-                    ? "Loading networks..."
-                    : network.trim()
-                      ? `Template/default network (${network.trim()})`
-                      : "Bridge default / no explicit network"
-                }
-                searchPlaceholder="Search network..."
-                emptyText="No network found"
-                disabled={!serverId || networksLoading}
-              />
-              {networksError ? (
-                <p
-                  style={{
-                    marginTop: 6,
-                    fontSize: 11,
-                    color: "#fca5a5",
-                    lineHeight: 1.5,
-                  }}
-                >
-                  {networksError}
-                </p>
-              ) : null}
-            </div>
-            <div>
-              <InputLabel>Docker Image *</InputLabel>
-              <input
-                className="input"
-                value={imageName}
-                onChange={(e) => setImageName(e.target.value)}
-                placeholder="n8nio/n8n"
-                style={{ width: "100%" }}
-              />
-            </div>
-            <div>
-              <InputLabel>Tag</InputLabel>
-              <input
-                className="input"
-                value={imageTag}
-                onChange={(e) => setImageTag(e.target.value)}
-                placeholder="latest"
-                style={{ width: "100%" }}
-              />
-            </div>
-            <div>
-              <InputLabel>Restart Policy</InputLabel>
-              <select
-                className="input"
-                value={restartPolicy}
-                onChange={(e) => setRestartPolicy(e.target.value)}
-                style={{ width: "100%" }}
-              >
-                <option value="no">no</option>
-                <option value="always">always</option>
-                <option value="unless-stopped">unless-stopped</option>
-                <option value="on-failure">on-failure</option>
-              </select>
-            </div>
-            <div>
-              <InputLabel>Command Override</InputLabel>
-              <input
-                className="input"
-                value={command}
-                onChange={(e) => setCommand(e.target.value)}
-                placeholder="Optional custom command"
-                style={{ width: "100%" }}
-              />
-            </div>
-          </div>
-
-          <div className="card" style={{ padding: 18 }}>
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                marginBottom: 12,
-              }}
-            >
-              <div>
-                <p
-                  style={{
-                    fontSize: 14,
-                    fontWeight: 700,
-                    color: "var(--text-primary)",
-                  }}
-                >
-                  Port Mappings
-                </p>
-                <p style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                  Map host ports to container ports. Use UDP only when needed.
-                </p>
               </div>
-              <button
-                type="button"
-                className="btn"
-                onClick={() =>
-                  setPorts((current) => [
-                    ...current,
-                    { host: "", container: "", protocol: "tcp" },
-                  ])
-                }
+            </div>
+
+            <div className="card" style={{ padding: 18 }}>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  marginBottom: 12,
+                }}
               >
-                <Plus size={13} /> Add Port
+                <div>
+                  <p
+                    style={{
+                      fontSize: 14,
+                      fontWeight: 700,
+                      color: "var(--text-primary)",
+                    }}
+                  >
+                    Volume and Path Mounts
+                  </p>
+                  <p style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                    Persist data or attach existing directories from the server.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() =>
+                    setVolumes((current) => [
+                      ...current,
+                      { host: "", container: "" },
+                    ])
+                  }
+                >
+                  <Plus size={13} /> Add Volume
+                </button>
+              </div>
+              <div
+                style={{ display: "flex", flexDirection: "column", gap: 10 }}
+              >
+                {volumes.length === 0 && (
+                  <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                    No mounted paths yet.
+                  </div>
+                )}
+                {volumes.map((row, index) => (
+                  <div
+                    key={`volume-${index}`}
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "1fr 1fr auto",
+                      gap: 10,
+                    }}
+                  >
+                    <input
+                      className="input"
+                      value={row.host}
+                      onChange={(e) =>
+                        updateVolume(index, "host", e.target.value)
+                      }
+                      placeholder="Host path"
+                    />
+                    <input
+                      className="input"
+                      value={row.container}
+                      onChange={(e) =>
+                        updateVolume(index, "container", e.target.value)
+                      }
+                      placeholder="Container path"
+                    />
+                    <button
+                      type="button"
+                      className="btn"
+                      onClick={() =>
+                        setVolumes((current) =>
+                          current.filter((_, itemIndex) => itemIndex !== index),
+                        )
+                      }
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="card" style={{ padding: 18 }}>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  marginBottom: 12,
+                }}
+              >
+                <div>
+                  <p
+                    style={{
+                      fontSize: 14,
+                      fontWeight: 700,
+                      color: "var(--text-primary)",
+                    }}
+                  >
+                    Environment Variables
+                  </p>
+                  <p style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                    Override credentials, URLs, feature flags, or app runtime
+                    settings.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() =>
+                    setEnvVars((current) => [
+                      ...current,
+                      { key: "", value: "" },
+                    ])
+                  }
+                >
+                  <Plus size={13} /> Add Env Var
+                </button>
+              </div>
+              <div
+                style={{ display: "flex", flexDirection: "column", gap: 10 }}
+              >
+                {envVars.length === 0 && (
+                  <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                    No environment variables yet.
+                  </div>
+                )}
+                {envVars.map((row, index) => (
+                  <div
+                    key={`env-${index}`}
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "1fr 1.5fr auto",
+                      gap: 10,
+                    }}
+                  >
+                    <input
+                      className="input"
+                      value={row.key}
+                      onChange={(e) => updateEnv(index, "key", e.target.value)}
+                      placeholder="KEY"
+                    />
+                    <input
+                      className="input"
+                      value={row.value}
+                      onChange={(e) =>
+                        updateEnv(index, "value", e.target.value)
+                      }
+                      placeholder="value"
+                    />
+                    <button
+                      type="button"
+                      className="btn"
+                      onClick={() =>
+                        setEnvVars((current) =>
+                          current.filter((_, itemIndex) => itemIndex !== index),
+                        )
+                      }
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div
+              style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}
+            >
+              <button type="button" onClick={onClose} className="btn">
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={
+                  loading || dockerStatusLoading || dockerInstallLoading
+                }
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 8,
+                  padding: "10px 16px",
+                  borderRadius: 10,
+                  border: "none",
+                  background: mode === "custom" ? "#0f766e" : visual.color,
+                  color: "white",
+                  cursor: "pointer",
+                  fontSize: 13,
+                  fontWeight: 700,
+                  minWidth: 180,
+                }}
+              >
+                {loading && <Loader2 size={14} className="animate-spin" />}
+                <Download size={13} />
+                {mode === "custom" ? "Install Custom App" : "Install Template"}
               </button>
             </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {ports.length === 0 && (
-                <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                  No port mappings yet.
-                </div>
-              )}
-              {ports.map((row, index) => (
-                <div
-                  key={`port-${index}`}
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "1fr 1fr 140px auto",
-                    gap: 10,
-                  }}
-                >
-                  <input
-                    className="input"
-                    value={row.host}
-                    onChange={(e) => updatePort(index, "host", e.target.value)}
-                    placeholder="Host port"
-                  />
-                  <input
-                    className="input"
-                    value={row.container}
-                    onChange={(e) =>
-                      updatePort(index, "container", e.target.value)
-                    }
-                    placeholder="Container port"
-                  />
-                  <select
-                    className="input"
-                    value={row.protocol}
-                    onChange={(e) =>
-                      updatePort(
-                        index,
-                        "protocol",
-                        e.target.value as "tcp" | "udp",
-                      )
-                    }
-                  >
-                    <option value="tcp">tcp</option>
-                    <option value="udp">udp</option>
-                  </select>
-                  <button
-                    type="button"
-                    className="btn"
-                    onClick={() =>
-                      setPorts((current) =>
-                        current.filter((_, itemIndex) => itemIndex !== index),
-                      )
-                    }
-                  >
-                    Remove
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="card" style={{ padding: 18 }}>
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                marginBottom: 12,
-              }}
-            >
-              <div>
-                <p
-                  style={{
-                    fontSize: 14,
-                    fontWeight: 700,
-                    color: "var(--text-primary)",
-                  }}
-                >
-                  Volume and Path Mounts
-                </p>
-                <p style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                  Persist data or attach existing directories from the server.
-                </p>
-              </div>
-              <button
-                type="button"
-                className="btn"
-                onClick={() =>
-                  setVolumes((current) => [
-                    ...current,
-                    { host: "", container: "" },
-                  ])
-                }
-              >
-                <Plus size={13} /> Add Volume
-              </button>
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {volumes.length === 0 && (
-                <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                  No mounted paths yet.
-                </div>
-              )}
-              {volumes.map((row, index) => (
-                <div
-                  key={`volume-${index}`}
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "1fr 1fr auto",
-                    gap: 10,
-                  }}
-                >
-                  <input
-                    className="input"
-                    value={row.host}
-                    onChange={(e) =>
-                      updateVolume(index, "host", e.target.value)
-                    }
-                    placeholder="Host path"
-                  />
-                  <input
-                    className="input"
-                    value={row.container}
-                    onChange={(e) =>
-                      updateVolume(index, "container", e.target.value)
-                    }
-                    placeholder="Container path"
-                  />
-                  <button
-                    type="button"
-                    className="btn"
-                    onClick={() =>
-                      setVolumes((current) =>
-                        current.filter((_, itemIndex) => itemIndex !== index),
-                      )
-                    }
-                  >
-                    Remove
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="card" style={{ padding: 18 }}>
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                marginBottom: 12,
-              }}
-            >
-              <div>
-                <p
-                  style={{
-                    fontSize: 14,
-                    fontWeight: 700,
-                    color: "var(--text-primary)",
-                  }}
-                >
-                  Environment Variables
-                </p>
-                <p style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                  Override credentials, URLs, feature flags, or app runtime
-                  settings.
-                </p>
-              </div>
-              <button
-                type="button"
-                className="btn"
-                onClick={() =>
-                  setEnvVars((current) => [...current, { key: "", value: "" }])
-                }
-              >
-                <Plus size={13} /> Add Env Var
-              </button>
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {envVars.length === 0 && (
-                <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                  No environment variables yet.
-                </div>
-              )}
-              {envVars.map((row, index) => (
-                <div
-                  key={`env-${index}`}
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "1fr 1.5fr auto",
-                    gap: 10,
-                  }}
-                >
-                  <input
-                    className="input"
-                    value={row.key}
-                    onChange={(e) => updateEnv(index, "key", e.target.value)}
-                    placeholder="KEY"
-                  />
-                  <input
-                    className="input"
-                    value={row.value}
-                    onChange={(e) => updateEnv(index, "value", e.target.value)}
-                    placeholder="value"
-                  />
-                  <button
-                    type="button"
-                    className="btn"
-                    onClick={() =>
-                      setEnvVars((current) =>
-                        current.filter((_, itemIndex) => itemIndex !== index),
-                      )
-                    }
-                  >
-                    Remove
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
-            <button type="button" onClick={onClose} className="btn">
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={loading || dockerStatusLoading || dockerInstallLoading}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: 8,
-                padding: "10px 16px",
-                borderRadius: 10,
-                border: "none",
-                background: mode === "custom" ? "#0f766e" : visual.color,
-                color: "white",
-                cursor: "pointer",
-                fontSize: 13,
-                fontWeight: 700,
-                minWidth: 180,
-              }}
-            >
-              {loading && <Loader2 size={14} className="animate-spin" />}
-              <Download size={13} />
-              {mode === "custom" ? "Install Custom App" : "Install Template"}
-            </button>
-          </div>
-        </form>
+          </form>
         </div>
       </div>
     </div>,
