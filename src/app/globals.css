@@ -140,7 +140,7 @@ html[data-theme="light"] {
   --scrollbar-track: #e2e8f0;
   --scrollbar-thumb: #cbd5e1;
 
-  /* Toast tones — light */
+  /* Toast tones â€” light */
   --toast-success-border: 1px solid rgba(16, 185, 129, 0.22);
   --toast-success-bg: #ecfdf5;
   --toast-success-title: #14532d;
@@ -924,6 +924,22 @@ body {
   --modal-close-size: 28px;
 }
 
+/* Shared wide modal variant for long settings/forms. */
+.modal-shell-wide {
+  max-width: 780px;
+}
+
+.modal-overlay-wide {
+  padding: 16px;
+}
+
+.modal-wide {
+  width: 100%;
+  max-width: none;
+  max-height: calc(100dvh - 32px);
+  box-sizing: border-box;
+}
+
 .modal-close {
   position: absolute;
   top: 5px;
@@ -979,6 +995,19 @@ body {
 }
 
 @media (max-width: 640px) {
+  .modal-overlay-wide {
+    padding: 8px;
+  }
+
+  .modal-shell-wide {
+    max-width: calc(100vw - 16px);
+  }
+
+  .modal-wide {
+    padding: 20px;
+    max-height: calc(100dvh - 32px);
+  }
+
   .modal-close {
     --modal-close-size: 28px;
   }
@@ -1077,3 +1106,4 @@ body {
   opacity: 1;
   transform: translateX(-50%) translateY(0);
 }
+
