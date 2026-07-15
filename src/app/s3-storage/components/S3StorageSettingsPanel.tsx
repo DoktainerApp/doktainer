@@ -160,8 +160,8 @@ function getDestinationSummary(destination: DestinationDraft) {
   }
 
   return parts.length > 0
-    ? parts.join(" â€¢ ")
-    : "Bucket dan region belum lengkap";
+    ? parts.join(" • ")
+    : "Bucket and region are incomplete";
 }
 
 function StatusButton({
@@ -604,11 +604,8 @@ export default function S3StorageSettingsPanel({
       </div>
 
       {draft ? (
-        <div className="modal-overlay">
-          <div
-            className="modal-shell"
-            style={{ width: "min(780px, calc(100% - 48px))", maxWidth: 1100 }}
-          >
+        <div className="modal-overlay modal-overlay-wide">
+          <div className="modal-shell modal-shell-wide">
             <button
               type="button"
               onClick={closeModal}
@@ -1284,4 +1281,3 @@ export default function S3StorageSettingsPanel({
     </>
   );
 }
-

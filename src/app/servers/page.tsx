@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -444,19 +444,7 @@ export default function ServersPage() {
         }}
       />
       {deleteTarget ? (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(2, 6, 23, 0.68)",
-            backdropFilter: "blur(6px)",
-            zIndex: 130,
-            display: "grid",
-            placeItems: "center",
-            padding: 20,
-          }}
-          onClick={closeDeleteModal}
-        >
+        <div className="modal-overlay" onClick={closeDeleteModal}>
           <div
             className="modal-shell"
             style={{
@@ -477,7 +465,7 @@ export default function ServersPage() {
               </button>
             ) : null}
             <div
-              className="card"
+              className="modal animate-slide-in"
               style={{
                 padding: 0,
                 overflow: "hidden",
@@ -757,3 +745,5 @@ export default function ServersPage() {
     </DashboardLayout>
   );
 }
+
+

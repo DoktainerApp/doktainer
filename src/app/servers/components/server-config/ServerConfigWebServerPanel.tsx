@@ -174,8 +174,9 @@ export default function ServerConfigWebServerPanel({
     <div style={{ display: "grid", gap: 16 }}>
       {activeIssueDetail && typeof document !== "undefined"
         ? createPortal(
-            <div className="server-config-issue-overlay">
-              <div className="card server-config-issue-dialog">
+            <div className="modal-overlay server-config-issue-overlay">
+              <div className="modal-shell" style={{ maxWidth: 520 }}>
+                <div className="modal server-config-issue-dialog">
                 <div className="server-config-issue-dialog-header">
                   <div>
                     <strong
@@ -210,6 +211,7 @@ export default function ServerConfigWebServerPanel({
                       {note}
                     </div>
                   ))}
+                </div>
                 </div>
               </div>
             </div>,
@@ -457,3 +459,5 @@ export default function ServerConfigWebServerPanel({
     </div>
   );
 }
+
+

@@ -471,18 +471,7 @@ function InstallOperationsModal({
   }, [activeTab, logContent, loading]);
 
   return (
-    <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,0.72)",
-        zIndex: 1000,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: 16,
-      }}
-    >
+    <div className="modal-overlay">
       <div className="modal-shell" style={{ maxWidth: 1100 }}>
         <button
           type="button"
@@ -533,7 +522,7 @@ function InstallOperationsModal({
               {install.server
                 ? `${install.server.name} (${install.server.ip})`
                 : install.serverId}
-              {install.containerName ? ` • ${install.containerName}` : ""}
+              {install.containerName ? ` â€¢ ${install.containerName}` : ""}
             </p>
           </div>
         </div>
@@ -1924,3 +1913,5 @@ export default function InstalledAppsPage() {
     </DashboardLayout>
   );
 }
+
+

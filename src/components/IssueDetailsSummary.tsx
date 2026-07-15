@@ -43,8 +43,9 @@ export default function IssueDetailsSummary({
 
       {detailOpen && typeof document !== "undefined"
         ? createPortal(
-            <div className="server-config-issue-overlay">
-              <div className="card server-config-issue-dialog">
+            <div className="modal-overlay server-config-issue-overlay">
+              <div className="modal-shell" style={{ maxWidth: 520 }}>
+                <div className="modal server-config-issue-dialog">
                 <div className="server-config-issue-dialog-header">
                   <div>
                     <strong
@@ -82,6 +83,7 @@ export default function IssueDetailsSummary({
                     </div>
                   ))}
                 </div>
+                </div>
               </div>
             </div>,
             document.body,
@@ -90,3 +92,5 @@ export default function IssueDetailsSummary({
     </>
   );
 }
+
+

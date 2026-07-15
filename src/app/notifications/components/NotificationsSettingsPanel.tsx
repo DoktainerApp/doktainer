@@ -595,11 +595,8 @@ export default function NotificationsSettingsPanel({
       </div>
 
       {draft ? (
-        <div className="modal-overlay">
-          <div
-            className="modal-shell"
-            style={{ width: "min(780px, calc(100% - 48px))", maxWidth: 780 }}
-          >
+        <div className="modal-overlay modal-overlay-wide">
+          <div className="modal-shell modal-shell-wide">
             <button
               type="button"
               onClick={closeModal}
@@ -609,816 +606,829 @@ export default function NotificationsSettingsPanel({
             >
               <X size={22} />
             </button>
-          <div
-            className="modal animate-slide-in"
-            style={{
-              width: "min(780px, 100%)",
-              maxWidth: "780px",
-              maxHeight: "calc(100vh - 40px)",
-              overflowY: "auto",
-              padding: 24,
-            }}
-          >
             <div
+              className="modal animate-slide-in"
               style={{
-                display: "flex",
-                gap: 12,
-                alignItems: "flex-start",
-                marginBottom: 22,
-                paddingRight: 36,
+                width: "min(780px, 100%)",
+                maxWidth: "780px",
+                maxHeight: "calc(100vh - 40px)",
+                overflowY: "auto",
+                padding: 24,
               }}
             >
-              <div>
-                <h3
-                  style={{
-                    fontSize: 16,
-                    fontWeight: 700,
-                    color: "var(--text-primary)",
-                  }}
-                >
-                  {editingId ? "Update Notification" : "Add Notification"}
-                </h3>
-                <p
-                  style={{
-                    fontSize: 12,
-                    color: "var(--text-muted)",
-                    marginTop: 6,
-                  }}
-                >
-                  {editingId
-                    ? "Update your notification providers for multiple channels."
-                    : "Set up a new notification provider and configure which events will trigger notifications."}
-                </p>
+              <div
+                style={{
+                  display: "flex",
+                  gap: 12,
+                  alignItems: "flex-start",
+                  marginBottom: 22,
+                  paddingRight: 36,
+                }}
+              >
+                <div>
+                  <h3
+                    style={{
+                      fontSize: 16,
+                      fontWeight: 700,
+                      color: "var(--text-primary)",
+                    }}
+                  >
+                    {editingId ? "Update Notification" : "Add Notification"}
+                  </h3>
+                  <p
+                    style={{
+                      fontSize: 12,
+                      color: "var(--text-muted)",
+                      marginTop: 6,
+                    }}
+                  >
+                    {editingId
+                      ? "Update your notification providers for multiple channels."
+                      : "Set up a new notification provider and configure which events will trigger notifications."}
+                  </p>
+                </div>
               </div>
-            </div>
 
-            <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-              <section>
-                <p
-                  style={{
-                    fontSize: 13,
-                    fontWeight: 700,
-                    color: "var(--text-primary)",
-                    marginBottom: 12,
-                  }}
-                >
-                  Provider Type
-                </p>
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-                    gap: 10,
-                  }}
-                >
-                  {PROVIDER_OPTIONS.map((option) => {
-                    const Icon = option.icon;
-                    const selected = draft.type === option.type;
+              <div
+                style={{ display: "flex", flexDirection: "column", gap: 20 }}
+              >
+                <section>
+                  <p
+                    style={{
+                      fontSize: 13,
+                      fontWeight: 700,
+                      color: "var(--text-primary)",
+                      marginBottom: 12,
+                    }}
+                  >
+                    Provider Type
+                  </p>
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns:
+                        "repeat(auto-fit, minmax(180px, 1fr))",
+                      gap: 10,
+                    }}
+                  >
+                    {PROVIDER_OPTIONS.map((option) => {
+                      const Icon = option.icon;
+                      const selected = draft.type === option.type;
 
-                    return (
-                      <button
-                        key={option.type}
-                        type="button"
-                        onClick={() =>
+                      return (
+                        <button
+                          key={option.type}
+                          type="button"
+                          onClick={() =>
+                            setDraft((current) =>
+                              current
+                                ? {
+                                    ...current,
+                                    type: option.type,
+                                    name:
+                                      editingId ||
+                                      current.name !==
+                                        getProviderMeta(current.type).label
+                                        ? current.name
+                                        : option.label,
+                                  }
+                                : current,
+                            )
+                          }
+                          style={{
+                            textAlign: "left",
+                            padding: 14,
+                            borderRadius: 14,
+                            border: selected
+                              ? `1px solid ${option.color}`
+                              : "1px solid var(--border)",
+                            background: selected
+                              ? `${option.color}12`
+                              : "var(--bg-card)",
+                            display: "flex",
+                            gap: 12,
+                            alignItems: "flex-start",
+                            cursor: "pointer",
+                          }}
+                        >
+                          <div
+                            style={{
+                              width: 36,
+                              height: 36,
+                              borderRadius: 10,
+                              background: `${option.color}18`,
+                              border: `1px solid ${option.color}33`,
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              flexShrink: 0,
+                            }}
+                          >
+                            <Icon size={15} style={{ color: option.color }} />
+                          </div>
+                          <div>
+                            <p
+                              style={{
+                                fontSize: 13,
+                                fontWeight: 600,
+                                color: "var(--text-primary)",
+                              }}
+                            >
+                              {option.label}
+                            </p>
+                            <p
+                              style={{
+                                fontSize: 11,
+                                color: "var(--text-muted)",
+                                marginTop: 4,
+                              }}
+                            >
+                              {option.description}
+                            </p>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </section>
+
+                <section>
+                  <p
+                    style={{
+                      fontSize: 13,
+                      fontWeight: 700,
+                      color: "var(--text-primary)",
+                      marginBottom: 12,
+                    }}
+                  >
+                    Basic Information
+                  </p>
+                  <div
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 14,
+                    }}
+                  >
+                    <div>
+                      <FieldLabel>Provider name</FieldLabel>
+                      <input
+                        className="input"
+                        value={draft.name}
+                        onChange={(event) =>
                           setDraft((current) =>
                             current
-                              ? {
-                                  ...current,
-                                  type: option.type,
-                                  name:
-                                    editingId ||
-                                    current.name !==
-                                      getProviderMeta(current.type).label
-                                      ? current.name
-                                      : option.label,
-                                }
+                              ? { ...current, name: event.target.value }
                               : current,
                           )
                         }
-                        style={{
-                          textAlign: "left",
-                          padding: 14,
-                          borderRadius: 14,
-                          border: selected
-                            ? `1px solid ${option.color}`
-                            : "1px solid var(--border)",
-                          background: selected
-                            ? `${option.color}12`
-                            : "var(--bg-card)",
-                          display: "flex",
-                          gap: 12,
-                          alignItems: "flex-start",
-                          cursor: "pointer",
-                        }}
-                      >
-                        <div
-                          style={{
-                            width: 36,
-                            height: 36,
-                            borderRadius: 10,
-                            background: `${option.color}18`,
-                            border: `1px solid ${option.color}33`,
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            flexShrink: 0,
-                          }}
-                        >
-                          <Icon size={15} style={{ color: option.color }} />
+                        placeholder="Contoh: Discord Infra, Telegram Ops, SMTP Finance"
+                      />
+                    </div>
+
+                    {draft.type === "email" ? (
+                      <>
+                        <div>
+                          <FieldLabel>SMTP host</FieldLabel>
+                          <input
+                            className="input"
+                            value={draft.smtpHost}
+                            onChange={(event) =>
+                              setDraft((current) =>
+                                current
+                                  ? { ...current, smtpHost: event.target.value }
+                                  : current,
+                              )
+                            }
+                            placeholder="smtp.mailgun.org"
+                          />
                         </div>
                         <div>
-                          <p
-                            style={{
-                              fontSize: 13,
-                              fontWeight: 600,
-                              color: "var(--text-primary)",
+                          <FieldLabel>SMTP port</FieldLabel>
+                          <input
+                            className="input"
+                            type="number"
+                            min={1}
+                            value={draft.smtpPort}
+                            onChange={(event) => {
+                              const nextPort = Number.parseInt(
+                                event.target.value,
+                                10,
+                              );
+                              setDraft((current) =>
+                                current
+                                  ? {
+                                      ...current,
+                                      smtpPort: Number.isNaN(nextPort)
+                                        ? 587
+                                        : nextPort,
+                                    }
+                                  : current,
+                              );
                             }}
-                          >
-                            {option.label}
-                          </p>
-                          <p
-                            style={{
-                              fontSize: 11,
-                              color: "var(--text-muted)",
-                              marginTop: 4,
-                            }}
-                          >
-                            {option.description}
-                          </p>
+                          />
                         </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              </section>
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            gap: 12,
+                            padding: 14,
+                            border: "1px solid var(--border)",
+                            borderRadius: 12,
+                            background: "var(--bg-input)",
+                          }}
+                        >
+                          <div>
+                            <p
+                              style={{
+                                fontSize: 13,
+                                fontWeight: 600,
+                                color: "var(--text-primary)",
+                              }}
+                            >
+                              Secure SMTP connection
+                            </p>
+                            <p
+                              style={{
+                                fontSize: 11,
+                                color: "var(--text-muted)",
+                                marginTop: 4,
+                              }}
+                            >
+                              Activate if your SMTP server requires a secure
+                              connection (TLS/SSL).
+                            </p>
+                          </div>
+                          <Toggle
+                            checked={draft.smtpSecure}
+                            onChange={() =>
+                              setDraft((current) =>
+                                current
+                                  ? {
+                                      ...current,
+                                      smtpSecure: !current.smtpSecure,
+                                    }
+                                  : current,
+                              )
+                            }
+                          />
+                        </div>
+                        <div>
+                          <FieldLabel>SMTP username</FieldLabel>
+                          <input
+                            className="input"
+                            autoComplete="off"
+                            value={draft.smtpUsername}
+                            onChange={(event) =>
+                              setDraft((current) =>
+                                current
+                                  ? {
+                                      ...current,
+                                      smtpUsername: event.target.value,
+                                    }
+                                  : current,
+                              )
+                            }
+                            placeholder="apikey or mailbox username"
+                          />
+                        </div>
+                        <div>
+                          <FieldLabel>SMTP password</FieldLabel>
+                          <input
+                            className="input"
+                            autoComplete="new-password"
+                            type="password"
+                            value={draft.smtpPassword}
+                            onChange={(event) =>
+                              setDraft((current) =>
+                                current
+                                  ? {
+                                      ...current,
+                                      smtpPassword: event.target.value,
+                                      smtpPasswordConfigured:
+                                        current.smtpPasswordConfigured ||
+                                        Boolean(event.target.value.trim()),
+                                    }
+                                  : current,
+                              )
+                            }
+                          />
+                          <SecretHint
+                            configured={draft.smtpPasswordConfigured}
+                            label="SMTP Password"
+                          />
+                        </div>
+                        <div>
+                          <FieldLabel>From email</FieldLabel>
+                          <input
+                            className="input"
+                            value={draft.smtpFromEmail}
+                            onChange={(event) =>
+                              setDraft((current) =>
+                                current
+                                  ? {
+                                      ...current,
+                                      smtpFromEmail: event.target.value,
+                                    }
+                                  : current,
+                              )
+                            }
+                            placeholder="alerts@example.com"
+                          />
+                        </div>
+                        <div>
+                          <FieldLabel>From name</FieldLabel>
+                          <input
+                            className="input"
+                            value={draft.smtpFromName}
+                            onChange={(event) =>
+                              setDraft((current) =>
+                                current
+                                  ? {
+                                      ...current,
+                                      smtpFromName: event.target.value,
+                                    }
+                                  : current,
+                              )
+                            }
+                            placeholder="Doktainer Alerts"
+                          />
+                        </div>
+                      </>
+                    ) : null}
 
-              <section>
-                <p
-                  style={{
-                    fontSize: 13,
-                    fontWeight: 700,
-                    color: "var(--text-primary)",
-                    marginBottom: 12,
-                  }}
-                >
-                  Basic Information
-                </p>
-                <div
-                  style={{ display: "flex", flexDirection: "column", gap: 14 }}
-                >
-                  <div>
-                    <FieldLabel>Provider name</FieldLabel>
-                    <input
-                      className="input"
-                      value={draft.name}
-                      onChange={(event) =>
+                    {draft.type === "telegram" ? (
+                      <>
+                        <div>
+                          <FieldLabel>Bot token</FieldLabel>
+                          <input
+                            className="input"
+                            type="password"
+                            autoComplete="new-password"
+                            value={draft.telegramBotToken}
+                            onChange={(event) =>
+                              setDraft((current) =>
+                                current
+                                  ? {
+                                      ...current,
+                                      telegramBotToken: event.target.value,
+                                      telegramBotTokenConfigured:
+                                        current.telegramBotTokenConfigured ||
+                                        Boolean(event.target.value.trim()),
+                                    }
+                                  : current,
+                              )
+                            }
+                          />
+                          <SecretHint
+                            configured={draft.telegramBotTokenConfigured}
+                            label="Telegram Bot Token"
+                          />
+                        </div>
+                        <div>
+                          <FieldLabel>Chat ID</FieldLabel>
+                          <input
+                            className="input"
+                            value={draft.telegramChatId}
+                            onChange={(event) =>
+                              setDraft((current) =>
+                                current
+                                  ? {
+                                      ...current,
+                                      telegramChatId: event.target.value,
+                                    }
+                                  : current,
+                              )
+                            }
+                            placeholder="-100xxxxxxxxxx"
+                          />
+                        </div>
+                      </>
+                    ) : null}
+
+                    {[
+                      "discord",
+                      "slack",
+                      "lark",
+                      "teams",
+                      "mattermost",
+                      "custom",
+                    ].includes(draft.type) ? (
+                      <>
+                        <div>
+                          <FieldLabel>Webhook URL</FieldLabel>
+                          <input
+                            className="input"
+                            value={draft.webhookUrl}
+                            onChange={(event) =>
+                              setDraft((current) =>
+                                current
+                                  ? {
+                                      ...current,
+                                      webhookUrl: event.target.value,
+                                      webhookConfigured:
+                                        current.webhookConfigured ||
+                                        Boolean(event.target.value.trim()),
+                                    }
+                                  : current,
+                              )
+                            }
+                            placeholder="https://hooks.example.com/..."
+                          />
+                          <SecretHint
+                            configured={draft.webhookConfigured}
+                            label="Webhook URL"
+                          />
+                        </div>
+                        <div>
+                          <FieldLabel>Channel / label</FieldLabel>
+                          <input
+                            className="input"
+                            value={draft.channel}
+                            onChange={(event) =>
+                              setDraft((current) =>
+                                current
+                                  ? { ...current, channel: event.target.value }
+                                  : current,
+                              )
+                            }
+                            placeholder="#infra-alerts or Incident Room"
+                          />
+                        </div>
+                      </>
+                    ) : null}
+
+                    {draft.type === "resend" ? (
+                      <>
+                        <div>
+                          <FieldLabel>API key</FieldLabel>
+                          <input
+                            className="input"
+                            type="password"
+                            autoComplete="new-password"
+                            value={draft.apiKey}
+                            onChange={(event) =>
+                              setDraft((current) =>
+                                current
+                                  ? {
+                                      ...current,
+                                      apiKey: event.target.value,
+                                      apiKeyConfigured:
+                                        current.apiKeyConfigured ||
+                                        Boolean(event.target.value.trim()),
+                                    }
+                                  : current,
+                              )
+                            }
+                          />
+                          <SecretHint
+                            configured={draft.apiKeyConfigured}
+                            label="API key Resend"
+                          />
+                        </div>
+                        <div>
+                          <FieldLabel>From email</FieldLabel>
+                          <input
+                            className="input"
+                            value={draft.smtpFromEmail}
+                            onChange={(event) =>
+                              setDraft((current) =>
+                                current
+                                  ? {
+                                      ...current,
+                                      smtpFromEmail: event.target.value,
+                                    }
+                                  : current,
+                              )
+                            }
+                          />
+                        </div>
+                        <div>
+                          <FieldLabel>From name</FieldLabel>
+                          <input
+                            className="input"
+                            value={draft.smtpFromName}
+                            onChange={(event) =>
+                              setDraft((current) =>
+                                current
+                                  ? {
+                                      ...current,
+                                      smtpFromName: event.target.value,
+                                    }
+                                  : current,
+                              )
+                            }
+                          />
+                        </div>
+                      </>
+                    ) : null}
+
+                    {draft.type === "gotify" ? (
+                      <>
+                        <div>
+                          <FieldLabel>Server URL</FieldLabel>
+                          <input
+                            className="input"
+                            value={draft.serverUrl}
+                            onChange={(event) =>
+                              setDraft((current) =>
+                                current
+                                  ? {
+                                      ...current,
+                                      serverUrl: event.target.value,
+                                    }
+                                  : current,
+                              )
+                            }
+                            placeholder="https://gotify.example.com"
+                          />
+                        </div>
+                        <div>
+                          <FieldLabel>API key</FieldLabel>
+                          <input
+                            className="input"
+                            type="password"
+                            autoComplete="new-password"
+                            value={draft.apiKey}
+                            onChange={(event) =>
+                              setDraft((current) =>
+                                current
+                                  ? {
+                                      ...current,
+                                      apiKey: event.target.value,
+                                      apiKeyConfigured:
+                                        current.apiKeyConfigured ||
+                                        Boolean(event.target.value.trim()),
+                                    }
+                                  : current,
+                              )
+                            }
+                          />
+                          <SecretHint
+                            configured={draft.apiKeyConfigured}
+                            label="API key Gotify"
+                          />
+                        </div>
+                      </>
+                    ) : null}
+
+                    {draft.type === "ntfy" ? (
+                      <>
+                        <div>
+                          <FieldLabel>Server URL</FieldLabel>
+                          <input
+                            className="input"
+                            value={draft.serverUrl}
+                            onChange={(event) =>
+                              setDraft((current) =>
+                                current
+                                  ? {
+                                      ...current,
+                                      serverUrl: event.target.value,
+                                    }
+                                  : current,
+                              )
+                            }
+                            placeholder="https://ntfy.sh or internal endpoint"
+                          />
+                        </div>
+                        <div>
+                          <FieldLabel>Topic</FieldLabel>
+                          <input
+                            className="input"
+                            value={draft.topic}
+                            onChange={(event) =>
+                              setDraft((current) =>
+                                current
+                                  ? { ...current, topic: event.target.value }
+                                  : current,
+                              )
+                            }
+                            placeholder="dokta infra alerts"
+                          />
+                        </div>
+                      </>
+                    ) : null}
+
+                    {draft.type === "pushover" ? (
+                      <>
+                        <div>
+                          <FieldLabel>User key</FieldLabel>
+                          <input
+                            className="input"
+                            value={draft.userKey}
+                            onChange={(event) =>
+                              setDraft((current) =>
+                                current
+                                  ? { ...current, userKey: event.target.value }
+                                  : current,
+                              )
+                            }
+                          />
+                        </div>
+                        <div>
+                          <FieldLabel>API token</FieldLabel>
+                          <input
+                            className="input"
+                            type="password"
+                            autoComplete="new-password"
+                            value={draft.apiKey}
+                            onChange={(event) =>
+                              setDraft((current) =>
+                                current
+                                  ? {
+                                      ...current,
+                                      apiKey: event.target.value,
+                                      apiKeyConfigured:
+                                        current.apiKeyConfigured ||
+                                        Boolean(event.target.value.trim()),
+                                    }
+                                  : current,
+                              )
+                            }
+                          />
+                          <SecretHint
+                            configured={draft.apiKeyConfigured}
+                            label="API token Pushover"
+                          />
+                        </div>
+                      </>
+                    ) : null}
+                  </div>
+                </section>
+
+                <section>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      gap: 12,
+                      alignItems: "center",
+                      marginBottom: 12,
+                    }}
+                  >
+                    <div>
+                      <p
+                        style={{
+                          fontSize: 13,
+                          fontWeight: 700,
+                          color: "var(--text-primary)",
+                        }}
+                      >
+                        Alert Actions
+                      </p>
+                      <p
+                        style={{
+                          fontSize: 11,
+                          color: "var(--text-muted)",
+                          marginTop: 4,
+                        }}
+                      >
+                        Old actions remain available, and new actions can be
+                        enabled per provider.
+                      </p>
+                    </div>
+                    <StatusButton
+                      active={draft.enabled}
+                      onClick={() =>
                         setDraft((current) =>
                           current
-                            ? { ...current, name: event.target.value }
+                            ? { ...current, enabled: !current.enabled }
                             : current,
                         )
                       }
-                      placeholder="Contoh: Discord Infra, Telegram Ops, SMTP Finance"
                     />
                   </div>
 
-                  {draft.type === "email" ? (
-                    <>
-                      <div>
-                        <FieldLabel>SMTP host</FieldLabel>
-                        <input
-                          className="input"
-                          value={draft.smtpHost}
-                          onChange={(event) =>
-                            setDraft((current) =>
-                              current
-                                ? { ...current, smtpHost: event.target.value }
-                                : current,
-                            )
-                          }
-                          placeholder="smtp.mailgun.org"
-                        />
-                      </div>
-                      <div>
-                        <FieldLabel>SMTP port</FieldLabel>
-                        <input
-                          className="input"
-                          type="number"
-                          min={1}
-                          value={draft.smtpPort}
-                          onChange={(event) => {
-                            const nextPort = Number.parseInt(
-                              event.target.value,
-                              10,
-                            );
-                            setDraft((current) =>
-                              current
-                                ? {
-                                    ...current,
-                                    smtpPort: Number.isNaN(nextPort)
-                                      ? 587
-                                      : nextPort,
-                                  }
-                                : current,
-                            );
+                  <div
+                    className="notification-action-grid"
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                      gap: 10,
+                    }}
+                  >
+                    {NOTIFICATION_ACTION_OPTIONS.map((action) => {
+                      const checked = draft.actions.includes(action.value);
+
+                      return (
+                        <div
+                          key={action.value}
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            gap: 12,
+                            padding: 14,
+                            borderRadius: 14,
+                            border: checked
+                              ? "1px solid rgba(37,99,235,0.28)"
+                              : "1px solid var(--border)",
+                            background: checked
+                              ? "rgba(37,99,235,0.08)"
+                              : "var(--bg-input)",
                           }}
-                        />
-                      </div>
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "space-between",
-                          gap: 12,
-                          padding: 14,
-                          border: "1px solid var(--border)",
-                          borderRadius: 12,
-                          background: "var(--bg-input)",
-                        }}
-                      >
-                        <div>
-                          <p
-                            style={{
-                              fontSize: 13,
-                              fontWeight: 600,
-                              color: "var(--text-primary)",
-                            }}
-                          >
-                            Secure SMTP connection
-                          </p>
-                          <p
-                            style={{
-                              fontSize: 11,
-                              color: "var(--text-muted)",
-                              marginTop: 4,
-                            }}
-                          >
-                            Activate if your SMTP server requires a secure
-                            connection (TLS/SSL).
-                          </p>
+                        >
+                          <div>
+                            <p
+                              style={{
+                                fontSize: 13,
+                                fontWeight: 600,
+                                color: "var(--text-primary)",
+                              }}
+                            >
+                              {action.label}
+                            </p>
+                            <p
+                              style={{
+                                fontSize: 11,
+                                color: "var(--text-muted)",
+                                marginTop: 4,
+                              }}
+                            >
+                              {action.description}
+                            </p>
+                          </div>
+                          <Toggle
+                            checked={checked}
+                            onChange={() =>
+                              setDraft((current) => {
+                                if (!current) return current;
+
+                                return {
+                                  ...current,
+                                  actions: checked
+                                    ? current.actions.filter(
+                                        (item) => item !== action.value,
+                                      )
+                                    : [...current.actions, action.value],
+                                };
+                              })
+                            }
+                          />
                         </div>
-                        <Toggle
-                          checked={draft.smtpSecure}
-                          onChange={() =>
-                            setDraft((current) =>
-                              current
-                                ? {
-                                    ...current,
-                                    smtpSecure: !current.smtpSecure,
-                                  }
-                                : current,
-                            )
-                          }
-                        />
-                      </div>
-                      <div>
-                        <FieldLabel>SMTP username</FieldLabel>
-                        <input
-                          className="input"
-                          autoComplete="off"
-                          value={draft.smtpUsername}
-                          onChange={(event) =>
-                            setDraft((current) =>
-                              current
-                                ? {
-                                    ...current,
-                                    smtpUsername: event.target.value,
-                                  }
-                                : current,
-                            )
-                          }
-                          placeholder="apikey or mailbox username"
-                        />
-                      </div>
-                      <div>
-                        <FieldLabel>SMTP password</FieldLabel>
-                        <input
-                          className="input"
-                          autoComplete="new-password"
-                          type="password"
-                          value={draft.smtpPassword}
-                          onChange={(event) =>
-                            setDraft((current) =>
-                              current
-                                ? {
-                                    ...current,
-                                    smtpPassword: event.target.value,
-                                    smtpPasswordConfigured:
-                                      current.smtpPasswordConfigured ||
-                                      Boolean(event.target.value.trim()),
-                                  }
-                                : current,
-                            )
-                          }
-                        />
-                        <SecretHint
-                          configured={draft.smtpPasswordConfigured}
-                          label="SMTP Password"
-                        />
-                      </div>
-                      <div>
-                        <FieldLabel>From email</FieldLabel>
-                        <input
-                          className="input"
-                          value={draft.smtpFromEmail}
-                          onChange={(event) =>
-                            setDraft((current) =>
-                              current
-                                ? {
-                                    ...current,
-                                    smtpFromEmail: event.target.value,
-                                  }
-                                : current,
-                            )
-                          }
-                          placeholder="alerts@example.com"
-                        />
-                      </div>
-                      <div>
-                        <FieldLabel>From name</FieldLabel>
-                        <input
-                          className="input"
-                          value={draft.smtpFromName}
-                          onChange={(event) =>
-                            setDraft((current) =>
-                              current
-                                ? {
-                                    ...current,
-                                    smtpFromName: event.target.value,
-                                  }
-                                : current,
-                            )
-                          }
-                          placeholder="Doktainer Alerts"
-                        />
-                      </div>
-                    </>
-                  ) : null}
-
-                  {draft.type === "telegram" ? (
-                    <>
-                      <div>
-                        <FieldLabel>Bot token</FieldLabel>
-                        <input
-                          className="input"
-                          type="password"
-                          autoComplete="new-password"
-                          value={draft.telegramBotToken}
-                          onChange={(event) =>
-                            setDraft((current) =>
-                              current
-                                ? {
-                                    ...current,
-                                    telegramBotToken: event.target.value,
-                                    telegramBotTokenConfigured:
-                                      current.telegramBotTokenConfigured ||
-                                      Boolean(event.target.value.trim()),
-                                  }
-                                : current,
-                            )
-                          }
-                        />
-                        <SecretHint
-                          configured={draft.telegramBotTokenConfigured}
-                          label="Telegram Bot Token"
-                        />
-                      </div>
-                      <div>
-                        <FieldLabel>Chat ID</FieldLabel>
-                        <input
-                          className="input"
-                          value={draft.telegramChatId}
-                          onChange={(event) =>
-                            setDraft((current) =>
-                              current
-                                ? {
-                                    ...current,
-                                    telegramChatId: event.target.value,
-                                  }
-                                : current,
-                            )
-                          }
-                          placeholder="-100xxxxxxxxxx"
-                        />
-                      </div>
-                    </>
-                  ) : null}
-
-                  {[
-                    "discord",
-                    "slack",
-                    "lark",
-                    "teams",
-                    "mattermost",
-                    "custom",
-                  ].includes(draft.type) ? (
-                    <>
-                      <div>
-                        <FieldLabel>Webhook URL</FieldLabel>
-                        <input
-                          className="input"
-                          value={draft.webhookUrl}
-                          onChange={(event) =>
-                            setDraft((current) =>
-                              current
-                                ? {
-                                    ...current,
-                                    webhookUrl: event.target.value,
-                                    webhookConfigured:
-                                      current.webhookConfigured ||
-                                      Boolean(event.target.value.trim()),
-                                  }
-                                : current,
-                            )
-                          }
-                          placeholder="https://hooks.example.com/..."
-                        />
-                        <SecretHint
-                          configured={draft.webhookConfigured}
-                          label="Webhook URL"
-                        />
-                      </div>
-                      <div>
-                        <FieldLabel>Channel / label</FieldLabel>
-                        <input
-                          className="input"
-                          value={draft.channel}
-                          onChange={(event) =>
-                            setDraft((current) =>
-                              current
-                                ? { ...current, channel: event.target.value }
-                                : current,
-                            )
-                          }
-                          placeholder="#infra-alerts or Incident Room"
-                        />
-                      </div>
-                    </>
-                  ) : null}
-
-                  {draft.type === "resend" ? (
-                    <>
-                      <div>
-                        <FieldLabel>API key</FieldLabel>
-                        <input
-                          className="input"
-                          type="password"
-                          autoComplete="new-password"
-                          value={draft.apiKey}
-                          onChange={(event) =>
-                            setDraft((current) =>
-                              current
-                                ? {
-                                    ...current,
-                                    apiKey: event.target.value,
-                                    apiKeyConfigured:
-                                      current.apiKeyConfigured ||
-                                      Boolean(event.target.value.trim()),
-                                  }
-                                : current,
-                            )
-                          }
-                        />
-                        <SecretHint
-                          configured={draft.apiKeyConfigured}
-                          label="API key Resend"
-                        />
-                      </div>
-                      <div>
-                        <FieldLabel>From email</FieldLabel>
-                        <input
-                          className="input"
-                          value={draft.smtpFromEmail}
-                          onChange={(event) =>
-                            setDraft((current) =>
-                              current
-                                ? {
-                                    ...current,
-                                    smtpFromEmail: event.target.value,
-                                  }
-                                : current,
-                            )
-                          }
-                        />
-                      </div>
-                      <div>
-                        <FieldLabel>From name</FieldLabel>
-                        <input
-                          className="input"
-                          value={draft.smtpFromName}
-                          onChange={(event) =>
-                            setDraft((current) =>
-                              current
-                                ? {
-                                    ...current,
-                                    smtpFromName: event.target.value,
-                                  }
-                                : current,
-                            )
-                          }
-                        />
-                      </div>
-                    </>
-                  ) : null}
-
-                  {draft.type === "gotify" ? (
-                    <>
-                      <div>
-                        <FieldLabel>Server URL</FieldLabel>
-                        <input
-                          className="input"
-                          value={draft.serverUrl}
-                          onChange={(event) =>
-                            setDraft((current) =>
-                              current
-                                ? { ...current, serverUrl: event.target.value }
-                                : current,
-                            )
-                          }
-                          placeholder="https://gotify.example.com"
-                        />
-                      </div>
-                      <div>
-                        <FieldLabel>API key</FieldLabel>
-                        <input
-                          className="input"
-                          type="password"
-                          autoComplete="new-password"
-                          value={draft.apiKey}
-                          onChange={(event) =>
-                            setDraft((current) =>
-                              current
-                                ? {
-                                    ...current,
-                                    apiKey: event.target.value,
-                                    apiKeyConfigured:
-                                      current.apiKeyConfigured ||
-                                      Boolean(event.target.value.trim()),
-                                  }
-                                : current,
-                            )
-                          }
-                        />
-                        <SecretHint
-                          configured={draft.apiKeyConfigured}
-                          label="API key Gotify"
-                        />
-                      </div>
-                    </>
-                  ) : null}
-
-                  {draft.type === "ntfy" ? (
-                    <>
-                      <div>
-                        <FieldLabel>Server URL</FieldLabel>
-                        <input
-                          className="input"
-                          value={draft.serverUrl}
-                          onChange={(event) =>
-                            setDraft((current) =>
-                              current
-                                ? { ...current, serverUrl: event.target.value }
-                                : current,
-                            )
-                          }
-                          placeholder="https://ntfy.sh or internal endpoint"
-                        />
-                      </div>
-                      <div>
-                        <FieldLabel>Topic</FieldLabel>
-                        <input
-                          className="input"
-                          value={draft.topic}
-                          onChange={(event) =>
-                            setDraft((current) =>
-                              current
-                                ? { ...current, topic: event.target.value }
-                                : current,
-                            )
-                          }
-                          placeholder="dokta infra alerts"
-                        />
-                      </div>
-                    </>
-                  ) : null}
-
-                  {draft.type === "pushover" ? (
-                    <>
-                      <div>
-                        <FieldLabel>User key</FieldLabel>
-                        <input
-                          className="input"
-                          value={draft.userKey}
-                          onChange={(event) =>
-                            setDraft((current) =>
-                              current
-                                ? { ...current, userKey: event.target.value }
-                                : current,
-                            )
-                          }
-                        />
-                      </div>
-                      <div>
-                        <FieldLabel>API token</FieldLabel>
-                        <input
-                          className="input"
-                          type="password"
-                          autoComplete="new-password"
-                          value={draft.apiKey}
-                          onChange={(event) =>
-                            setDraft((current) =>
-                              current
-                                ? {
-                                    ...current,
-                                    apiKey: event.target.value,
-                                    apiKeyConfigured:
-                                      current.apiKeyConfigured ||
-                                      Boolean(event.target.value.trim()),
-                                  }
-                                : current,
-                            )
-                          }
-                        />
-                        <SecretHint
-                          configured={draft.apiKeyConfigured}
-                          label="API token Pushover"
-                        />
-                      </div>
-                    </>
-                  ) : null}
-                </div>
-              </section>
-
-              <section>
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    gap: 12,
-                    alignItems: "center",
-                    marginBottom: 12,
-                  }}
-                >
-                  <div>
-                    <p
-                      style={{
-                        fontSize: 13,
-                        fontWeight: 700,
-                        color: "var(--text-primary)",
-                      }}
-                    >
-                      Alert Actions
-                    </p>
-                    <p
-                      style={{
-                        fontSize: 11,
-                        color: "var(--text-muted)",
-                        marginTop: 4,
-                      }}
-                    >
-                      Old actions remain available, and new actions can be
-                      enabled per provider.
-                    </p>
+                      );
+                    })}
                   </div>
-                  <StatusButton
-                    active={draft.enabled}
-                    onClick={() =>
-                      setDraft((current) =>
-                        current
-                          ? { ...current, enabled: !current.enabled }
-                          : current,
-                      )
-                    }
-                  />
+                </section>
+              </div>
+
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  gap: 12,
+                  marginTop: 24,
+                  flexWrap: "wrap",
+                }}
+              >
+                <div>
+                  {editingId && TESTABLE_PROVIDER_TYPES.includes(draft.type) ? (
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      onClick={() => void testNotification(draft.id)}
+                      disabled={
+                        actionLoading === `notify-${draft.type}-${draft.id}`
+                      }
+                      style={{ padding: "9px 14px", fontSize: 12 }}
+                    >
+                      {actionLoading === `notify-${draft.type}-${draft.id}` ? (
+                        <Loader2 size={14} className="animate-spin" />
+                      ) : (
+                        <Bell size={14} />
+                      )}
+                      Test Provider
+                    </button>
+                  ) : null}
                 </div>
-
-                <div
-                  className="notification-action-grid"
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-                    gap: 10,
-                  }}
-                >
-                  {NOTIFICATION_ACTION_OPTIONS.map((action) => {
-                    const checked = draft.actions.includes(action.value);
-
-                    return (
-                      <div
-                        key={action.value}
-                        style={{
-                          display: "flex",
-                          justifyContent: "space-between",
-                          alignItems: "center",
-                          gap: 12,
-                          padding: 14,
-                          borderRadius: 14,
-                          border: checked
-                            ? "1px solid rgba(37,99,235,0.28)"
-                            : "1px solid var(--border)",
-                          background: checked
-                            ? "rgba(37,99,235,0.08)"
-                            : "var(--bg-input)",
-                        }}
-                      >
-                        <div>
-                          <p
-                            style={{
-                              fontSize: 13,
-                              fontWeight: 600,
-                              color: "var(--text-primary)",
-                            }}
-                          >
-                            {action.label}
-                          </p>
-                          <p
-                            style={{
-                              fontSize: 11,
-                              color: "var(--text-muted)",
-                              marginTop: 4,
-                            }}
-                          >
-                            {action.description}
-                          </p>
-                        </div>
-                        <Toggle
-                          checked={checked}
-                          onChange={() =>
-                            setDraft((current) => {
-                              if (!current) return current;
-
-                              return {
-                                ...current,
-                                actions: checked
-                                  ? current.actions.filter(
-                                      (item) => item !== action.value,
-                                    )
-                                  : [...current.actions, action.value],
-                              };
-                            })
-                          }
-                        />
-                      </div>
-                    );
-                  })}
-                </div>
-              </section>
-            </div>
-
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                gap: 12,
-                marginTop: 24,
-                flexWrap: "wrap",
-              }}
-            >
-              <div>
-                {editingId && TESTABLE_PROVIDER_TYPES.includes(draft.type) ? (
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
                   <button
                     type="button"
                     className="btn btn-ghost"
-                    onClick={() => void testNotification(draft.id)}
-                    disabled={
-                      actionLoading === `notify-${draft.type}-${draft.id}`
-                    }
-                    style={{ padding: "9px 14px", fontSize: 12 }}
+                    onClick={closeModal}
                   >
-                    {actionLoading === `notify-${draft.type}-${draft.id}` ? (
-                      <Loader2 size={14} className="animate-spin" />
-                    ) : (
-                      <Bell size={14} />
-                    )}
-                    Test Provider
+                    Cancel
                   </button>
-                ) : null}
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={saveDraft}
+                  >
+                    {editingId ? (
+                      <>
+                        <Pencil size={13} /> Update Provider
+                      </>
+                    ) : (
+                      <>
+                        <Pencil size={13} /> Create Provider
+                      </>
+                    )}
+                  </button>
+                </div>
               </div>
-              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                <button
-                  type="button"
-                  className="btn btn-ghost"
-                  onClick={closeModal}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  onClick={saveDraft}
-                >
-                  {editingId ? (
-                    <>
-                      <Pencil size={13} /> Update Provider
-                    </>
-                  ) : (
-                    <>
-                      <Pencil size={13} /> Create Provider
-                    </>
-                  )}
-                </button>
-              </div>
-            </div>
             </div>
           </div>
         </div>

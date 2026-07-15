@@ -220,23 +220,24 @@ export default function ProcessLogsModal({
       className="modal-overlay"
       onClick={closeOnOverlayClick ? handleClose : undefined}
     >
-      <div
-        className="modal animate-slide-in"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="process-logs-modal-title"
-        style={{
-          width: "min(100%, 620px)",
-          maxWidth: 620,
-          padding: 0,
-          overflow: "hidden",
-          maxHeight: "92vh",
-          display: "flex",
-          flexDirection: "column",
-          borderRadius: 18,
-        }}
-        onClick={(event) => event.stopPropagation()}
-      >
+      <div className="modal-shell" style={{ maxWidth: 620 }}>
+        <div
+          className="modal animate-slide-in"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="process-logs-modal-title"
+          style={{
+            width: "100%",
+            maxWidth: 620,
+            padding: 0,
+            overflow: "hidden",
+            maxHeight: "92vh",
+            display: "flex",
+            flexDirection: "column",
+            borderRadius: 18,
+          }}
+          onClick={(event) => event.stopPropagation()}
+        >
         <div
           style={{
             display: "flex",
@@ -558,7 +559,10 @@ export default function ProcessLogsModal({
             </pre>
           )}
         </div>
+        </div>
       </div>
     </div>
   );
 }
+
+
