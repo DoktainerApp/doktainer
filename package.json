@@ -1,7 +1,7 @@
 {
   "name": "doktainer",
   "description": "Doktainer is a platform for managing containerized applications.",
-  "version": "v0.1.4",
+  "version": "v0.1.5",
   "author": "Doktainer Team",
   "license": "MIT",
   "private": true,
