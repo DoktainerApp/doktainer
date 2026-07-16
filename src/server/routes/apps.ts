@@ -8,6 +8,11 @@ import { dispatchRuntimeNotification } from "../services/notification.service";
 import * as ssh from "../services/ssh.service";
 import { rebuildAppInstall } from "../services/app-install-rebuild.service";
 import {
+  createDeployment,
+  updateDeployment,
+} from "../services/deployment.service";
+import { sanitizeDeploymentError } from "../services/deployment-error.service";
+import {
   APP_TEMPLATES,
   AppTemplate,
   AppTemplatePreset,
@@ -97,48 +102,6 @@ type DockerInspectRuntime = {
     RW?: boolean;
   }>;
 };
-
-type DockerPortBindings = Record<
-  string,
-  Array<{ HostIp?: string; HostPort?: string }> | null
->;
-
-function formatEnvLines(env?: string[] | null): string {
-  return (env ?? []).filter(Boolean).join("\n");
-}
-
-function formatMountBindings(mounts?: DockerInspectRuntime["Mounts"]): string {
-  return (mounts ?? [])
-    .map((mount) => {
-      if (!mount.Source || !mount.Destination) return "";
-      return `${mount.Source}:${mount.Destination}${mount.RW === false ? ":ro" : ""}`;
-    })
-    .filter(Boolean)
-    .join(",");
-}
-
-function formatPortBindings(bindings?: DockerPortBindings): string {
-  if (!bindings) return "";
-
-  return Object.entries(bindings)
-    .flatMap(([containerPortSpec, hostBindings]) => {
-      if (!hostBindings || hostBindings.length === 0) return [];
-      const [containerPort, protocol = "tcp"] = containerPortSpec.split("/");
-
-      return hostBindings
-        .map((binding) => {
-          const hostPort = binding.HostPort?.trim();
-          if (!hostPort) return "";
-          return `${hostPort}:${containerPort}${protocol !== "tcp" ? `/${protocol}` : ""}`;
-        })
-        .filter(Boolean);
-    })
-    .join(",");
-}
-
-function formatCommandParts(cmd?: string[] | null): string {
-  return (cmd ?? []).filter(Boolean).join(" ").trim();
-}
 
 function parseCsvBindings(value: string): string[] {
   return value
@@ -1045,16 +1008,88 @@ export async function appsRoutes(app: FastifyInstance) {
       });
     }
 
-    const install = await prisma.appInstall.create({
-      data: {
-        appId: finalAppId,
-        appName: finalAppName,
-        serverId: server.id,
-        containerName,
-        port: finalPorts || null,
-        status: "INSTALLING",
+    const { install, provisionalContainer } = await prisma.$transaction(
+      async (tx) => {
+        const createdInstall = await tx.appInstall.create({
+          data: {
+            appId: finalAppId,
+            appName: finalAppName,
+            serverId: server.id,
+            containerName,
+            port: finalPorts || null,
+            status: "INSTALLING",
+          },
+        });
+        const createdContainer = await tx.container.create({
+          data: {
+            name: containerName,
+            image: finalImage,
+            serverId: server.id,
+            environmentId: selectedEnvironmentId,
+            status: "STARTING",
+            sourceType: "APP_INSTALLER",
+            deployMode: "IMAGE",
+            ports: JSON.parse(JSON.stringify(parseCsvBindings(finalPorts))),
+            envVars: JSON.parse(
+              JSON.stringify(parseEnvironmentVariables(finalEnv)),
+            ),
+            volumes: JSON.parse(
+              JSON.stringify(parseCsvBindings(finalVolumes)),
+            ),
+            restartPolicy: finalRestartPolicy,
+          },
+        });
+
+        return {
+          install: createdInstall,
+          provisionalContainer: createdContainer,
+        };
       },
-    });
+    );
+    const deploymentStartedAt = new Date();
+    let deployment;
+    try {
+      deployment = await createDeployment({
+        containerId: provisionalContainer.id,
+        organizationId: req.organizationId!,
+        serverId: server.id,
+        userId: req.userId,
+        status: "RUNNING",
+        trigger: "APP_INSTALLER",
+        version: finalImage,
+        image: finalImage,
+        configSnapshot: {
+          sourceType: "APP_INSTALLER",
+          deployMode: "IMAGE",
+          image: finalImage,
+          ports: finalPorts,
+          env: finalEnv,
+          volumes: finalVolumes,
+          network: finalNetwork,
+          restartPolicy: finalRestartPolicy,
+          command: finalCommand,
+          appId: finalAppId,
+          appName: finalAppName,
+          presetId: body.data.presetId ?? null,
+        },
+        startedAt: deploymentStartedAt,
+      });
+    } catch (error) {
+      const message = sanitizeDeploymentError(error, {
+        fallback: "Failed to create deployment history",
+      });
+      await prisma.$transaction([
+        prisma.container.update({
+          where: { id: provisionalContainer.id },
+          data: { status: "ERROR" },
+        }),
+        prisma.appInstall.update({
+          where: { id: install.id },
+          data: { status: "FAILED", error: message },
+        }),
+      ]);
+      return reply.status(500).send({ success: false, error: message });
+    }
 
     setImmediate(async () => {
       try {
@@ -1069,6 +1104,13 @@ export async function appsRoutes(app: FastifyInstance) {
           command: finalCommand,
           mountValidation: resolveAppMountValidation(finalAppId),
         });
+        await prisma.container.update({
+          where: { id: provisionalContainer.id },
+          data: {
+            dockerId: dockerId.trim().slice(0, 12) || null,
+            status: "STARTING",
+          },
+        });
 
         await upsertAppInstallerContainer({
           serverId: server.id,
@@ -1081,6 +1123,32 @@ export async function appsRoutes(app: FastifyInstance) {
           volumes: finalVolumes,
           restartPolicy: finalRestartPolicy,
         });
+
+        const deployedContainer = await prisma.container.findUnique({
+          where: { id: provisionalContainer.id },
+          select: { id: true, image: true },
+        });
+        if (deployedContainer) {
+          await updateDeployment(deployment.id, {
+            status: "SUCCESS",
+            image: deployedContainer.image || finalImage,
+            configSnapshot: {
+              sourceType: "APP_INSTALLER",
+              deployMode: "IMAGE",
+              image: deployedContainer.image || finalImage,
+              ports: finalPorts,
+              env: finalEnv,
+              volumes: finalVolumes,
+              network: finalNetwork,
+              restartPolicy: finalRestartPolicy,
+              command: finalCommand,
+              appId: finalAppId,
+              appName: finalAppName,
+              presetId: body.data.presetId ?? null,
+            },
+            completedAt: new Date(),
+          });
+        }
 
         await prisma.appInstall.update({
           where: { id: install.id },
@@ -1125,11 +1193,28 @@ export async function appsRoutes(app: FastifyInstance) {
             },
           });
         }
-      } catch (err: any) {
-        await prisma.appInstall.update({
-          where: { id: install.id },
-          data: { status: "FAILED", error: err.message },
+      } catch (err: unknown) {
+        const errorMessage = sanitizeDeploymentError(err, {
+          fallback: "App installation failed",
         });
+        await prisma.$transaction([
+          prisma.appInstall.update({
+            where: { id: install.id },
+            data: { status: "FAILED", error: errorMessage },
+          }),
+          prisma.container.update({
+            where: { id: provisionalContainer.id },
+            data: { status: "ERROR" },
+          }),
+          prisma.deployment.update({
+            where: { id: deployment.id },
+            data: {
+              status: "FAILED",
+              error: errorMessage,
+              completedAt: new Date(),
+            },
+          }),
+        ]);
 
         await auditLog({
           userId: req.userId,
@@ -1138,7 +1223,7 @@ export async function appsRoutes(app: FastifyInstance) {
           action: "APP_INSTALL_FAILED",
           category: "SYSTEM",
           level: "ERROR",
-          message: `App "${finalAppName}" install failed on "${server.name}": ${err.message}`,
+          message: `App "${finalAppName}" install failed on "${server.name}": ${errorMessage}`,
           meta: {
             mode: body.data.mode,
             image: finalImage,
@@ -1151,7 +1236,7 @@ export async function appsRoutes(app: FastifyInstance) {
             organizationId: req.organizationId,
             action: "app_build_error",
             title: `App deploy failed: ${finalAppName}`,
-            message: `App ${finalAppName} failed to deploy on ${server.name}. ${err.message}`,
+            message: `App ${finalAppName} failed to deploy on ${server.name}. ${errorMessage}`,
             serverId: server.id,
             resourceType: "app_install",
             resourceId: install.id,
@@ -1164,7 +1249,7 @@ export async function appsRoutes(app: FastifyInstance) {
               presetId: body.data.presetId ?? null,
               serverId: server.id,
               serverName: server.name,
-              error: err.message,
+              error: errorMessage,
             },
           });
         }

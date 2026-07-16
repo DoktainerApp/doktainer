@@ -25,6 +25,19 @@ import {
 import * as ssh from "../services/ssh.service";
 import { withCommandLogSink } from "../services/ssh.service";
 import { rebuildAppInstall } from "../services/app-install-rebuild.service";
+import {
+  createDeployment,
+  getDeployment,
+  listDeployments,
+  updateDeployment,
+} from "../services/deployment.service";
+import { rollbackContainerToDeployment } from "../services/deployment-rollback.service";
+import {
+  acquireDeploymentLock,
+  releaseDeploymentLock,
+  startDeploymentLockHeartbeat,
+} from "../services/deployment-lock.service";
+import { sanitizeDeploymentError } from "../services/deployment-error.service";
 
 const DeploySourceTypeSchema = z.enum([
   "APP_INSTALLER",
@@ -707,8 +720,7 @@ export function resolveContainerPathToHostMountPath(
   const matchedMount = mounts
     .filter(
       (mount) =>
-        isUsableMountPath(mount.Source) &&
-        isUsableMountPath(mount.Destination),
+        isUsableMountPath(mount.Source) && isUsableMountPath(mount.Destination),
     )
     .map((mount) => ({
       source: normalizeRemotePath(mount.Source!),
@@ -732,7 +744,10 @@ export function resolveContainerPathToHostMountPath(
   return pathPosix.normalize(pathPosix.join(matchedMount.source, relativePath));
 }
 
-function getWritableMountRootsForPath(targetPath: string, mounts: DockerInspectMount[]) {
+function getWritableMountRootsForPath(
+  targetPath: string,
+  mounts: DockerInspectMount[],
+) {
   const normalizedTargetPath = normalizeRemotePath(targetPath);
 
   return mounts
@@ -944,6 +959,7 @@ function resolveGitBuildType(input: z.infer<typeof DeploySchema>) {
 }
 
 type DockerInspectRuntime = {
+  Image?: string;
   Config?: {
     Image?: string;
     Env?: string[];
@@ -1564,7 +1580,7 @@ function parseInjectedResponsePayload(response: {
 
 function runInjectedContainerJob(input: {
   app: FastifyInstance;
-  job: ReturnType<typeof createProcessJob>;
+  job: Awaited<ReturnType<typeof createProcessJob>>;
   method: "POST";
   url: string;
   headers: Record<string, unknown>;
@@ -1574,19 +1590,22 @@ function runInjectedContainerJob(input: {
   void Promise.resolve().then(async () => {
     const abortController = new AbortController();
     if (isProcessJobCancelling(input.job)) {
-      updateProcessJob(input.job, {
+      await updateProcessJob(input.job, {
         status: "cancelled",
         error: input.job.cancelReason ?? "Job cancelled",
       });
-      appendProcessJobLog(input.job, "[job] Cancelled");
+      await appendProcessJobLog(input.job, "[job] Cancelled");
       return;
     }
 
-    updateProcessJob(input.job, {
+    await updateProcessJob(input.job, {
       status: "running",
       cancel: (reason) => abortController.abort(reason),
     });
-    appendProcessJobLog(input.job, `[job] Started ${input.job.type}`);
+    await appendProcessJobLog(
+      input.job,
+      `[job] Started ${input.job.type}`,
+    );
 
     try {
       const response = await withCommandLogSink(
@@ -1601,7 +1620,10 @@ function runInjectedContainerJob(input: {
           await input.app.inject({
             method: input.method,
             url: input.url,
-            headers: buildInternalJobHeaders(input.headers),
+            headers: {
+              ...buildInternalJobHeaders(input.headers),
+              "x-process-job-sync": "true",
+            },
             payload: input.payload,
           }),
         {
@@ -1610,12 +1632,12 @@ function runInjectedContainerJob(input: {
         },
       );
 
-      if (abortController.signal.aborted || isProcessJobCancelling(input.job)) {
-        updateProcessJob(input.job, {
+      if (isProcessJobCancelling(input.job)) {
+        await updateProcessJob(input.job, {
           status: "cancelled",
           error: input.job.cancelReason ?? "Job cancelled",
         });
-        appendProcessJobLog(input.job, "[job] Cancelled");
+        await appendProcessJobLog(input.job, "[job] Cancelled");
         return;
       }
 
@@ -1628,27 +1650,54 @@ function runInjectedContainerJob(input: {
         throw new Error(error || `Job failed with HTTP ${response.statusCode}`);
       }
 
-      updateProcessJob(input.job, { status: "success", result: payload });
-      appendProcessJobLog(input.job, "[job] Completed successfully");
+      await updateProcessJob(input.job, {
+        status: "success",
+        result: payload,
+      });
+      await appendProcessJobLog(input.job, "[job] Completed successfully");
     } catch (error) {
       const message = error instanceof Error ? error.message : "Job failed";
       if (
-        abortController.signal.aborted ||
         isProcessJobCancelling(input.job) ||
         message === "Command cancelled"
       ) {
-        updateProcessJob(input.job, {
+        await updateProcessJob(input.job, {
           status: "cancelled",
           error: input.job.cancelReason ?? "Job cancelled",
         });
-        appendProcessJobLog(input.job, "[job] Cancelled");
+        await appendProcessJobLog(input.job, "[job] Cancelled");
         return;
       }
-
-      updateProcessJob(input.job, { status: "error", error: message });
-      appendProcessJobLog(input.job, `[job] Failed: ${message}`);
+      await updateProcessJob(input.job, {
+        status: "error",
+        error: message,
+      });
+      await appendProcessJobLog(input.job, `[job] Failed: ${message}`);
     }
   });
+}
+
+function buildDeploymentSnapshot(
+  body: z.infer<typeof DeploySchema>,
+  runtimeImage?: string,
+) {
+  return {
+    sourceType: body.sourceType,
+    deployMode: body.deployMode,
+    buildType: body.buildType,
+    image: runtimeImage || body.image,
+    ports: body.ports,
+    env: body.env,
+    volumes: body.volumes,
+    restartPolicy: body.restartPolicy,
+    repoUrl: body.repoUrl,
+    repoBranch: body.repoBranch,
+    buildPath: body.buildPath,
+    composeFilePath: body.composeFilePath,
+    dockerfilePath: body.dockerfilePath,
+    dockerContextPath: body.dockerContextPath,
+    imageTag: body.imageTag,
+  };
 }
 
 export async function containerRoutes(app: FastifyInstance) {
@@ -1662,6 +1711,143 @@ export async function containerRoutes(app: FastifyInstance) {
   ];
 
   // GET /containers — all containers from DB
+  const recordDeployment = async (input: {
+    container: { id: string; serverId: string; image: string };
+    body: z.infer<typeof DeploySchema>;
+    trigger: "MANUAL" | "GIT_WEBHOOK" | "APP_INSTALLER";
+    userId?: string;
+    organizationId: string;
+  }) => {
+    const body = input.body;
+    return createDeployment({
+      containerId: input.container.id,
+      organizationId: input.organizationId,
+      serverId: input.container.serverId,
+      userId: input.userId,
+      status: "SUCCESS",
+      trigger: input.trigger,
+      version: body.imageTag || body.repoBranch || input.container.image,
+      branch: body.repoBranch || null,
+      image: input.container.image,
+      configSnapshot: buildDeploymentSnapshot(body, input.container.image),
+      startedAt: new Date(),
+      completedAt: new Date(),
+    });
+  };
+
+  const recordFailedDeployment = async (input: {
+    container: { id: string; serverId: string; image: string };
+    body: z.infer<typeof DeploySchema>;
+    trigger: "MANUAL" | "GIT_WEBHOOK" | "APP_INSTALLER";
+    userId?: string;
+    organizationId: string;
+    error: string;
+  }) =>
+    createDeployment({
+      containerId: input.container.id,
+      organizationId: input.organizationId,
+      serverId: input.container.serverId,
+      userId: input.userId,
+      status: "FAILED",
+      trigger: input.trigger,
+      version: input.body.imageTag || input.body.repoBranch || input.container.image,
+      branch: input.body.repoBranch || null,
+      image: input.container.image,
+      configSnapshot: buildDeploymentSnapshot(input.body, input.container.image),
+      error: input.error,
+      startedAt: new Date(),
+      completedAt: new Date(),
+    });
+
+  app.get(
+    "/:id/deployments",
+    { preHandler: containerReadAccess },
+    async (req, reply) => {
+      const { id } = req.params as { id: string };
+      const query = req.query as { page?: string; pageSize?: string };
+      const page = Math.max(1, Number.parseInt(query.page ?? "1", 10) || 1);
+      const pageSize = Math.min(
+        50,
+        Math.max(1, Number.parseInt(query.pageSize ?? "20", 10) || 20),
+      );
+      const container = await prisma.container.findFirst({
+        where: { id, server: { organizationId: req.organizationId! } },
+        select: { id: true },
+      });
+      if (!container) {
+        return reply
+          .status(404)
+          .send({ success: false, error: "Container not found" });
+      }
+
+      const data = await listDeployments({
+        containerId: id,
+        organizationId: req.organizationId!,
+        page,
+        pageSize,
+      });
+      return reply.send({ success: true, data });
+    },
+  );
+
+  app.get(
+    "/:id/deployments/:deploymentId",
+    { preHandler: containerReadAccess },
+    async (req, reply) => {
+      const { id, deploymentId } = req.params as {
+        id: string;
+        deploymentId: string;
+      };
+      const deployment = await getDeployment({
+        containerId: id,
+        deploymentId,
+        organizationId: req.organizationId!,
+      });
+      if (!deployment) {
+        return reply
+          .status(404)
+          .send({ success: false, error: "Deployment not found" });
+      }
+      return reply.send({ success: true, data: deployment });
+    },
+  );
+
+  app.post(
+    "/:id/deployments/:deploymentId/rollback",
+    { preHandler: containerWriteAccess },
+    async (req, reply) => {
+      const { id, deploymentId } = req.params as {
+        id: string;
+        deploymentId: string;
+      };
+
+      try {
+        const result = await rollbackContainerToDeployment({
+          containerId: id,
+          deploymentId,
+          organizationId: req.organizationId!,
+          userId: req.userId,
+        });
+        return reply.send({
+          success: true,
+          data: result.updated,
+          meta: {
+            rollbackDeploymentId: result.deploymentId,
+            targetDeploymentId: result.targetDeploymentId,
+          },
+          message: "Container rolled back successfully",
+        });
+      } catch (error) {
+        return reply.status(400).send({
+          success: false,
+          error: sanitizeDeploymentError(error, {
+            fallback: "Rollback failed",
+          }),
+        });
+      }
+    },
+  );
+
   app.get(
     "/jobs/:jobId",
     { preHandler: containerReadAccess },
@@ -1700,7 +1886,7 @@ export async function containerRoutes(app: FastifyInstance) {
           .send({ success: false, error: "Job not found" });
       }
 
-      const cancelled = cancelProcessJob(job);
+      const cancelled = await cancelProcessJob(job);
 
       return reply.send({
         success: true,
@@ -1792,7 +1978,7 @@ export async function containerRoutes(app: FastifyInstance) {
           .send({ success: false, error: validationError });
       }
 
-      const job = createProcessJob({
+      const job = await createProcessJob({
         type: "container_deploy",
         userId: req.userId,
         organizationId: req.organizationId,
@@ -2196,10 +2382,10 @@ export async function containerRoutes(app: FastifyInstance) {
               container.dockerId || container.name,
             );
             canWriteProjectEnv =
-              getWritableMountRootsForPath(
-                normalizedEnvPath,
-                [...getInspectMounts(inspect), ...storedMounts],
-              ).length > 0;
+              getWritableMountRootsForPath(normalizedEnvPath, [
+                ...getInspectMounts(inspect),
+                ...storedMounts,
+              ]).length > 0;
           } catch {
             canWriteProjectEnv = false;
           }
@@ -3082,7 +3268,6 @@ export async function containerRoutes(app: FastifyInstance) {
               volumes,
               network: selectedNetworkName,
             });
-
             const updatedContainer = await prisma.container.update({
               where: { id: container.id },
               data: {
@@ -3090,6 +3275,14 @@ export async function containerRoutes(app: FastifyInstance) {
                 dockerId: dockerId.trim().slice(0, 12),
               },
               include: { server: { select: { name: true, ip: true } } },
+            });
+
+            await recordDeployment({
+              container: updatedContainer,
+              body: body.data,
+              trigger: "MANUAL",
+              userId: req.userId,
+              organizationId: req.organizationId!,
             });
 
             await auditLog({
@@ -3107,14 +3300,22 @@ export async function containerRoutes(app: FastifyInstance) {
               message: "Deployment completed successfully",
             });
           } catch (err) {
-            const errorMessage = redactSecret(
-              err instanceof Error ? err.message : String(err),
-              accessToken,
-            );
+            const errorMessage = sanitizeDeploymentError(err, {
+              fallback: "Container deployment failed",
+              secrets: [accessToken],
+            });
             await prisma.container.update({
               where: { id: container.id },
               data: { status: "ERROR" },
             });
+            await recordFailedDeployment({
+              container,
+              body: body.data,
+              trigger: "MANUAL",
+              userId: req.userId,
+              organizationId: req.organizationId!,
+              error: errorMessage,
+            }).catch(() => undefined);
             await auditLog({
               userId: req.userId,
               serverId,
@@ -3150,6 +3351,17 @@ export async function containerRoutes(app: FastifyInstance) {
                 dockerId: dockerId.trim().slice(0, 12),
               },
             });
+            await recordDeployment({
+              container: {
+                id: container.id,
+                serverId: container.serverId,
+                image: container.image,
+              },
+              body: body.data,
+              trigger: "MANUAL",
+              userId: req.userId,
+              organizationId: req.organizationId!,
+            });
             await auditLog({
               userId: req.userId,
               serverId,
@@ -3160,14 +3372,22 @@ export async function containerRoutes(app: FastifyInstance) {
             });
           })
           .catch(async (err) => {
-            const errorMessage = redactSecret(
-              err instanceof Error ? err.message : String(err),
-              accessToken,
-            );
+            const errorMessage = sanitizeDeploymentError(err, {
+              fallback: "Container deployment failed",
+              secrets: [accessToken],
+            });
             await prisma.container.update({
               where: { id: container.id },
               data: { status: "ERROR" },
             });
+            await recordFailedDeployment({
+              container,
+              body: body.data,
+              trigger: "MANUAL",
+              userId: req.userId,
+              organizationId: req.organizationId!,
+              error: errorMessage,
+            }).catch(() => undefined);
             await auditLog({
               userId: req.userId,
               serverId,
@@ -3290,6 +3510,23 @@ export async function containerRoutes(app: FastifyInstance) {
           include: { server: { select: { name: true, ip: true } } },
         });
 
+        await Promise.all(
+          responseContainers.map((matchedContainer) =>
+            recordDeployment({
+              container: matchedContainer,
+              body: body.data,
+              trigger:
+                body.data.sourceType === "APP_INSTALLER"
+                  ? "APP_INSTALLER"
+                  : "MANUAL",
+              userId: req.userId,
+              organizationId: req.organizationId!,
+            }),
+          ),
+        ).catch((error) => {
+          app.log.error({ error }, "Failed to persist deployment history");
+        });
+
         await auditLog({
           userId: req.userId,
           serverId,
@@ -3315,10 +3552,31 @@ export async function containerRoutes(app: FastifyInstance) {
               : "Deployment completed successfully",
         });
       } catch (error) {
-        const errorMessage = redactSecret(
+        const errorMessage = sanitizeDeploymentError(
           ssh.formatDeploymentErrorMessage(error),
-          accessToken,
+          {
+            fallback: "Container deployment failed",
+            secrets: [accessToken],
+          },
         );
+
+        const failedContainer = await prisma.container.findFirst({
+          where: {
+            serverId,
+            name: { equals: rest.name, mode: "insensitive" },
+          },
+          select: { id: true, serverId: true, image: true },
+        });
+        if (failedContainer) {
+          await recordFailedDeployment({
+            container: failedContainer,
+            body: body.data,
+            trigger: body.data.sourceType === "APP_INSTALLER" ? "APP_INSTALLER" : "MANUAL",
+            userId: req.userId,
+            organizationId: req.organizationId!,
+            error: errorMessage,
+          }).catch(() => undefined);
+        }
 
         await auditLog({
           userId: req.userId,
@@ -3501,7 +3759,7 @@ export async function containerRoutes(app: FastifyInstance) {
           .send({ success: false, error: "Container not found" });
       }
 
-      const job = createProcessJob({
+      const job = await createProcessJob({
         type: "container_rebuild",
         userId: req.userId,
         organizationId: req.organizationId,
@@ -3544,6 +3802,13 @@ export async function containerRoutes(app: FastifyInstance) {
           .status(404)
           .send({ success: false, error: "Container not found" });
       }
+
+      let gitDeploymentId: string | null = null;
+      let gitDeploymentLock: { token: string } | null = null;
+      let gitDeploymentHeartbeat: ReturnType<
+        typeof startDeploymentLockHeartbeat
+      > | null = null;
+      let gitAccessToken: string | undefined;
 
       try {
         if (container.sourceType === "APP_INSTALLER") {
@@ -3626,6 +3891,50 @@ export async function containerRoutes(app: FastifyInstance) {
         const accessToken = container.deploymentSource.accessTokenEnc
           ? decrypt(container.deploymentSource.accessTokenEnc)
           : undefined;
+        gitAccessToken = accessToken;
+        const gitDeploymentSnapshot = {
+          sourceType: container.sourceType,
+          deployMode: container.deployMode,
+          buildType,
+          image: container.image,
+          ports: runtimeConfig.ports,
+          env: runtimeConfig.env,
+          volumes: runtimeConfig.volumes,
+          network: runtimeConfig.network,
+          restartPolicy: runtimeConfig.restartPolicy,
+          repoUrl: container.deploymentSource.repoUrl,
+          repoBranch: container.deploymentSource.repoBranch,
+          buildPath: container.deploymentSource.buildPath,
+          composeFilePath: container.deploymentSource.composeFilePath,
+          dockerfilePath: container.deploymentSource.dockerfilePath,
+          dockerContextPath:
+            container.deploymentSource.dockerContextPath,
+          imageTag: container.deploymentSource.imageTag,
+          deploymentPath: container.deploymentSource.deploymentPath,
+        };
+
+        gitDeploymentLock = await acquireDeploymentLock({
+          containerId: container.id,
+        });
+        gitDeploymentHeartbeat = startDeploymentLockHeartbeat({
+          containerId: container.id,
+          token: gitDeploymentLock.token,
+        });
+        const runningDeployment = await createDeployment({
+          containerId: container.id,
+          organizationId: req.organizationId!,
+          serverId: container.serverId,
+          userId: req.userId,
+          status: "RUNNING",
+          trigger: "REBUILD",
+          version:
+            container.deploymentSource.repoBranch?.trim() || container.image,
+          branch: container.deploymentSource.repoBranch?.trim() || null,
+          image: container.image,
+          configSnapshot: gitDeploymentSnapshot,
+          startedAt: new Date(),
+        });
+        gitDeploymentId = runningDeployment.id;
 
         if (buildType !== "COMPOSE") {
           for (const candidate of [container.dockerId, container.name]) {
@@ -3650,7 +3959,9 @@ export async function containerRoutes(app: FastifyInstance) {
           }
         }
 
-        await ssh.deployContainerFromGitSource(container.server, {
+        const gitDeploymentResult = await ssh.deployContainerFromGitSource(
+          container.server,
+          {
           projectName: deploymentProjectName,
           repoUrl: container.deploymentSource.repoUrl,
           branch: toOptionalValue(container.deploymentSource.repoBranch),
@@ -3686,7 +3997,9 @@ export async function containerRoutes(app: FastifyInstance) {
           deploymentPath: toOptionalValue(
             container.deploymentSource.deploymentPath,
           ),
-        });
+          },
+        );
+        gitDeploymentHeartbeat.assertOwned();
 
         await syncContainersForServers(
           [container.server],
@@ -3740,6 +4053,46 @@ export async function containerRoutes(app: FastifyInstance) {
             (candidate) =>
               candidate.name.toLowerCase() === container.name.toLowerCase(),
           ) ?? responseContainers[0];
+        if (!updatedContainer) {
+          throw new Error(
+            "Redeploy from Git finished but no primary container could be resolved",
+          );
+        }
+
+        gitDeploymentHeartbeat.assertOwned();
+
+        let imageDigest: string | null = null;
+        try {
+          const inspect = (await ssh.dockerInspect(
+            container.server,
+            updatedContainer.dockerId || updatedContainer.name,
+          )) as DockerInspectRuntime;
+          imageDigest =
+            typeof inspect.Image === "string" && inspect.Image.trim()
+              ? inspect.Image.trim()
+              : null;
+        } catch {
+          // The canonical runtime image is still persisted even when Docker
+          // does not return an image ID after the successful health gate.
+        }
+
+        await updateDeployment(runningDeployment.id, {
+          status: "SUCCESS",
+          completedAt: new Date(),
+          image: updatedContainer.image,
+          imageDigest,
+          commitSha: gitDeploymentResult.commitSha,
+          branch: container.deploymentSource.repoBranch?.trim() || null,
+          configSnapshot: {
+            ...gitDeploymentSnapshot,
+            image: updatedContainer.image,
+            imageDigest,
+            commitSha: gitDeploymentResult.commitSha,
+            matchedContainerIds: responseContainers.map(
+              (candidate) => candidate.id,
+            ),
+          },
+        });
 
         await auditLog({
           userId: req.userId,
@@ -3748,6 +4101,16 @@ export async function containerRoutes(app: FastifyInstance) {
           category: "CONTAINER",
           level: "SUCCESS",
           message: `Container "${container.name}" redeployed from Git on ${container.server.name}`,
+          meta: {
+            deploymentId: runningDeployment.id,
+            commitSha: gitDeploymentResult.commitSha,
+            branch: container.deploymentSource.repoBranch,
+            image: updatedContainer.image,
+            imageDigest,
+            matchedContainerIds: responseContainers.map(
+              (candidate) => candidate.id,
+            ),
+          },
         });
 
         return reply.send({
@@ -3759,11 +4122,45 @@ export async function containerRoutes(app: FastifyInstance) {
               : "Container redeployed successfully from Git",
         });
       } catch (err: unknown) {
+        const errorMessage = gitDeploymentId
+          ? sanitizeDeploymentError(ssh.formatDeploymentErrorMessage(err), {
+              fallback: "Git redeploy failed",
+              secrets: [gitAccessToken],
+            })
+          : err instanceof Error
+            ? err.message
+            : "Failed to rebuild container";
+
+        if (gitDeploymentId) {
+          await updateDeployment(gitDeploymentId, {
+            status: "FAILED",
+            error: errorMessage,
+            completedAt: new Date(),
+          }).catch(() => undefined);
+          await auditLog({
+            userId: req.userId,
+            organizationId: req.organizationId,
+            serverId: container.serverId,
+            action: "CONTAINER_REDEPLOY_GIT",
+            category: "CONTAINER",
+            level: "ERROR",
+            message: `Git redeploy failed for container "${container.name}": ${errorMessage}`,
+            meta: { deploymentId: gitDeploymentId },
+          }).catch(() => undefined);
+        }
+
         return reply.status(500).send({
           success: false,
-          error:
-            err instanceof Error ? err.message : "Failed to rebuild container",
+          error: errorMessage,
         });
+      } finally {
+        gitDeploymentHeartbeat?.stop();
+        if (gitDeploymentLock) {
+          await releaseDeploymentLock({
+            containerId: container.id,
+            token: gitDeploymentLock.token,
+          }).catch(() => undefined);
+        }
       }
     },
   );

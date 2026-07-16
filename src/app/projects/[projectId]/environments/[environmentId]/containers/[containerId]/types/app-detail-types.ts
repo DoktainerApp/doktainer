@@ -144,35 +144,12 @@ export interface DeploymentHistoryItem {
   branch: string;
   duration: string;
   deployedAt: string;
-}
-
-export interface DeploymentPipelineStep {
-  id: string;
-  label: string;
-  description: string;
-  status: "success" | "running" | "pending" | "failed";
-  duration: string;
-}
-
-export interface DeploymentArtifact {
-  label: string;
-  value: string;
-  meta: string;
+  canRollback?: boolean;
 }
 
 export interface DeploymentTabData {
   summaries: DeploymentTabSummary[];
-  latest: {
-    version: string;
-    status: DeploymentHistoryItem["status"];
-    source: string;
-    image: string;
-    deployedBy: string;
-  };
   history: DeploymentHistoryItem[];
-  pipeline: DeploymentPipelineStep[];
-  artifacts: DeploymentArtifact[];
-  hasHistoricalData: boolean;
 }
 
 export interface AdvancedSummary {

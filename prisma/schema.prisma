@@ -31,6 +31,7 @@ model User {
   createdOrganizations Organization[] @relation("OrganizationCreator")
   apiKeys      ApiKey[]
   auditLogs    AuditLog[]
+  deployments  Deployment[]
   settings     UserSettings?
   notificationProviders UserNotificationProvider[]
   integrations UserIntegration[]
@@ -61,6 +62,7 @@ model Organization {
   apiKeys     ApiKey[]
   invitations UserInvitation[]
   auditLogs   AuditLog[]
+  deployments Deployment[]
 
   @@index([createdById])
   @@map("organizations")
@@ -397,6 +399,7 @@ model Server {
   storageDestinations UserStorageDestination[]
   domains      Domain[]
   auditLogs    AuditLog[]
+  deployments  Deployment[]
   metrics      ServerMetric[]
   appInstalls  AppInstall[]
   backups      Backup[]
@@ -456,6 +459,8 @@ model Container {
   environment Environment?    @relation(fields: [environmentId], references: [id], onDelete: SetNull)
   domains     Domain[]
   deploymentSource ContainerDeploymentSource?
+  deployments Deployment[]
+  deploymentLock DeploymentLock?
   ports       Json            @default("[]") // [{host: 80, container: 80, protocol: "tcp"}]
   envVars     Json            @default("[]") // [{key: "NODE_ENV", value: "production"}]
   volumes     Json            @default("[]")
@@ -499,6 +504,67 @@ model ContainerDeploymentSource {
 
   @@index([gitProviderId])
   @@map("container_deployment_sources")
+}
+
+model Deployment {
+  id              String           @id @default(cuid())
+  containerId     String
+  organizationId  String
+  serverId        String
+  userId          String?
+  status          DeploymentStatus
+  trigger         DeploymentTrigger
+  version         String?
+  commitSha       String?
+  branch          String?
+  image           String?
+  imageDigest     String?
+  configSnapshot  Json
+  rollbackSnapshotEnc String?
+  error           String?
+  startedAt       DateTime?
+  completedAt     DateTime?
+  createdAt       DateTime         @default(now())
+
+  container       Container         @relation(fields: [containerId], references: [id], onDelete: Cascade)
+  organization    Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  server          Server             @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  user            User?              @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([containerId, createdAt])
+  @@index([organizationId, createdAt])
+  @@index([serverId, createdAt])
+  @@map("deployments")
+}
+
+model DeploymentLock {
+  containerId String   @id
+  token       String   @unique
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  container Container @relation(fields: [containerId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
+  @@map("deployment_locks")
+}
+
+enum DeploymentStatus {
+  QUEUED
+  RUNNING
+  SUCCESS
+  FAILED
+  CANCELLED
+  ROLLED_BACK
+}
+
+enum DeploymentTrigger {
+  MANUAL
+  GIT_WEBHOOK
+  REBUILD
+  ROLLBACK
+  APP_INSTALLER
 }
 
 model Network {
@@ -781,4 +847,3 @@ enum BackupStatus {
   COMPLETED
   FAILED
 }
-

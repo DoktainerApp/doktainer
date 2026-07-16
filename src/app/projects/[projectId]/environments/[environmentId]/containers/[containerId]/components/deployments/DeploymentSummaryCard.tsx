@@ -20,6 +20,7 @@ export default function DeploymentSummaryCard({
       className="card"
       style={{
         padding: 14,
+        minWidth: 0,
         minHeight: 104,
         display: "flex",
         flexDirection: "column",
@@ -42,11 +43,24 @@ export default function DeploymentSummaryCard({
           color: "var(--text-primary)",
           fontSize: 20,
           lineHeight: 1.1,
+          minWidth: 0,
+          overflowWrap: "anywhere",
+          wordBreak: "break-word",
         }}
+        title={item.value}
       >
         {item.value}
       </strong>
-      <span style={{ color: toneColor[item.tone], fontSize: 11 }}>
+      <span
+        style={{
+          color: toneColor[item.tone],
+          fontSize: 11,
+          minWidth: 0,
+          overflowWrap: "anywhere",
+          wordBreak: "break-word",
+        }}
+        title={item.subvalue}
+      >
         {item.subvalue}
       </span>
     </section>

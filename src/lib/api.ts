@@ -1,5 +1,5 @@
 /**
- * API Client â€” DOKTAINER
+ * API Client — DOKTAINER
  * Centralized HTTP client with auth token injection
  */
 
@@ -130,7 +130,7 @@ function handleUnauthorizedSession(
   throw new Error("Unauthorized - session expired");
 }
 
-// â”€â”€â”€ Token helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Token helpers ────────────────────────────────────────────────────────────
 
 export function getToken(): string | null {
   return getSensitiveStorageItem(sensitiveStorageKeys.token);
@@ -165,7 +165,7 @@ export function setUser(user: UserInfo): void {
   emitAuthStateChanged();
 }
 
-// â”€â”€â”€ Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface UserInfo {
   id: string;
@@ -628,7 +628,7 @@ async function readApiErrorMessage(
   }
 }
 
-// â”€â”€â”€ Core fetch wrapper â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Core fetch wrapper ───────────────────────────────────────────────────────
 
 async function request<T>(
   path: string,
@@ -754,7 +754,7 @@ function del<T>(path: string, body?: unknown, config?: { timeoutMs?: number }) {
   );
 }
 
-// â”€â”€â”€ WebSocket helper â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── WebSocket helper ─────────────────────────────────────────────────────────
 
 export function createWs(path: string): WebSocket {
   const token = getToken();
@@ -764,7 +764,7 @@ export function createWs(path: string): WebSocket {
   );
 }
 
-// â”€â”€â”€ Auth â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Auth ─────────────────────────────────────────────────────────────────────
 
 export const auth = {
   registrationStatus: () =>
@@ -858,7 +858,7 @@ export const auth = {
     ),
 };
 
-// â”€â”€â”€ Users â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Users ───────────────────────────────────────────────────────────────────
 
 export type UserRole = "SUPER_ADMIN" | "OPERATOR" | "DEVELOPER" | "VIEWER";
 
@@ -1244,7 +1244,7 @@ export const gitProvidersApi = {
     ),
 };
 
-// â”€â”€â”€ Servers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Servers ──────────────────────────────────────────────────────────────────
 
 export interface Server {
   id: string;
@@ -1536,7 +1536,7 @@ export const servers = {
     ),
 };
 
-// â”€â”€â”€ Containers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Containers ───────────────────────────────────────────────────────────────
 
 export interface Container {
   id: string;
@@ -1611,6 +1611,40 @@ export interface ContainerDetails {
   inspect: Record<string, unknown>;
   stats: ContainerRuntimeStats;
   processes: ContainerProcess[];
+}
+
+export type DeploymentStatus =
+  | "QUEUED"
+  | "RUNNING"
+  | "SUCCESS"
+  | "FAILED"
+  | "CANCELLED"
+  | "ROLLED_BACK";
+
+export type DeploymentTrigger =
+  | "MANUAL"
+  | "GIT_WEBHOOK"
+  | "REBUILD"
+  | "ROLLBACK"
+  | "APP_INSTALLER";
+
+export interface DeploymentRecord {
+  id: string;
+  containerId: string;
+  serverId?: string;
+  status: DeploymentStatus;
+  trigger: DeploymentTrigger;
+  version: string | null;
+  commitSha: string | null;
+  branch: string | null;
+  image: string | null;
+  imageDigest: string | null;
+  configSnapshot?: Record<string, unknown>;
+  error: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  createdAt: string;
+  user: { id: string; name: string } | null;
 }
 
 export interface ContainerMetrics {
@@ -1786,6 +1820,35 @@ export const containers = {
   },
   get: (id: string) =>
     get<{ success: boolean; data: Container }>(`/containers/${id}`),
+  deployments: (id: string, params?: { page?: number; pageSize?: number }) => {
+    const qs = new URLSearchParams();
+    if (params?.page) qs.set("page", String(params.page));
+    if (params?.pageSize) qs.set("pageSize", String(params.pageSize));
+    const query = qs.toString();
+    return get<{
+      success: boolean;
+      data: {
+        items: DeploymentRecord[];
+        total: number;
+        page: number;
+        pageSize: number;
+      };
+    }>(`/containers/${id}/deployments${query ? `?${query}` : ""}`);
+  },
+  rollbackDeployment: (containerId: string, deploymentId: string) =>
+    post<{
+      success: boolean;
+      data: Container;
+      meta?: {
+        rollbackDeploymentId: string;
+        targetDeploymentId: string;
+      };
+      message?: string;
+    }>(`/containers/${containerId}/deployments/${deploymentId}/rollback`, {}),
+  deployment: (containerId: string, deploymentId: string) =>
+    get<{ success: boolean; data: DeploymentRecord }>(
+      `/containers/${containerId}/deployments/${deploymentId}`,
+    ),
   deploy: (body: ContainerDeployBody) =>
     post<{
       success: boolean;
@@ -2003,7 +2066,7 @@ export const containers = {
     ),
 };
 
-// â”€â”€â”€ Metrics â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Metrics ──────────────────────────────────────────────────────────────────
 
 export interface DashboardOverview {
   servers: { total: number; online: number };
@@ -2059,7 +2122,7 @@ export const metrics = {
     ),
 };
 
-// â”€â”€â”€ Domains â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Domains ──────────────────────────────────────────────────────────────────
 
 export interface Domain {
   id: string;
@@ -2450,7 +2513,7 @@ export const security = {
     ),
 };
 
-// â”€â”€â”€ Apps â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Apps ────────────────────────────────────────────────────────────────────
 
 export interface AppTemplate {
   id: string;
@@ -2649,7 +2712,7 @@ export const apps = {
     }),
 };
 
-// â”€â”€â”€ Backups â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Backups ──────────────────────────────────────────────────────────────────
 
 export interface Backup {
   id: string;
@@ -2750,7 +2813,7 @@ export const backups = {
   delete: (id: string) => del<{ success: boolean }>(`/backups/${id}`),
 };
 
-// â”€â”€â”€ Logs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Logs ─────────────────────────────────────────────────────────────────────
 
 export const logs = {
   list: (params?: {
@@ -2775,7 +2838,7 @@ export const logs = {
   },
 };
 
-// â”€â”€â”€ Terminal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Terminal ─────────────────────────────────────────────────────────────────
 
 export const terminal = {
   sessions: () =>
@@ -2847,4 +2910,3 @@ export const apiClient = {
   terminal,
 };
 export default apiClient;
-

@@ -5,6 +5,7 @@ import jwt from "@fastify/jwt";
 import rateLimit from "@fastify/rate-limit";
 import websocket from "@fastify/websocket";
 import prisma from "./lib/prisma";
+import { validateEncryptionConfiguration } from "./lib/crypto";
 
 import { authRoutes } from "./routes/auth";
 import { serverRoutes } from "./routes/servers";
@@ -109,10 +110,11 @@ async function ensureDatabaseConnection() {
 
 async function start() {
   const jwtSecret = getJwtSecretOrThrow();
+  validateEncryptionConfiguration();
   await ensureDatabaseConnection();
   setDefaultSecurityHeaders();
 
-  // â”€â”€ Plugins â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Plugins ──────────────────────────────────────────
   await app.register(cors, {
     origin: getCorsOrigins(),
     credentials: true,
@@ -143,7 +145,7 @@ async function start() {
 
   await app.register(websocket);
 
-  // â”€â”€ Health check â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Health check ──────────────────────────────────────
   app.get("/health", { config: { rateLimit: false } }, async () => ({
     status: "ok",
     uptime: process.uptime(),
@@ -151,7 +153,7 @@ async function start() {
     version: process.env.NEXT_PUBLIC_VERSION || "unknown",
   }));
 
-  // â”€â”€ API Routes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── API Routes ────────────────────────────────────────
   const API_PREFIX = "/api/v1";
 
   await app.register(authRoutes, { prefix: `${API_PREFIX}/auth` });
@@ -183,7 +185,7 @@ async function start() {
     prefix: `${API_PREFIX}/notifications`,
   });
 
-  // â”€â”€ Error handler â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Error handler ─────────────────────────────────────
   app.setErrorHandler((error: FastifyError, _req, reply) => {
     app.log.error(error);
     const code = error.statusCode || 500;
@@ -194,14 +196,14 @@ async function start() {
     });
   });
 
-  // â”€â”€ Start â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Start ─────────────────────────────────────────────
   try {
     await app.listen({ port: PORT, host: HOST });
     startS3StorageRetentionScheduler();
     console.log(
-      `\nðŸš€ Doktainer Server Backend running on http://${HOST}:${PORT}`,
+      `\n🚀 Doktainer Server Backend running on http://${HOST}:${PORT}`,
     );
-    console.log(`ðŸ“‹ Health Check: http://localhost:${PORT}/health\n`);
+    console.log(`📋 Health Check: http://localhost:${PORT}/health\n`);
   } catch (err) {
     const error = err as NodeJS.ErrnoException;
     if (error.code === "EADDRINUSE") {
@@ -227,4 +229,3 @@ if (require.main === module) {
 }
 
 export { app, start };
-

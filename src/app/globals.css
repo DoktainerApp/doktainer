@@ -384,6 +384,9 @@ body {
   flex: 1 1 240px;
 }
 
+.deployment-filter-toolbar { display: flex; align-items: flex-end; justify-content: flex-end; gap: 12px; flex-wrap: wrap; }
+.deployment-filter-control { display: grid; gap: 4px; min-width: 160px; flex: 0 1 190px; }
+
 @media (max-width: 768px) {
   .ui-responsive-toolbar,
   .ui-tab-shell {
@@ -416,6 +419,9 @@ body {
   .ui-tab-scroll {
     width: 100%;
   }
+
+  .deployment-filter-toolbar { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: end; justify-content: stretch; }
+  .deployment-filter-control { min-width: 0; width: 100%; flex: none; }
 }
 
 /* Gradient text */

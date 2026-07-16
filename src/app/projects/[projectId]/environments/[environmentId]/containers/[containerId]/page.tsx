@@ -18,6 +18,7 @@ import {
   type ContainerProcess,
   type ContainerProjectEnvFile,
   type ContainerRuntimeStats,
+  type DeploymentRecord,
   type Domain,
   type ProjectEnvironmentRecord,
   type ProjectRecord,
@@ -25,6 +26,7 @@ import {
 import ContainerFileManagerModal from "@/components/containers/modals/ContainerFileManagerModal";
 import AdvancedTabPanel from "./components/advanced/AdvancedTabPanel";
 import DeploymentsTabPanel from "./components/deployments/DeploymentsTabPanel";
+import DeploymentDetailsModal from "./components/deployments/DeploymentDetailsModal";
 import EnvironmentTabPanel from "./components/environment/EnvironmentTabPanel";
 import AppDetailHeader from "./components/header/AppDetailHeader";
 import LogsTabPanel from "./components/logs/LogsTabPanel";
@@ -467,6 +469,16 @@ export default function AppContainerDetailPage() {
   );
   const [loading, setLoading] = useState(true);
   const [acting, setActing] = useState(false);
+  const [rollingBackDeploymentId, setRollingBackDeploymentId] = useState<
+    string | null
+  >(null);
+  const [selectedDeployment, setSelectedDeployment] =
+    useState<DeploymentRecord | null>(null);
+  const [deploymentDetailLoading, setDeploymentDetailLoading] =
+    useState(false);
+  const [deploymentDetailError, setDeploymentDetailError] = useState<
+    string | null
+  >(null);
   const [activeAction, setActiveAction] = useState<AppAction["id"] | null>(
     null,
   );
@@ -491,6 +503,7 @@ export default function AppContainerDetailPage() {
   const runtimeMetricsInFlightRef = useRef(false);
   const runtimeDetailRef = useRef<ContainerDetails | null>(null);
   const environmentRecordRef = useRef<ProjectEnvironmentRecord | null>(null);
+  const deploymentHistoryRef = useRef<DeploymentRecord[]>([]);
   const projectEnvRef = useRef<ContainerProjectEnvFile | null>(null);
   const domainsLoadedRef = useRef(false);
   const domainsLoadingRef = useRef(false);
@@ -518,6 +531,7 @@ export default function AppContainerDetailPage() {
     runtimeDetailLoadedRef.current = false;
     projectEnvLoadedRef.current = false;
     logsLoadedRef.current = false;
+    deploymentHistoryRef.current = [];
 
     try {
       const [projectResponse, containerResponse, metricsResult] =
@@ -613,6 +627,105 @@ export default function AppContainerDetailPage() {
   useEffect(() => {
     containerRecordRef.current = containerRecord;
   }, [containerRecord]);
+
+  const hydrateDeployments = useCallback(async () => {
+    const container = containerRecordRef.current;
+    if (!container) return;
+
+    try {
+      const response = await containersApi.deployments(params.containerId, {
+        page: 1,
+        pageSize: 50,
+      });
+      deploymentHistoryRef.current = response.data.items;
+      setAppDetail((current) =>
+        current
+          ? {
+              ...current,
+              deployments: createDeploymentsData(
+                container,
+                runtimeDetailRef.current,
+                response.data.items,
+              ),
+            }
+          : current,
+      );
+    } catch {
+      // The detail page remains usable if deployment history is unavailable.
+    }
+  }, [params.containerId]);
+
+  const runRollback = useCallback(
+    async (deploymentId: string) => {
+      if (acting || rollingBackDeploymentId) return;
+
+      setRollingBackDeploymentId(deploymentId);
+      setActionError("");
+      try {
+        await containersApi.rollbackDeployment(params.containerId, deploymentId);
+        await load();
+        setActiveTab("deployments");
+      } catch (rollbackError) {
+        setActionError(
+          rollbackError instanceof Error
+            ? rollbackError.message
+            : "Rollback failed",
+        );
+      } finally {
+        setRollingBackDeploymentId(null);
+      }
+    },
+    [acting, load, params.containerId, rollingBackDeploymentId],
+  );
+
+  const requestRollback = useCallback(
+    (deploymentId: string) => {
+      const deployment = appDetail?.deployments.history.find(
+        (item) => item.id === deploymentId,
+      );
+      if (!deployment || !deployment.canRollback) return;
+
+      setConfirmDialog({
+        title: "Rollback Deployment",
+        description: `Rollback container "${appDetail?.name ?? "this container"}" to ${deployment.version}?`,
+        confirmLabel: "Rollback Deployment",
+        tone: "warning",
+        note: "The current container will be replaced using the selected deployment artifact. Doktainer will attempt to recover the current runtime if rollback fails.",
+        onConfirm: () => {
+          void runRollback(deploymentId);
+        },
+      });
+    },
+    [appDetail, runRollback],
+  );
+
+  const openDeploymentDetails = useCallback(
+    async (deploymentId: string) => {
+      setSelectedDeployment(null);
+      setDeploymentDetailError(null);
+      setDeploymentDetailLoading(true);
+      try {
+        const response = await containersApi.deployment(
+          params.containerId,
+          deploymentId,
+        );
+        setSelectedDeployment(response.data);
+      } catch (detailsError) {
+        setDeploymentDetailError(
+          detailsError instanceof Error
+            ? detailsError.message
+            : "Failed to load deployment details",
+        );
+      } finally {
+        setDeploymentDetailLoading(false);
+      }
+    },
+    [params.containerId],
+  );
+
+  useEffect(() => {
+    if (containerRecord) void hydrateDeployments();
+  }, [containerRecord, hydrateDeployments]);
 
   const refreshRuntimeMetrics = useCallback(async () => {
     const container = containerRecordRef.current;
@@ -757,7 +870,11 @@ export default function AppContainerDetailPage() {
           serverIp: detail.server.ip,
           metrics: buildMetrics(detail, container),
           runtime: createRuntimeData(container, detail),
-          deployments: createDeploymentsData(container, detail),
+          deployments: createDeploymentsData(
+            container,
+            detail,
+            deploymentHistoryRef.current,
+          ),
           advanced: createAdvancedData(container, detail),
           environment: createEnvironmentData({
             container,
@@ -940,6 +1057,7 @@ export default function AppContainerDetailPage() {
       return;
     }
 
+    setActionError("");
     window.open(appDetail.openUrl, "_blank", "noopener,noreferrer");
   }, [appDetail]);
 
@@ -1432,6 +1550,15 @@ export default function AppContainerDetailPage() {
           current?.onConfirm();
         }}
       />
+      <DeploymentDetailsModal
+        deployment={selectedDeployment}
+        loading={deploymentDetailLoading}
+        error={deploymentDetailError}
+        onClose={() => {
+          setSelectedDeployment(null);
+          setDeploymentDetailError(null);
+        }}
+      />
       <ProcessLogsModal
         open={isProcessLogsOpen}
         onClose={closeProcessLogs}
@@ -1544,7 +1671,12 @@ export default function AppContainerDetailPage() {
               />
             ) : activeTab === "terminal" ? null : activeTab ===
               "deployments" ? (
-              <DeploymentsTabPanel deployments={appDetail.deployments} />
+              <DeploymentsTabPanel
+                deployments={appDetail.deployments}
+                onRollback={requestRollback}
+                onViewDetails={openDeploymentDetails}
+                rollingBackId={rollingBackDeploymentId}
+              />
             ) : activeTab === "advanced" ? (
               <AdvancedTabPanel
                 advanced={appDetail.advanced}

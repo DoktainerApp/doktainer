@@ -69,6 +69,37 @@ Security fixes may be released as maintenance releases:
 
 or, when necessary, included in the next milestone release.
 
+## Production Encryption Key
+
+Doktainer uses `ENCRYPTION_KEY` to encrypt SSH credentials, integration secrets,
+and deployment rollback snapshots at rest.
+
+- Production startup requires a non-placeholder key of at least 32 characters.
+- Generate a key with a cryptographically secure generator, for example
+  `openssl rand -hex 32`.
+- Store the key in a secret manager or protected runtime environment file. Do
+  not commit the production value to Git.
+- Keep the key stable across application restarts and deployments. Losing it
+  makes existing encrypted records unreadable.
+
+### Rotation procedure
+
+Do not replace `ENCRYPTION_KEY` directly while encrypted records still use the
+old key. A safe rotation requires:
+
+1. Back up the database and verify the backup can be restored.
+2. Stop writes that create or update encrypted records.
+3. Decrypt every encrypted record with the old key and re-encrypt it with the
+   new key, including deployment `rollbackSnapshotEnc` values.
+4. Verify representative SSH credentials, integrations, 2FA secrets, storage
+   destinations, and rollback snapshots before switching traffic.
+5. Deploy the new key, restart all backend instances, and remove the old key
+   only after verification succeeds.
+
+The current encrypted payload format does not contain a key identifier.
+Operators should therefore treat key rotation as a controlled maintenance
+operation until versioned key-ring support is implemented.
+
 ## Acknowledgements
 
 We appreciate responsible security researchers and community members who help improve the security of Doktainer.

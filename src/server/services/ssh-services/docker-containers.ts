@@ -1,8 +1,8 @@
 ﻿import yaml from "js-yaml";
 import { randomBytes } from "crypto";
 import { posix as pathPosix } from "path";
-import { Server } from "@prisma/client";
 import { TextDecoder } from "util";
+import { Server } from "@prisma/client";
 import { execStrict } from "./commands";
 import { execDocker, execDockerStrict } from "./internal/docker";
 import { privilegedCommand } from "./internal/privilege";
@@ -1138,6 +1138,18 @@ export async function listContainerFiles(
     parentPath: getParentContainerPath(resolvedPath),
     entries,
   };
+}
+
+export async function dockerRename(
+  server: Server,
+  containerId: string,
+  newName: string,
+): Promise<void> {
+  await execDockerStrict(
+    server,
+    `docker rename ${escapeShellArg(containerId)} ${escapeShellArg(newName)}`,
+    shortDockerCommandTimeout(DOCKER_ACTION_TIMEOUT_MS),
+  );
 }
 
 export async function getContainerMainProcessWorkingDirectory(
@@ -2518,6 +2530,7 @@ export async function deployContainerFromGitSource(
   dockerId?: string;
   imageTag?: string;
   composeFilePath?: string;
+  commitSha: string;
 }> {
   const projectName = sanitizeProjectName(opts.projectName);
   const deploymentPath =
@@ -2572,6 +2585,24 @@ export async function deployContainerFromGitSource(
     throw new Error(formatDeploymentErrorMessage(error));
   }
 
+  let commitSha = "";
+  try {
+    commitSha = (
+      await execStrict(
+        server,
+        privilegedCommand(
+          server,
+          `git -C ${escapeShellArg(deploymentPath)} rev-parse HEAD`,
+        ),
+        shortDockerCommandTimeout(DOCKER_INSPECT_TIMEOUT_MS),
+      )
+    ).trim();
+  } catch (error) {
+    throw new Error(
+      `Repository was cloned but its commit SHA could not be resolved: ${formatDeploymentErrorMessage(error)}`,
+    );
+  }
+
   if (buildType === "COMPOSE") {
     try {
       await writeComposeEnvFiles({
@@ -2608,6 +2639,7 @@ export async function deployContainerFromGitSource(
     return {
       deploymentPath,
       composeFilePath,
+      commitSha,
     };
   }
 
@@ -2708,6 +2740,7 @@ export async function deployContainerFromGitSource(
       deploymentPath,
       dockerId,
       imageTag,
+      commitSha,
     };
   }
 
@@ -2813,6 +2846,7 @@ export async function deployContainerFromGitSource(
       deploymentPath,
       dockerId,
       imageTag,
+      commitSha,
     };
   }
 
@@ -2851,6 +2885,7 @@ export async function deployContainerFromGitSource(
       deploymentPath,
       dockerId,
       imageTag,
+      commitSha,
     };
   }
 
@@ -2916,5 +2951,6 @@ export async function deployContainerFromGitSource(
     deploymentPath,
     dockerId,
     imageTag,
+    commitSha,
   };
 }

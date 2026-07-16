@@ -4,6 +4,13 @@ import { auditLog } from "./audit.service";
 import { dispatchRuntimeNotification } from "./notification.service";
 import * as ssh from "./ssh.service";
 import { APP_TEMPLATES } from "../config/app-templates";
+import { createDeployment, updateDeployment } from "./deployment.service";
+import {
+  acquireDeploymentLock,
+  DeploymentLockConflictError,
+  releaseDeploymentLock,
+  startDeploymentLockHeartbeat,
+} from "./deployment-lock.service";
 
 type DockerInspectRuntime = {
   Config?: {
@@ -176,15 +183,51 @@ export async function rebuildAppInstall(options: {
     throw new Error("Unable to determine which image should be rebuilt");
   }
 
-  await prisma.appInstall.update({
-    where: { id: install.id },
-    data: { status: "INSTALLING", error: null },
-  });
-
   let pulledLatestImage = false;
   let usedImageCache = false;
+  let deploymentId: string | null = null;
+  let deploymentLockToken: string | null = null;
+  let deploymentLockContainerId: string | null = null;
+  let deploymentLockHeartbeat: ReturnType<
+    typeof startDeploymentLockHeartbeat
+  > | null = null;
 
   try {
+    const currentContainer = await prisma.container.findFirst({
+      where: {
+        serverId: install.serverId,
+        name: { equals: install.containerName, mode: "insensitive" },
+      },
+      select: { id: true },
+    });
+    if (currentContainer) {
+      const lock = await acquireDeploymentLock({ containerId: currentContainer.id });
+      deploymentLockToken = lock.token;
+      deploymentLockContainerId = currentContainer.id;
+      deploymentLockHeartbeat = startDeploymentLockHeartbeat({
+        containerId: currentContainer.id,
+        token: lock.token,
+      });
+      const deployment = await createDeployment({
+        containerId: currentContainer.id,
+        organizationId: options.organizationId ?? install.server.organizationId,
+        serverId: install.serverId,
+        userId: options.userId,
+        status: "RUNNING",
+        trigger: "REBUILD",
+        version: runtimeConfig.image,
+        image: runtimeConfig.image,
+        configSnapshot: runtimeConfig,
+        startedAt: new Date(),
+      });
+      deploymentId = deployment.id;
+    }
+
+    await prisma.appInstall.update({
+      where: { id: install.id },
+      data: { status: "INSTALLING", error: null },
+    });
+
     try {
       await ssh.dockerPullImage(install.server, runtimeConfig.image);
       pulledLatestImage = true;
@@ -218,6 +261,8 @@ export async function rebuildAppInstall(options: {
 
     const normalizedDockerId = dockerId.trim().slice(0, 12);
 
+    deploymentLockHeartbeat?.assertOwned();
+
     await prisma.container.updateMany({
       where: {
         serverId: install.serverId,
@@ -237,6 +282,14 @@ export async function rebuildAppInstall(options: {
         server: { select: { name: true, ip: true, organizationId: true } },
       },
     });
+
+    if (deploymentId) {
+      await updateDeployment(deploymentId, {
+        status: "SUCCESS",
+        completedAt: new Date(),
+        image: runtimeConfig.image,
+      });
+    }
 
     await auditLog({
       userId: options.userId,
@@ -283,6 +336,9 @@ export async function rebuildAppInstall(options: {
       usedImageCache,
     };
   } catch (error) {
+    if (error instanceof DeploymentLockConflictError) {
+      throw error;
+    }
     const message =
       error instanceof Error ? error.message : "Failed to rebuild app";
 
@@ -298,6 +354,15 @@ export async function rebuildAppInstall(options: {
       },
       data: { status: "ERROR" },
     });
+
+    if (deploymentId) {
+      await updateDeployment(deploymentId, {
+        status: "FAILED",
+        error: message,
+        completedAt: new Date(),
+        image: runtimeConfig.image,
+      }).catch(() => undefined);
+    }
 
     await auditLog({
       userId: options.userId,
@@ -335,5 +400,13 @@ export async function rebuildAppInstall(options: {
     }
 
     throw error instanceof Error ? error : new Error(message);
+  } finally {
+    deploymentLockHeartbeat?.stop();
+    if (deploymentLockToken && deploymentLockContainerId) {
+      await releaseDeploymentLock({
+        containerId: deploymentLockContainerId,
+        token: deploymentLockToken,
+      }).catch(() => undefined);
+    }
   }
 }
