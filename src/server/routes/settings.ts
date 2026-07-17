@@ -711,18 +711,31 @@ export async function settingsRoutes(app: FastifyInstance) {
   const runDatabaseCommand = async (
     command: "pg_dump" | "pg_restore" | "psql",
     args: string[],
-    options: { inputPath?: string; outputPath?: string } = {},
+    options: {
+      inputPath?: string;
+      outputPath?: string;
+      allowTransactionTimeoutCompatibilityError?: boolean;
+    } = {},
   ) => {
     const databaseUrl = process.env.DATABASE_URL?.trim();
     if (!databaseUrl) throw new Error("DATABASE_URL is not configured");
     const databaseCliUrl = getPostgresCliUrl(databaseUrl);
 
-    const run = (executable: string, commandArgs: string[], usePipe = false) =>
+    const run = (
+      executable: string,
+      commandArgs: string[],
+      usePipe = false,
+      inputPathOverride?: string | null,
+    ) =>
       new Promise<void>((resolve, reject) => {
+        const inputPath =
+          inputPathOverride === undefined
+            ? options.inputPath
+            : inputPathOverride;
         const child = spawn(executable, commandArgs, {
           env: { ...process.env, PGPASSFILE: undefined },
           stdio: [
-            options.inputPath ? "pipe" : "ignore",
+            inputPath ? "pipe" : "ignore",
             usePipe ? "pipe" : "ignore",
             "pipe",
           ],
@@ -739,18 +752,55 @@ export async function settingsRoutes(app: FastifyInstance) {
           child.once("close", (code) => resolveExit(code ?? 1));
         });
         const streamTasks: Promise<unknown>[] = [];
-        if (options.inputPath)
+        if (inputPath)
           streamTasks.push(
-            pipeline(createReadStream(options.inputPath), child.stdin!),
+            pipeline(createReadStream(inputPath), child.stdin!),
           );
         if (output && child.stdout)
           streamTasks.push(pipeline(child.stdout, output));
-        void Promise.all([childExit, ...streamTasks])
-          .then(([code]) => {
-            if (code === 0) resolve();
-            else reject(new Error(stderr.trim() || `${command} failed`));
-          })
-          .catch(reject);
+        void Promise.allSettled([childExit, ...streamTasks]).then((results) => {
+          const exitResult = results[0];
+          const rejectedResult = results.find(
+            (result) => result.status === "rejected",
+          );
+          const exitCode =
+            exitResult?.status === "fulfilled" ? exitResult.value : 1;
+          const streamError =
+            rejectedResult?.status === "rejected" &&
+            rejectedResult.reason instanceof Error
+              ? rejectedResult.reason.message
+              : "";
+
+          const onlyTransactionTimeoutCompatibilityError =
+            options.allowTransactionTimeoutCompatibilityError &&
+            stderr.includes(
+              'unrecognized configuration parameter "transaction_timeout"',
+            ) &&
+            stderr
+              .replace(
+                /pg_restore: error: could not execute query: ERROR:\s+unrecognized configuration parameter "transaction_timeout"[\r\n]+Command was:\s*SET transaction_timeout = 0;\s*/g,
+                "",
+              )
+              .replace(
+                /pg_restore: warning: errors ignored on restore: 1\s*/g,
+                "",
+              )
+              .trim().length === 0;
+
+          if (
+            !rejectedResult &&
+            (exitCode === 0 || onlyTransactionTimeoutCompatibilityError)
+          ) {
+            resolve();
+            return;
+          }
+
+          reject(
+            new Error(
+              stderr.trim() || streamError || `${command} failed with exit code ${exitCode}`,
+            ),
+          );
+        });
       });
 
     const databaseContainer =
@@ -768,10 +818,13 @@ export async function settingsRoutes(app: FastifyInstance) {
     const localBinary = await findLocalPostgresBinary(command);
     const runLocal = async () => {
       if (!localBinary) return false;
+      const localArgs = ["--dbname", databaseCliUrl, ...args];
+      if (options.inputPath) localArgs.push(options.inputPath);
       await run(
         localBinary,
-        ["--dbname", databaseCliUrl, ...args],
+        localArgs,
         Boolean(options.outputPath),
+        null,
       );
       return true;
     };
@@ -859,9 +912,12 @@ export async function settingsRoutes(app: FastifyInstance) {
         await runDatabaseCommand(
           isCustomArchive ? "pg_restore" : "psql",
           isCustomArchive
-            ? ["--clean", "--if-exists", "--no-owner", "--exit-on-error"]
+            ? ["--clean", "--if-exists", "--no-owner"]
             : ["--set", "ON_ERROR_STOP=1"],
-          { inputPath: filePath },
+          {
+            inputPath: filePath,
+            allowTransactionTimeoutCompatibilityError: isCustomArchive,
+          },
         );
         await auditLog({
           userId: req.userId,
