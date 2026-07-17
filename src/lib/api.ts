@@ -669,7 +669,9 @@ async function requestRaw(
       ? setTimeout(() => controller.abort(), timeoutMs)
       : null;
 
-  if (options.body !== undefined && !("Content-Type" in headers)) {
+  const isMultipartBody =
+    typeof FormData !== "undefined" && options.body instanceof FormData;
+  if (options.body !== undefined && !isMultipartBody && !("Content-Type" in headers)) {
     headers["Content-Type"] = "application/json";
   }
 
@@ -1113,6 +1115,32 @@ export const apiKeys = {
 
 export const settingsApi = {
   get: () => get<{ success: boolean; data: SettingsRecord }>("/settings"),
+
+  downloadDatabaseBackup: async () => {
+    const res = await requestRaw("/settings/database-backup", { method: "GET" });
+    if (!res.ok) throw new Error(await readApiErrorMessage(res, "Database backup failed"));
+    const disposition = res.headers.get("content-disposition") || "";
+    const serverFileName = disposition.match(/filename="?([^";]+)"?/i)?.[1];
+    const timestamp = new Date()
+      .toISOString()
+      .replace(/[-:]/g, "")
+      .replace(/\.\d{3}Z$/, "Z")
+      .replace("T", "-");
+    const fileName =
+      serverFileName && /^doktainer-database-\d{8}-\d{6}Z\.dump$/i.test(serverFileName)
+        ? serverFileName
+        : `doktainer-database-${timestamp}.dump`;
+    return { blob: await res.blob(), fileName };
+  },
+
+  restoreDatabaseBackup: async (file: File) => {
+    const body = new FormData();
+    body.append("file", file);
+    const res = await requestRaw("/settings/database-restore", { method: "POST", body }, { timeoutMs: 120000 });
+    const json = await readJsonResponse<{ success?: boolean; message?: string; error?: string }>(res, "Database restore failed");
+    if (!res.ok) throw new Error(json.error || json.message || "Database restore failed");
+    return json;
+  },
 
   getPanelAccessCapabilities: () =>
     get<{ success: boolean; data: PanelAccessCapabilities }>(

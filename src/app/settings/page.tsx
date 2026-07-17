@@ -7,6 +7,7 @@ import { getStoredTheme, storeUiPreferences } from "@/lib/preferences";
 import GeneralSettingsPanel from "@/app/settings/components/GeneralSettingsPanel";
 import PanelAccessSettingsPanel from "@/app/settings/components/PanelAccessSettingsPanel";
 import SecuritySettingsPanel from "@/app/settings/components/SecuritySettingsPanel";
+import DatabaseSettingsPanel from "@/app/settings/components/DatabaseSettingsPanel";
 import {
   Banner,
   SettingsLoadingPanel,
@@ -364,6 +365,13 @@ export default function SettingsPage() {
                   resetting={resetting}
                   onReset={() => void resetSettings()}
                   onSave={() => void saveSettings()}
+                />
+              ) : null}
+
+              {activeTab === "database" ? (
+                <DatabaseSettingsPanel
+                  onError={setError}
+                  onSuccess={setSuccess}
                 />
               ) : null}
             </>

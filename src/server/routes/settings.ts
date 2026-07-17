@@ -1,9 +1,15 @@
 import { FastifyInstance } from "fastify";
+import { createReadStream, createWriteStream, promises as fs } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { execFile, spawn } from "node:child_process";
+import { promisify } from "node:util";
+import { pipeline } from "node:stream/promises";
 import { z } from "zod";
 import { resolvePublicAppOrigin } from "../lib/public-url";
 import prisma from "../lib/prisma";
 import { decrypt, encrypt } from "../lib/crypto";
-import { authenticate } from "../middleware/auth";
+import { authenticate, requireRole } from "../middleware/auth";
 import { auditLog } from "../services/audit.service";
 import {
   getPanelAccessCapabilities,
@@ -638,6 +644,167 @@ async function ensureModularSettings(
 }
 
 export async function settingsRoutes(app: FastifyInstance) {
+  const databaseAccess = [authenticate, requireRole("DEVELOPER")];
+  const execFileAsync = promisify(execFile);
+
+  const getPostgresCliUrl = (databaseUrl: string) => {
+    try {
+      const parsed = new URL(databaseUrl);
+      // `schema` is a Prisma connection parameter and is rejected by pg_dump/pg_restore.
+      parsed.searchParams.delete("schema");
+      return parsed.toString();
+    } catch {
+      return databaseUrl;
+    }
+  };
+
+  const findLocalPostgresBinary = async (
+    command: "pg_dump" | "pg_restore" | "psql",
+  ) => {
+    if (process.platform !== "win32") return null;
+
+    try {
+      const { stdout } = await execFileAsync(
+        "powershell.exe",
+        [
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          "Get-Process -Name postgres -ErrorAction SilentlyContinue | ForEach-Object { try { $_.Path } catch { $null } } | Where-Object { $_ } | Sort-Object -Unique | ConvertTo-Json -Compress",
+        ],
+        { windowsHide: true, timeout: 5000, maxBuffer: 1024 * 1024 },
+      );
+      const parsed = JSON.parse(stdout.trim() || "[]") as string | string[];
+      const postgresExecutables = Array.isArray(parsed) ? parsed : [parsed];
+
+      for (const postgresExecutable of postgresExecutables) {
+        if (!postgresExecutable) continue;
+        const candidate = join(
+          postgresExecutable.replace(/[\\/]postgres(?:\.exe)?$/i, ""),
+          `${command}.exe`,
+        );
+        try {
+          await fs.access(candidate);
+          return candidate;
+        } catch {
+          // Try another active PostgreSQL process, if more than one exists.
+        }
+      }
+    } catch {
+      // PowerShell/CIM may be unavailable or PostgreSQL may not be running locally.
+    }
+
+    return null;
+  };
+
+  const runDatabaseCommand = async (
+    command: "pg_dump" | "pg_restore" | "psql",
+    args: string[],
+    options: { inputPath?: string; outputPath?: string } = {},
+  ) => {
+    const databaseUrl = process.env.DATABASE_URL?.trim();
+    if (!databaseUrl) throw new Error("DATABASE_URL is not configured");
+    const databaseCliUrl = getPostgresCliUrl(databaseUrl);
+
+    const run = (executable: string, commandArgs: string[], usePipe = false) => new Promise<void>((resolve, reject) => {
+      const child = spawn(executable, commandArgs, {
+        env: { ...process.env, PGPASSFILE: undefined },
+        stdio: [options.inputPath ? "pipe" : "ignore", usePipe ? "pipe" : "ignore", "pipe"],
+      });
+      let stderr = "";
+      const output = options.outputPath ? createWriteStream(options.outputPath) : null;
+      child.stderr?.on("data", (chunk) => { stderr += chunk.toString(); });
+      const childExit = new Promise<number>((resolveExit, rejectExit) => {
+        child.once("error", rejectExit);
+        child.once("close", (code) => resolveExit(code ?? 1));
+      });
+      const streamTasks: Promise<unknown>[] = [];
+      if (options.inputPath) streamTasks.push(pipeline(createReadStream(options.inputPath), child.stdin!));
+      if (output && child.stdout) streamTasks.push(pipeline(child.stdout, output));
+      void Promise.all([childExit, ...streamTasks])
+        .then(([code]) => {
+          if (code === 0) resolve();
+          else reject(new Error(stderr.trim() || `${command} failed`));
+        })
+        .catch(reject);
+    });
+
+    const localBinary = await findLocalPostgresBinary(command);
+    if (localBinary) {
+      await run(localBinary, ["--dbname", databaseCliUrl, ...args], Boolean(options.outputPath));
+      return;
+    }
+
+    const databaseContainer =
+      process.env.DATABASE_BACKUP_CONTAINER?.trim() || "doktainer-postgres";
+    const dockerArgs = ["exec", "-i", databaseContainer, command, "--dbname", databaseCliUrl, ...args];
+    try {
+      await run("docker", dockerArgs, Boolean(options.outputPath));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException)?.code === "ENOENT") {
+        throw new Error(
+          process.platform === "win32"
+            ? "PostgreSQL lokal yang aktif tidak ditemukan dan Docker CLI juga tidak tersedia."
+            : "Docker CLI tidak tersedia untuk menjalankan backup PostgreSQL.",
+        );
+      }
+      throw error;
+    }
+  };
+
+  app.get("/database-backup", { preHandler: databaseAccess }, async (_req, reply) => {
+    const timestamp = new Date()
+      .toISOString()
+      .replace(/[-:]/g, "")
+      .replace(/\.\d{3}Z$/, "Z")
+      .replace("T", "-");
+    const downloadName = `doktainer-database-${timestamp}.dump`;
+    const filePath = join(tmpdir(), `.${downloadName}`);
+    try {
+      await runDatabaseCommand("pg_dump", ["--format=custom"], { outputPath: filePath });
+      reply.header("Content-Type", "application/octet-stream");
+      reply.header("Content-Disposition", `attachment; filename="${downloadName}"`);
+      const stream = createReadStream(filePath);
+      stream.once("close", () => void fs.rm(filePath, { force: true }));
+      return reply.send(stream);
+    } catch (error) {
+      return reply.status(500).send({ success: false, error: error instanceof Error ? error.message : "Database backup failed" });
+    } finally {
+      // The successful response owns cleanup through the stream close handler.
+      if (!reply.sent) await fs.rm(filePath, { force: true });
+    }
+  });
+
+  app.post("/database-restore", { preHandler: databaseAccess }, async (req, reply) => {
+    const upload = await req.file();
+    if (!upload) return reply.status(400).send({ success: false, error: "Select a PostgreSQL dump file" });
+    const filePath = join(tmpdir(), `doktainer-restore-${Date.now()}.dump`);
+    try {
+      await pipeline(upload.file, createWriteStream(filePath));
+      const header = Buffer.alloc(5);
+      const handle = await fs.open(filePath, "r");
+      try {
+        await handle.read(header, 0, header.length, 0);
+      } finally {
+        await handle.close();
+      }
+
+      const isCustomArchive = header.toString("ascii") === "PGDMP";
+      await runDatabaseCommand(
+        isCustomArchive ? "pg_restore" : "psql",
+        isCustomArchive
+          ? ["--clean", "--if-exists", "--no-owner", "--exit-on-error"]
+          : ["--set", "ON_ERROR_STOP=1"],
+        { inputPath: filePath },
+      );
+      await auditLog({ userId: req.userId, organizationId: req.organizationId, action: "DATABASE_RESTORE", category: "SYSTEM", level: "WARNING", message: "Doktainer database restored from uploaded dump" });
+      return reply.send({ success: true, message: "Database restore completed" });
+    } catch (error) {
+      return reply.status(500).send({ success: false, error: error instanceof Error ? error.message : "Database restore failed" });
+    } finally {
+      await fs.rm(filePath, { force: true });
+    }
+  });
   app.get("/", { preHandler: [authenticate] }, async (req, reply) => {
     const bundle = await ensureModularSettings(req.userId!, req.organizationId);
     return reply.send({ success: true, data: serializeSettings(bundle) });
@@ -646,7 +813,7 @@ export async function settingsRoutes(app: FastifyInstance) {
   app.get(
     "/panel-access/capabilities",
     { preHandler: [authenticate] },
-    async (_req, reply) => {
+    async (req, reply) => {
       const capabilities = await getPanelAccessCapabilities();
       return reply.send({ success: true, data: capabilities });
     },
@@ -702,7 +869,7 @@ export async function settingsRoutes(app: FastifyInstance) {
           error instanceof Error ? error.message : "Panel domain provisioning failed";
         const statusCode =
           typeof (error as { statusCode?: unknown })?.statusCode === "number"
-            ? (error as { statusCode: number }).statusCode
+            ? ((error as { statusCode: number }).statusCode)
             : 400;
 
         await auditLog({

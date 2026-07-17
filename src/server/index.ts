@@ -3,6 +3,7 @@ import Fastify, { FastifyError } from "fastify";
 import cors from "@fastify/cors";
 import jwt from "@fastify/jwt";
 import rateLimit from "@fastify/rate-limit";
+import multipart from "@fastify/multipart";
 import websocket from "@fastify/websocket";
 import prisma from "./lib/prisma";
 import { validateEncryptionConfiguration } from "./lib/crypto";
@@ -144,6 +145,7 @@ async function start() {
   });
 
   await app.register(websocket);
+  await app.register(multipart, { limits: { fileSize: 512 * 1024 * 1024, files: 1 } });
 
   // ── Health check ──────────────────────────────────────
   app.get("/health", { config: { rateLimit: false } }, async () => ({
