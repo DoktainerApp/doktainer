@@ -1,7 +1,7 @@
 import { FastifyInstance } from "fastify";
 import { z } from "zod";
 import prisma from "../lib/prisma";
-import { decrypt, encrypt } from "../lib/crypto";
+import { encrypt } from "../lib/crypto";
 import { authenticate, requireRole } from "../middleware/auth";
 import { auditLog } from "../services/audit.service";
 import { verifyGitProviderConfiguration } from "../services/integration-verification.service";
@@ -170,6 +170,18 @@ function getProviderOwner(provider: GitProviderRecord) {
   );
 }
 
+function getGithubInstallationTargetId(installationUrl?: string | null) {
+  const rawUrl = toTrimmedValue(installationUrl);
+  if (!rawUrl) return "";
+
+  try {
+    const targetId = new URL(rawUrl).searchParams.get("target_id")?.trim();
+    return targetId && /^\d+$/.test(targetId) ? targetId : "";
+  } catch {
+    return "";
+  }
+}
+
 function buildProviderFetchErrorMessage(args: {
   provider: GitProviderRecord["provider"];
   resource: string;
@@ -245,6 +257,32 @@ async function fetchJson(
   }
 
   return json;
+}
+
+async function resolveProviderOwner(provider: GitProviderRecord) {
+  const configuredOwner = getProviderOwner(provider);
+  if (configuredOwner || provider.provider !== "GITHUB") {
+    return configuredOwner;
+  }
+
+  // GitHub's manifest flow stores the installation target account ID in the
+  // installation URL. Older personal-account records did not persist a
+  // username, so resolve the public login from that stable account ID.
+  const targetId = getGithubInstallationTargetId(provider.installationUrl);
+  if (!targetId) return "";
+
+  const baseUrl = normalizeBaseUrl(provider.providerUrl, "https://github.com");
+  const apiBase =
+    baseUrl.toLowerCase() === "https://github.com"
+      ? "https://api.github.com"
+      : `${baseUrl}/api/v3`;
+  const payload = await fetchJson(`${apiBase}/user/${targetId}`, {
+    provider: provider.provider,
+    resource: "GitHub account",
+  });
+
+  if (!payload || typeof payload !== "object") return "";
+  return toTrimmedValue((payload as { login?: string }).login);
 }
 
 function mapGithubRepositories(payload: unknown): GitProviderRepository[] {
@@ -468,7 +506,7 @@ function mapGiteaBranches(
 async function listRepositoriesForProvider(
   provider: GitProviderRecord,
 ): Promise<GitProviderRepository[]> {
-  const owner = getProviderOwner(provider);
+  const owner = await resolveProviderOwner(provider);
   if (!owner) {
     throw new Error(
       "Configure namespace, organization name, or account username on the Git provider before loading repositories",

@@ -5,7 +5,6 @@ import {
 } from "@/app/settings/components/SettingsPrimitives";
 import {
   type GithubProviderModalProps,
-  ProviderBadge,
   getProviderMeta,
   launchGithubManifestFlow,
 } from "./git-provider-shared";
@@ -117,7 +116,19 @@ export default function GithubProviderModal({
               placeholder="Organization name"
             />
           </div>
-        ) : null}
+        ) : (
+          <div>
+            <FieldLabel>GitHub Username</FieldLabel>
+            <input
+              className="input"
+              value={draft.accountUsername}
+              onChange={(event) =>
+                updateDraft("accountUsername", event.target.value)
+              }
+              placeholder="Your GitHub username"
+            />
+          </div>
+        )}
 
         <div
           style={{
@@ -191,7 +202,7 @@ export default function GithubProviderModal({
               className="input"
               value={draft.appName}
               onChange={(event) => updateDraft("appName", event.target.value)}
-              placeholder={`Doktainer-${new Date().toISOString().split("T")[0].replace(/-/g, "")}-${Math.random().toString(36).slice(2, 10)}`}
+              placeholder="Doktainer-20260718-ab12cd34"
             />
           </div>
 

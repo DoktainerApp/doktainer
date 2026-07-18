@@ -2,7 +2,6 @@ import { ExternalLink } from "lucide-react";
 import { FieldLabel } from "@/app/settings/components/SettingsPrimitives";
 import {
   type GitProviderModalBaseProps,
-  ProviderBadge,
   getProviderMeta,
 } from "./git-provider-shared";
 import { markGitProviderCallbackIntent } from "@/lib/git-provider-callback-intent";
@@ -191,6 +190,18 @@ export default function GitlabProviderModal({
             value={draft.namespace}
             onChange={(event) => updateDraft("namespace", event.target.value)}
             placeholder="my-org"
+          />
+        </div>
+
+        <div style={{ gridColumn: "1 / -1" }}>
+          <FieldLabel>GitLab Username (Required Without Group)</FieldLabel>
+          <input
+            className="input"
+            value={draft.accountUsername}
+            onChange={(event) =>
+              updateDraft("accountUsername", event.target.value)
+            }
+            placeholder="Your GitLab username"
           />
         </div>
       </section>
