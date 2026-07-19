@@ -120,14 +120,17 @@ export function failDeployTimelineModal({
   onProcessUpdate,
   name,
   message,
+  terminalLogs,
 }: {
   onProcessUpdate?: ProcessLogUpdateHandler;
   name: string;
   message: string;
+  terminalLogs?: string[];
 }) {
   onProcessUpdate?.({
     timelineLogs: createFailedDeployTimeline(2),
     terminalLogs: [
+      ...(terminalLogs ?? []),
       `[deploy] Deployment failed for ${name || "new container"}`,
       `[error] ${message}`,
     ],

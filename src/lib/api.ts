@@ -19,6 +19,7 @@ import {
   getStoredOrganizationId,
   setStoredOrganizationId,
 } from "@/lib/organization-state";
+import { parseServerSentEventBlock } from "@/lib/server-sent-events";
 
 const DEFAULT_API_PORT = process.env.NEXT_PUBLIC_API_PORT || "4000";
 
@@ -1814,28 +1815,6 @@ export interface ProcessJobRecord {
   cancelReason?: string;
 }
 
-function parseServerSentEventBlock(block: string) {
-  let event = "message";
-  const dataLines: string[] = [];
-
-  for (const line of block.split("\n")) {
-    if (line.startsWith("event:")) {
-      event = line.slice("event:".length).trim();
-    } else if (line.startsWith("data:")) {
-      dataLines.push(line.slice("data:".length).trimStart());
-    }
-  }
-
-  if (dataLines.length === 0) {
-    return null;
-  }
-
-  return {
-    event,
-    data: JSON.parse(dataLines.join("\n")) as unknown,
-  };
-}
-
 export const containers = {
   list: (params?: { serverId?: string; status?: string }) => {
     const qs = new URLSearchParams();
@@ -1937,16 +1916,26 @@ export const containers = {
       if (done) break;
 
       buffer += decoder.decode(value, { stream: true });
-      const blocks = buffer.split(/\n\n/);
+      const blocks = buffer.split(/\r?\n\r?\n/);
       buffer = blocks.pop() ?? "";
 
       for (const block of blocks) {
         const parsed = parseServerSentEventBlock(block.trim());
         if (!parsed) continue;
 
-        if (parsed.event === "log") {
+        if (
+          parsed.event === "log" &&
+          typeof parsed.data === "object" &&
+          parsed.data !== null &&
+          typeof (parsed.data as ProcessJobLogEntry).message === "string"
+        ) {
           handlers.onLog?.(parsed.data as ProcessJobLogEntry);
-        } else if (parsed.event === "status") {
+        } else if (
+          parsed.event === "status" &&
+          typeof parsed.data === "object" &&
+          parsed.data !== null &&
+          typeof (parsed.data as ProcessJobRecord).status === "string"
+        ) {
           handlers.onStatus?.(parsed.data as ProcessJobRecord);
         }
       }

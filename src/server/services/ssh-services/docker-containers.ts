@@ -4,7 +4,12 @@ import { posix as pathPosix } from "path";
 import { TextDecoder } from "util";
 import { Server } from "@prisma/client";
 import { execStrict } from "./commands";
-import { execDocker, execDockerStrict } from "./internal/docker";
+import {
+  DOCKER_ACCESS_DENIED_MESSAGE,
+  execDocker,
+  execDockerStrict,
+  parseDockerJson,
+} from "./internal/docker";
 import { privilegedCommand } from "./internal/privilege";
 import { escapeShellArg } from "./internal/shell";
 
@@ -577,6 +582,15 @@ export function formatDeploymentErrorMessage(error: unknown): string {
   const lower = cleaned.toLowerCase();
 
   if (
+    lower.includes("permission denied") &&
+    (lower.includes("docker.sock") ||
+      lower.includes("docker daemon") ||
+      lower.includes("docker api"))
+  ) {
+    return DOCKER_ACCESS_DENIED_MESSAGE;
+  }
+
+  if (
     lower.includes("could not read username for 'https://") ||
     lower.includes("terminal prompts disabled") ||
     lower.includes("authentication failed")
@@ -1003,7 +1017,10 @@ export async function dockerInspect(
     `docker inspect ${escapeShellArg(containerId)}`,
     shortDockerCommandTimeout(DOCKER_INSPECT_TIMEOUT_MS),
   );
-  const parsed = JSON.parse(stdout) as DockerContainerInspect[];
+  const parsed = parseDockerJson<DockerContainerInspect[]>(
+    stdout,
+    "Docker container inspection",
+  );
   return parsed[0] ?? {};
 }
 
@@ -1016,14 +1033,14 @@ export async function dockerStats(
     `docker stats --no-stream --format '{{json .}}' ${escapeShellArg(containerId)}`,
     shortDockerCommandTimeout(DOCKER_STATS_TIMEOUT_MS),
   );
-  const parsed = JSON.parse(stdout.trim()) as {
+  const parsed = parseDockerJson<{
     CPUPerc?: string;
     MemPerc?: string;
     MemUsage?: string;
     NetIO?: string;
     BlockIO?: string;
     PIDs?: string;
-  };
+  }>(stdout, "Docker container statistics");
 
   return {
     cpuPercent: parseFloat((parsed.CPUPerc || "0").replace("%", "")) || 0,
@@ -1848,7 +1865,10 @@ async function inspectImageExposedPorts(server: Server, imageTag: string) {
     return [] as string[];
   }
 
-  const parsed = JSON.parse(normalized) as Record<string, unknown> | null;
+  const parsed = parseDockerJson<Record<string, unknown> | null>(
+    normalized,
+    "Docker image inspection",
+  );
   if (!parsed || typeof parsed !== "object") {
     return [] as string[];
   }

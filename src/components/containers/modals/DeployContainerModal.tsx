@@ -789,6 +789,7 @@ export default function DeployContainerModal({
     let processLogLines = [
       `[deploy] Starting deployment for ${form.name || "new container"}`,
     ];
+    let latestTerminalLogs = [...processLogLines];
 
     try {
       if (!choice) {
@@ -800,7 +801,7 @@ export default function DeployContainerModal({
         `[deploy] Source: ${choice}`,
         `[deploy] Server ID: ${form.serverId}`,
       ];
-      let latestTerminalLogs = [...processLogLines];
+      latestTerminalLogs = [...processLogLines];
 
       const updateProcessTerminal = (
         lines: string[],
@@ -1010,6 +1011,12 @@ export default function DeployContainerModal({
         },
       });
 
+      // The status event can race with stream closure or be altered by a
+      // reverse proxy. The job endpoint is the authoritative final result.
+      const settledJob = await containersApi.getJob(job.id);
+      finalStatus = settledJob.data.status;
+      finalError = settledJob.data.error ?? settledJob.data.cancelReason;
+
       if (cancelRequestedRef.current && finalStatus !== "cancelled") {
         const cancelledJob = currentJobIdRef.current
           ? await containersApi.getJob(currentJobIdRef.current)
@@ -1027,6 +1034,12 @@ export default function DeployContainerModal({
 
       if (finalStatus === "cancelled") {
         throw new Error(finalError || "Deployment cancelled");
+      }
+
+      if (finalStatus !== "success") {
+        throw new Error(
+          "The deployment log stream ended before the server reported a final result. Check the job status and retry the deployment.",
+        );
       }
 
       updateDeployTimelineModal({
@@ -1067,6 +1080,7 @@ export default function DeployContainerModal({
         onProcessUpdate,
         name: form.name,
         message,
+        terminalLogs: latestTerminalLogs,
       });
       onProcessUpdate?.({ cancelAction: undefined });
     } finally {
