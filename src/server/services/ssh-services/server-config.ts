@@ -15,7 +15,15 @@ import {
   inspectWebServerCapability,
 } from "./web-stack";
 import { escapeShellArg } from "./internal/shell";
-import { privilegedCommand } from "./internal/privilege";
+import {
+  nonInteractivePrivilegedCommand,
+  privilegedCommand,
+} from "./internal/privilege";
+import {
+  assertLinuxAccountName,
+  SystemAccountInputError,
+  validateSystemUserUpdatePolicy,
+} from "./internal/system-account-security";
 
 const CONFIG_FAST_TIMEOUT_MS = 8_000;
 const CONFIG_LIST_TIMEOUT_MS = 12_000;
@@ -33,6 +41,7 @@ export interface ServerSystemUser {
   home: string | null;
   shell: string | null;
   groups: string[];
+  primaryGroup: string | null;
   isRoot: boolean;
   isSshUser: boolean;
 }
@@ -63,6 +72,7 @@ export interface ServerConfigSnapshot {
   users: ServerSystemUser[];
   rootUser: ServerSystemUser | null;
   nonRootUsers: ServerSystemUser[];
+  systemGroups: string[];
   hasRootUser: boolean;
   sudoNonInteractive: boolean;
   docker: DockerRuntimeStatus;
@@ -80,10 +90,12 @@ export async function getServerConfigSnapshot(
     "while IFS=: read -r user _ uid gid _ home shell; do",
     '  if [ "$uid" -eq 0 ] || [ "$uid" -ge 1000 ]; then',
     '    groups=$(id -nG "$user" 2>/dev/null || true)',
-    '    printf \'%s|%s|%s|%s|%s|%s\\n\' "$user" "$uid" "$gid" "$home" "$shell" "$groups"',
+    '    primary_group=$(id -gn "$user" 2>/dev/null || true)',
+    '    printf \'%s|%s|%s|%s|%s|%s|%s\\n\' "$user" "$uid" "$gid" "$home" "$shell" "$groups" "$primary_group"',
     "  fi",
     "done < /etc/passwd",
   ].join("\n");
+  const groupsScript = "cut -d: -f1 /etc/group 2>/dev/null | sort -u";
 
   const platformResult = await Promise.allSettled([
     detectServerPlatform(server, configCommandTimeout(CONFIG_FAST_TIMEOUT_MS)),
@@ -98,6 +110,7 @@ export async function getServerConfigSnapshot(
     kernelResult,
     currentUserResult,
     usersResult,
+    groupsResult,
     lastBootResult,
     servicesResult,
     diskMountsResult,
@@ -121,6 +134,11 @@ export async function getServerConfigSnapshot(
     exec(
       server,
       `bash -lc ${escapeShellArg(usersScript)}`,
+      configCommandTimeout(CONFIG_LIST_TIMEOUT_MS),
+    ),
+    exec(
+      server,
+      `bash -lc ${escapeShellArg(groupsScript)}`,
       configCommandTimeout(CONFIG_LIST_TIMEOUT_MS),
     ),
     exec(
@@ -170,7 +188,15 @@ export async function getServerConfigSnapshot(
     .map((line) => line.trim())
     .filter(Boolean)
     .map((line) => {
-      const [username, uidRaw, gidRaw, homeRaw, shellRaw, groupsRaw] =
+      const [
+        username,
+        uidRaw,
+        gidRaw,
+        homeRaw,
+        shellRaw,
+        groupsRaw,
+        primaryGroupRaw,
+      ] =
         line.split("|");
       const uid = Number(uidRaw);
       const gid = Number(gidRaw);
@@ -185,6 +211,7 @@ export async function getServerConfigSnapshot(
           .split(/\s+/)
           .map((group) => group.trim())
           .filter(Boolean),
+        primaryGroup: primaryGroupRaw || null,
         isRoot: uid === 0 || username === "root",
         isSshUser: username === server.username,
       } satisfies ServerSystemUser;
@@ -197,6 +224,13 @@ export async function getServerConfigSnapshot(
 
   const rootUser = users.find((user) => user.isRoot) ?? null;
   const nonRootUsers = users.filter((user) => !user.isRoot);
+  const systemGroups =
+    groupsResult.status === "fulfilled"
+      ? groupsResult.value.stdout
+          .split("\n")
+          .map((group) => group.trim())
+          .filter(Boolean)
+      : [];
 
   return {
     hostname:
@@ -216,6 +250,7 @@ export async function getServerConfigSnapshot(
     users,
     rootUser,
     nonRootUsers,
+    systemGroups,
     hasRootUser: Boolean(rootUser),
     sudoNonInteractive: docker.platform.sudoNonInteractive,
     docker,
@@ -227,6 +262,260 @@ export async function getServerConfigSnapshot(
         ? lastBootResult.value.stdout.trim() || null
         : null,
     fetchedAt: new Date().toISOString(),
+  };
+}
+
+async function accountExists(
+  server: Server,
+  database: "passwd" | "group",
+  name: string,
+): Promise<boolean> {
+  const result = await exec(
+    server,
+    `getent ${database} ${escapeShellArg(name)} >/dev/null 2>&1`,
+    configCommandTimeout(CONFIG_FAST_TIMEOUT_MS),
+  );
+  return result.code === 0;
+}
+
+export async function createServerSystemGroup(
+  server: Server,
+  groupName: string,
+): Promise<void> {
+  assertLinuxAccountName(groupName, "Group");
+  if (await accountExists(server, "group", groupName)) {
+    throw new SystemAccountInputError(`Group ${groupName} already exists`);
+  }
+
+  await execStrict(
+    server,
+    nonInteractivePrivilegedCommand(
+      server,
+      `groupadd ${escapeShellArg(groupName)}`,
+    ),
+    configCommandTimeout(CONFIG_LIST_TIMEOUT_MS),
+  );
+}
+
+export async function createServerSystemUser(
+  server: Server,
+  options: { username: string; groups: string[] },
+): Promise<void> {
+  assertLinuxAccountName(options.username, "User");
+  if (options.username === "root") {
+    throw new SystemAccountInputError(
+      "The root account cannot be created or replaced",
+    );
+  }
+
+  const groups = Array.from(new Set(options.groups));
+  groups.forEach((group) => assertLinuxAccountName(group, "Group"));
+
+  if (await accountExists(server, "passwd", options.username)) {
+    throw new SystemAccountInputError(
+      `User ${options.username} already exists`,
+    );
+  }
+
+  const missingGroups: string[] = [];
+  for (const group of groups) {
+    if (!(await accountExists(server, "group", group))) {
+      missingGroups.push(group);
+    }
+  }
+  if (missingGroups.length > 0) {
+    throw new SystemAccountInputError(
+      `Group not found: ${missingGroups.join(", ")}`,
+    );
+  }
+
+  const groupArgs =
+    groups.length > 0 ? ` -G ${escapeShellArg(groups.join(","))}` : "";
+  await execStrict(
+    server,
+    nonInteractivePrivilegedCommand(
+      server,
+      `useradd -m -s /bin/bash${groupArgs} ${escapeShellArg(options.username)}`,
+    ),
+    configCommandTimeout(CONFIG_LIST_TIMEOUT_MS),
+  );
+}
+
+interface CurrentServerSystemUser {
+  username: string;
+  uid: number;
+  gid: number;
+  home: string;
+  shell: string;
+  groups: string[];
+  primaryGroup: string;
+}
+
+export interface ServerSystemUserUpdateResult {
+  username: string;
+  isSshUser: boolean;
+  addedGroups: string[];
+  removedGroups: string[];
+  previousShell: string;
+  shell: string;
+}
+
+async function getCurrentServerSystemUser(
+  server: Server,
+  username: string,
+): Promise<CurrentServerSystemUser> {
+  const script = [
+    `TARGET=${escapeShellArg(username)}`,
+    'entry=$(getent passwd "$TARGET") || exit 3',
+    'IFS=: read -r account _ uid gid _ home shell <<< "$entry"',
+    'groups=$(id -nG "$TARGET" 2>/dev/null) || exit 3',
+    'primary_group=$(id -gn "$TARGET" 2>/dev/null) || exit 3',
+    'printf \'%s|%s|%s|%s|%s|%s|%s\\n\' "$account" "$uid" "$gid" "$home" "$shell" "$groups" "$primary_group"',
+  ].join("\n");
+  const result = await exec(
+    server,
+    `bash -lc ${escapeShellArg(script)}`,
+    configCommandTimeout(CONFIG_FAST_TIMEOUT_MS),
+  );
+
+  if (result.code === 3) {
+    throw new SystemAccountInputError(`User ${username} was not found`);
+  }
+  if (result.code !== 0 || !result.stdout.trim()) {
+    throw new Error("Failed to inspect the current system user state");
+  }
+
+  const [
+    account,
+    uidRaw,
+    gidRaw,
+    home,
+    shell,
+    groupsRaw,
+    primaryGroup,
+  ] = result.stdout.trim().split("|");
+  const uid = Number(uidRaw);
+  const gid = Number(gidRaw);
+  if (
+    !account ||
+    !Number.isInteger(uid) ||
+    !Number.isInteger(gid) ||
+    !shell ||
+    !primaryGroup
+  ) {
+    throw new Error("The host returned an invalid system user record");
+  }
+
+  return {
+    username: account,
+    uid,
+    gid,
+    home,
+    shell,
+    groups: groupsRaw.split(/\s+/).filter(Boolean),
+    primaryGroup,
+  };
+}
+
+export async function updateServerSystemUser(
+  server: Server,
+  options: {
+    username: string;
+    groups: string[];
+    shell: string;
+    expectedGroups: string[];
+    expectedShell: string;
+    acknowledgePrivilegedGroups: boolean;
+  },
+): Promise<ServerSystemUserUpdateResult> {
+  assertLinuxAccountName(options.username, "User");
+
+  const groups = Array.from(new Set(options.groups));
+  const expectedGroups = Array.from(new Set(options.expectedGroups));
+  if (groups.length > 16 || expectedGroups.length > 16) {
+    throw new SystemAccountInputError(
+      "A user can have at most 16 group memberships in one action",
+    );
+  }
+  groups.forEach((group) => assertLinuxAccountName(group, "Group"));
+  expectedGroups.forEach((group) => assertLinuxAccountName(group, "Group"));
+
+  const current = await getCurrentServerSystemUser(server, options.username);
+  const policy = validateSystemUserUpdatePolicy({
+    username: current.username,
+    uid: current.uid,
+    serverUsername: server.username,
+    currentGroups: current.groups,
+    primaryGroup: current.primaryGroup,
+    currentShell: current.shell,
+    desiredGroups: groups,
+    desiredShell: options.shell,
+    expectedGroups,
+    expectedShell: options.expectedShell,
+    acknowledgePrivilegedGroups: options.acknowledgePrivilegedGroups,
+  });
+  const { isSshUser, addedGroups, removedGroups, shellChanged } = policy;
+
+  if (shellChanged) {
+    const shellCheck = await exec(
+      server,
+      `test -x ${escapeShellArg(options.shell)}`,
+      configCommandTimeout(CONFIG_FAST_TIMEOUT_MS),
+    );
+    if (shellCheck.code !== 0) {
+      throw new SystemAccountInputError(
+        `Login shell ${options.shell} is not available on the host`,
+      );
+    }
+  }
+
+  const missingGroups: string[] = [];
+  for (const group of groups) {
+    if (!(await accountExists(server, "group", group))) {
+      missingGroups.push(group);
+    }
+  }
+  if (missingGroups.length > 0) {
+    throw new SystemAccountInputError(
+      `Group not found: ${missingGroups.join(", ")}`,
+    );
+  }
+
+  let command: string;
+  if (isSshUser) {
+    const supplementaryAdditions = addedGroups.filter(
+      (group) => group !== current.primaryGroup,
+    );
+    if (supplementaryAdditions.length === 0) {
+      throw new SystemAccountInputError("No user changes were selected");
+    }
+    command = `usermod -a -G ${escapeShellArg(supplementaryAdditions.join(","))} ${escapeShellArg(current.username)}`;
+  } else {
+    const supplementaryGroups = groups.filter(
+      (group) => group !== current.primaryGroup,
+    );
+    const argumentsList = [
+      shellChanged ? `-s ${escapeShellArg(options.shell)}` : null,
+      addedGroups.length > 0 || removedGroups.length > 0
+        ? `-G ${escapeShellArg(supplementaryGroups.join(","))}`
+        : null,
+    ].filter((value): value is string => Boolean(value));
+    command = `usermod ${argumentsList.join(" ")} ${escapeShellArg(current.username)}`;
+  }
+
+  await execStrict(
+    server,
+    nonInteractivePrivilegedCommand(server, command),
+    configCommandTimeout(CONFIG_LIST_TIMEOUT_MS),
+  );
+
+  return {
+    username: current.username,
+    isSshUser,
+    addedGroups,
+    removedGroups,
+    previousShell: current.shell,
+    shell: options.shell,
   };
 }
 

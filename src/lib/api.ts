@@ -1337,6 +1337,7 @@ export interface ServerSystemUser {
   home: string | null;
   shell: string | null;
   groups: string[];
+  primaryGroup: string | null;
   isRoot: boolean;
   isSshUser: boolean;
 }
@@ -1430,6 +1431,7 @@ export interface ServerConfigSnapshot {
   users: ServerSystemUser[];
   rootUser: ServerSystemUser | null;
   nonRootUsers: ServerSystemUser[];
+  systemGroups: string[];
   hasRootUser: boolean;
   sudoNonInteractive: boolean;
   docker: DockerRuntimeStatus;
@@ -1454,6 +1456,34 @@ export interface ServerCreateBody {
 
 export interface ServerDeleteBody {
   confirmation: "DELETE";
+}
+
+export interface ServerSystemUserCreateBody {
+  username: string;
+  groups: string[];
+  acknowledgePrivilegedGroups: boolean;
+}
+
+export interface ServerSystemGroupCreateBody {
+  groupName: string;
+  acknowledgePrivilegedGroup: boolean;
+}
+
+export interface ServerSystemUserUpdateBody {
+  groups: string[];
+  shell: string;
+  expectedGroups: string[];
+  expectedShell: string;
+  acknowledgePrivilegedGroups: boolean;
+}
+
+export interface ServerSystemUserUpdateResult {
+  username: string;
+  isSshUser: boolean;
+  addedGroups: string[];
+  removedGroups: string[];
+  previousShell: string;
+  shell: string;
 }
 
 export const servers = {
@@ -1484,6 +1514,32 @@ export const servers = {
     get<{ success: boolean; data: ServerConfigSnapshot }>(
       `/servers/${id}/config`,
       { timeoutMs: 45000 },
+    ),
+  createSystemUser: (id: string, body: ServerSystemUserCreateBody) =>
+    post<{ success: boolean; message: string }>(
+      `/servers/${id}/system-users`,
+      body,
+      { timeoutMs: 30000 },
+    ),
+  createSystemGroup: (id: string, body: ServerSystemGroupCreateBody) =>
+    post<{ success: boolean; message: string }>(
+      `/servers/${id}/system-groups`,
+      body,
+      { timeoutMs: 30000 },
+    ),
+  updateSystemUser: (
+    id: string,
+    username: string,
+    body: ServerSystemUserUpdateBody,
+  ) =>
+    patch<{
+      success: boolean;
+      data: ServerSystemUserUpdateResult;
+      message: string;
+    }>(
+      `/servers/${id}/system-users/${encodeURIComponent(username)}`,
+      body,
+      { timeoutMs: 30000 },
     ),
   reset: (id: string, confirmation: string) =>
     post<{ success: boolean; message: string }>(

@@ -1,6 +1,7 @@
 "use client";
 
-import { KeyRound } from "lucide-react";
+import type { ReactNode } from "react";
+import { LockKeyhole, Pencil, ShieldCheck } from "lucide-react";
 import type { ServerSystemUser } from "@/lib/api";
 import type { UserBadgeTone } from "@/app/servers/components/server-config-utils";
 
@@ -99,7 +100,19 @@ export function ServiceStatusBadge({ state }: { state: string }) {
   return <UserBadge label={state} tone={tone} />;
 }
 
-export function ServerUserCard({ user }: { user: ServerSystemUser }) {
+export function ServerUserCard({
+  user,
+  canEdit = false,
+  isEditing = false,
+  onEdit,
+  children,
+}: {
+  user: ServerSystemUser;
+  canEdit?: boolean;
+  isEditing?: boolean;
+  onEdit?: () => void;
+  children?: ReactNode;
+}) {
   const accountLabel = user.isRoot ? "root" : "non-root";
   const accountTone = user.isRoot ? "danger" : "info";
 
@@ -143,19 +156,67 @@ export function ServerUserCard({ user }: { user: ServerSystemUser }) {
             UID {user.uid ?? "—"} • GID {user.gid ?? "—"}
           </p>
         </div>
-        <KeyRound
-          size={16}
-          style={{ color: user.isRoot ? "#ef4444" : "#3b82f6" }}
-        />
+        {user.isRoot ? (
+          <span
+            className="ui-badge"
+            title="Root account is protected and cannot be edited here"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              color: "#ef4444",
+              background: "rgba(239,68,68,0.08)",
+              border: "1px solid rgba(239,68,68,0.2)",
+            }}
+          >
+            <LockKeyhole size={13} /> Protected
+          </span>
+        ) : (
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            onClick={onEdit}
+            disabled={!canEdit}
+            aria-expanded={isEditing}
+            title={
+              canEdit
+                ? user.isSshUser
+                  ? "Edit access with SSH login protections"
+                  : "Edit user access"
+                : "Operator or Super Admin role required"
+            }
+            style={{
+              color: user.isSshUser ? "#f59e0b" : "#3b82f6",
+              border: user.isSshUser
+                ? "1px solid rgba(245,158,11,0.2)"
+                : "1px solid rgba(59,130,246,0.2)",
+              background: user.isSshUser
+                ? "rgba(245,158,11,0.08)"
+                : "rgba(59,130,246,0.08)",
+            }}
+          >
+            {user.isSshUser ? (
+              <ShieldCheck size={13} />
+            ) : (
+              <Pencil size={13} />
+            )}
+            {user.isSshUser ? "Edit access" : "Edit"}
+          </button>
+        )}
       </div>
       <div style={{ display: "grid", gap: 8 }}>
         <ConfigInfoRow label="Home" value={user.home ?? "—"} />
         <ConfigInfoRow label="Shell" value={user.shell ?? "—"} />
         <ConfigInfoRow
-          label="Groups"
+          label="Primary group"
+          value={user.primaryGroup ?? "—"}
+        />
+        <ConfigInfoRow
+          label="All groups"
           value={user.groups.length > 0 ? user.groups.join(", ") : "—"}
         />
       </div>
+      {children}
     </div>
   );
 }

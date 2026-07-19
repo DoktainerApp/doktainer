@@ -47,6 +47,38 @@ export type ServerPendingConfirm =
       };
     }
   | {
+      kind: "system-user";
+      username: string;
+      groups: string[];
+      privileged: boolean;
+      title: string;
+      description: string;
+      confirmLabel: string;
+      tone: "danger" | "warning" | "info";
+    }
+  | {
+      kind: "system-group";
+      groupName: string;
+      privileged: boolean;
+      title: string;
+      description: string;
+      confirmLabel: string;
+      tone: "danger" | "warning" | "info";
+    }
+  | {
+      kind: "system-user-update";
+      username: string;
+      groups: string[];
+      shell: string;
+      expectedGroups: string[];
+      expectedShell: string;
+      privileged: boolean;
+      title: string;
+      description: string;
+      confirmLabel: string;
+      tone: "danger" | "warning" | "info";
+    }
+  | {
       kind: "docker";
       action: "install" | "uninstall" | "reinstall";
       title: string;
@@ -407,6 +439,7 @@ export function createUnavailableServerConfigSnapshot(
     users: [],
     rootUser: null,
     nonRootUsers: [],
+    systemGroups: [],
     hasRootUser: false,
     sudoNonInteractive: false,
     docker: {

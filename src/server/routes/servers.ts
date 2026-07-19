@@ -2,7 +2,11 @@ import { FastifyInstance } from "fastify";
 import { z } from "zod";
 import prisma from "../lib/prisma";
 import { encrypt } from "../lib/crypto";
-import { authenticate, requireApiKeyPermission } from "../middleware/auth";
+import {
+  authenticate,
+  requireApiKeyPermission,
+  requireRole,
+} from "../middleware/auth";
 import { auditLog } from "../services/audit.service";
 import { dispatchRuntimeNotification } from "../services/notification.service";
 import {
@@ -12,6 +16,14 @@ import {
 } from "../services/server-access.service";
 import * as ssh from "../services/ssh.service";
 import { closeTerminalSessionsForServer } from "./terminal";
+import {
+  getPrivilegedSystemGroups,
+  hasRequiredPrivilegeAcknowledgement,
+  LINUX_ACCOUNT_NAME_PATTERN,
+  PRIVILEGED_SYSTEM_GROUPS,
+  SystemAccountConflictError,
+  SystemAccountInputError,
+} from "../services/ssh-services/internal/system-account-security";
 
 function serializeMetric(
   metric: {
@@ -95,6 +107,74 @@ const ServerDeleteSchema = z.object({
 const ServerResetSchema = z.object({
   confirmation: z.literal("DELETE"),
 });
+const LinuxAccountNameSchema = z
+  .string()
+  .trim()
+  .regex(
+    LINUX_ACCOUNT_NAME_PATTERN,
+    "Must start with a lowercase letter or underscore and contain only lowercase letters, numbers, underscores, or hyphens (max 32 characters)",
+  );
+const ServerSystemUserCreateSchema = z
+  .object({
+    username: LinuxAccountNameSchema.refine((value) => value !== "root", {
+      message: "The root account cannot be created or replaced",
+    }),
+    groups: z
+      .array(LinuxAccountNameSchema)
+      .max(16, "A user can be assigned to at most 16 groups in one action")
+      .default([])
+      .refine((groups) => new Set(groups).size === groups.length, {
+        message: "Group names must be unique",
+      }),
+    acknowledgePrivilegedGroups: z.boolean().default(false),
+  })
+  .superRefine((value, context) => {
+    const selectedPrivilegedGroups = getPrivilegedSystemGroups(value.groups);
+    if (!hasRequiredPrivilegeAcknowledgement(
+      value.groups,
+      value.acknowledgePrivilegedGroups,
+    )) {
+      context.addIssue({
+        code: "custom",
+        path: ["acknowledgePrivilegedGroups"],
+        message: `Explicit confirmation is required for privileged groups: ${selectedPrivilegedGroups.join(", ")}`,
+      });
+    }
+  });
+const ServerSystemUserUpdateSchema = z.object({
+  groups: z
+    .array(LinuxAccountNameSchema)
+    .max(16, "A user can have at most 16 group memberships")
+    .refine((groups) => new Set(groups).size === groups.length, {
+      message: "Group names must be unique",
+    }),
+  shell: z.string().trim().min(1).max(128),
+  expectedGroups: z
+    .array(LinuxAccountNameSchema)
+    .max(16, "The expected group list is too large")
+    .refine((groups) => new Set(groups).size === groups.length, {
+      message: "Expected group names must be unique",
+    }),
+  expectedShell: z.string().trim().min(1).max(128),
+  acknowledgePrivilegedGroups: z.boolean().default(false),
+});
+const ServerSystemGroupCreateSchema = z
+  .object({
+    groupName: LinuxAccountNameSchema,
+    acknowledgePrivilegedGroup: z.boolean().default(false),
+  })
+  .superRefine((value, context) => {
+    if (
+      PRIVILEGED_SYSTEM_GROUPS.has(value.groupName) &&
+      !value.acknowledgePrivilegedGroup
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["acknowledgePrivilegedGroup"],
+        message: `Explicit confirmation is required for privileged group ${value.groupName}`,
+      });
+    }
+  });
 const DockerPruneSchema = z.object({
   options: z
     .object({
@@ -153,6 +233,10 @@ export async function serverRoutes(app: FastifyInstance) {
   const serverWriteAccess = [
     authenticate,
     requireApiKeyPermission("write:servers"),
+  ];
+  const serverSystemAccountWriteAccess = [
+    ...serverWriteAccess,
+    requireRole("OPERATOR"),
   ];
   const serverContainerReadAccess = [
     authenticate,
@@ -577,6 +661,217 @@ export async function serverRoutes(app: FastifyInstance) {
           success: false,
           error: err?.message || "Failed to load server configuration",
         });
+      }
+    },
+  );
+
+  app.post(
+    "/:id/system-users",
+    { preHandler: serverSystemAccountWriteAccess },
+    async (req, reply) => {
+      const { id } = req.params as { id: string };
+      const body = ServerSystemUserCreateSchema.safeParse(req.body ?? {});
+      if (!body.success) {
+        return reply
+          .status(400)
+          .send({ success: false, error: body.error.flatten() });
+      }
+
+      const server = await getAccessibleServer(
+        req.userId,
+        id,
+        req.organizationId,
+      );
+      if (!server) {
+        return reply.status(403).send({
+          success: false,
+          error: "Forbidden — you do not have access to this server",
+        });
+      }
+
+      const privilegedGroups = getPrivilegedSystemGroups(body.data.groups);
+      try {
+        await ssh.createServerSystemUser(server, body.data);
+        const message = `System user ${body.data.username} created on ${server.name}`;
+        await auditLog({
+          userId: req.userId,
+          organizationId: req.organizationId,
+          serverId: id,
+          action: "SERVER_SYSTEM_USER_CREATE",
+          category: "SERVER",
+          level: privilegedGroups.length > 0 ? "WARNING" : "SUCCESS",
+          message,
+          meta: {
+            username: body.data.username,
+            groups: body.data.groups,
+            privilegedGroups,
+          },
+        });
+        return reply.status(201).send({ success: true, message });
+      } catch (err: unknown) {
+        const message =
+          err instanceof SystemAccountInputError
+            ? err.message
+            : "The host could not create the system user. Verify sudo access and Linux account-management tools, then try again.";
+        await auditLog({
+          userId: req.userId,
+          organizationId: req.organizationId,
+          serverId: id,
+          action: "SERVER_SYSTEM_USER_CREATE_FAILED",
+          category: "SERVER",
+          level: "ERROR",
+          message: `Failed to create system user ${body.data.username} on ${server.name}`,
+          meta: { username: body.data.username, groups: body.data.groups },
+        });
+        return reply.status(400).send({ success: false, error: message });
+      }
+    },
+  );
+
+  app.post(
+    "/:id/system-groups",
+    { preHandler: serverSystemAccountWriteAccess },
+    async (req, reply) => {
+      const { id } = req.params as { id: string };
+      const body = ServerSystemGroupCreateSchema.safeParse(req.body ?? {});
+      if (!body.success) {
+        return reply
+          .status(400)
+          .send({ success: false, error: body.error.flatten() });
+      }
+
+      const server = await getAccessibleServer(
+        req.userId,
+        id,
+        req.organizationId,
+      );
+      if (!server) {
+        return reply.status(403).send({
+          success: false,
+          error: "Forbidden — you do not have access to this server",
+        });
+      }
+
+      const privileged = PRIVILEGED_SYSTEM_GROUPS.has(body.data.groupName);
+      try {
+        await ssh.createServerSystemGroup(server, body.data.groupName);
+        const message = `System group ${body.data.groupName} created on ${server.name}`;
+        await auditLog({
+          userId: req.userId,
+          organizationId: req.organizationId,
+          serverId: id,
+          action: "SERVER_SYSTEM_GROUP_CREATE",
+          category: "SERVER",
+          level: privileged ? "WARNING" : "SUCCESS",
+          message,
+          meta: { groupName: body.data.groupName, privileged },
+        });
+        return reply.status(201).send({ success: true, message });
+      } catch (err: unknown) {
+        const message =
+          err instanceof SystemAccountInputError
+            ? err.message
+            : "The host could not create the system group. Verify sudo access and Linux account-management tools, then try again.";
+        await auditLog({
+          userId: req.userId,
+          organizationId: req.organizationId,
+          serverId: id,
+          action: "SERVER_SYSTEM_GROUP_CREATE_FAILED",
+          category: "SERVER",
+          level: "ERROR",
+          message: `Failed to create system group ${body.data.groupName} on ${server.name}`,
+          meta: { groupName: body.data.groupName },
+        });
+        return reply.status(400).send({ success: false, error: message });
+      }
+    },
+  );
+
+  app.patch(
+    "/:id/system-users/:username",
+    { preHandler: serverSystemAccountWriteAccess },
+    async (req, reply) => {
+      const { id, username } = req.params as {
+        id: string;
+        username: string;
+      };
+      const parsedUsername = LinuxAccountNameSchema.safeParse(username);
+      const body = ServerSystemUserUpdateSchema.safeParse(req.body ?? {});
+      if (!parsedUsername.success) {
+        return reply.status(400).send({
+          success: false,
+          error: parsedUsername.error.flatten(),
+        });
+      }
+      if (!body.success) {
+        return reply.status(400).send({
+          success: false,
+          error: body.error.flatten(),
+        });
+      }
+
+      const server = await getAccessibleServer(
+        req.userId,
+        id,
+        req.organizationId,
+      );
+      if (!server) {
+        return reply.status(403).send({
+          success: false,
+          error: "Forbidden — you do not have access to this server",
+        });
+      }
+
+      try {
+        const result = await ssh.updateServerSystemUser(server, {
+          username: parsedUsername.data,
+          ...body.data,
+        });
+        const privilegedGroups = getPrivilegedSystemGroups(
+          result.addedGroups,
+        );
+        const message = `System user ${result.username} updated on ${server.name}`;
+        await auditLog({
+          userId: req.userId,
+          organizationId: req.organizationId,
+          serverId: id,
+          action: "SERVER_SYSTEM_USER_UPDATE",
+          category: "SERVER",
+          level: privilegedGroups.length > 0 ? "WARNING" : "SUCCESS",
+          message,
+          meta: {
+            username: result.username,
+            isSshUser: result.isSshUser,
+            addedGroups: result.addedGroups,
+            removedGroups: result.removedGroups,
+            privilegedGroups,
+            previousShell: result.previousShell,
+            shell: result.shell,
+          },
+        });
+        return reply.send({ success: true, data: result, message });
+      } catch (err: unknown) {
+        const isConflict = err instanceof SystemAccountConflictError;
+        const message =
+          err instanceof SystemAccountInputError
+            ? err.message
+            : "The host could not update the system user. Verify sudo access and Linux account-management tools, then try again.";
+        await auditLog({
+          userId: req.userId,
+          organizationId: req.organizationId,
+          serverId: id,
+          action: "SERVER_SYSTEM_USER_UPDATE_FAILED",
+          category: "SERVER",
+          level: isConflict ? "WARNING" : "ERROR",
+          message: `Failed to update system user ${parsedUsername.data} on ${server.name}`,
+          meta: {
+            username: parsedUsername.data,
+            conflict: isConflict,
+          },
+        });
+        return reply
+          .status(isConflict ? 409 : 400)
+          .send({ success: false, error: message });
       }
     },
   );
