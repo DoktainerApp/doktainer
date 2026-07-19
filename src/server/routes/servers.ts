@@ -11,6 +11,7 @@ import {
   userCanAccessServer,
 } from "../services/server-access.service";
 import * as ssh from "../services/ssh.service";
+import { closeTerminalSessionsForServer } from "./terminal";
 
 function serializeMetric(
   metric: {
@@ -308,6 +309,23 @@ export async function serverRoutes(app: FastifyInstance) {
       });
     }
 
+    const currentServer = await prisma.server.findFirst({
+      where: { id, organizationId: req.organizationId! },
+    });
+    if (!currentServer) {
+      return reply
+        .status(404)
+        .send({ success: false, error: "Server not found" });
+    }
+
+    const sshConfigChanged =
+      (rest.ip !== undefined && rest.ip !== currentServer.ip) ||
+      (rest.sshPort !== undefined && rest.sshPort !== currentServer.sshPort) ||
+      (rest.username !== undefined && rest.username !== currentServer.username) ||
+      (rest.authType !== undefined && rest.authType !== currentServer.authType) ||
+      sshKey !== undefined ||
+      password !== undefined;
+
     const server = await prisma.server.update({
       where: { id },
       data: {
@@ -316,6 +334,11 @@ export async function serverRoutes(app: FastifyInstance) {
         ...(password ? { passwordEnc: encrypt(password) } : {}),
       },
     });
+
+    if (sshConfigChanged) {
+      closeTerminalSessionsForServer(id);
+      ssh.closeConnection(id);
+    }
 
     await auditLog({
       userId: req.userId,

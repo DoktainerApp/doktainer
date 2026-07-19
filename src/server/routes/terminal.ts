@@ -89,14 +89,35 @@ function detachSocket(session: TerminalSession) {
   session.attachedSocket = undefined;
 }
 
-function destroySession(sessionId: string) {
+function destroySession(sessionId: string, message?: string) {
   const session = terminalSessions.get(sessionId);
   if (!session) return;
+  const attachedSocket = session.attachedSocket;
   detachSocket(session);
   session.shellStream?.end?.();
   session.shellStream?.close?.();
   session.shellStream?.destroy?.();
   terminalSessions.delete(sessionId);
+
+  if (attachedSocket?.readyState === 1) {
+    if (message) {
+      attachedSocket.send(JSON.stringify({ type: "error", data: message }));
+    }
+    attachedSocket.close();
+  }
+}
+
+export function closeTerminalSessionsForServer(serverId: string): number {
+  let closedSessions = 0;
+  for (const [sessionId, session] of terminalSessions.entries()) {
+    if (session.serverId !== serverId) continue;
+    destroySession(
+      sessionId,
+      "SSH settings changed. Open a new terminal session to use the updated account.",
+    );
+    closedSessions += 1;
+  }
+  return closedSessions;
 }
 
 function pruneExpiredSessions() {
