@@ -15,6 +15,11 @@ export default function ServerConfigUsersPanel({
   snapshot,
   snapshotLoadError,
 }: ServerConfigUsersPanelProps) {
+  const users = [
+    ...(snapshot.rootUser ? [snapshot.rootUser] : []),
+    ...snapshot.nonRootUsers,
+  ];
+
   return (
     <div
       style={{ display: "grid", gap: 16 }}
@@ -25,6 +30,7 @@ export default function ServerConfigUsersPanel({
           style={{
             display: "flex",
             justifyContent: "space-between",
+            alignItems: "center",
             gap: 12,
             flexWrap: "wrap",
           }}
@@ -44,7 +50,6 @@ export default function ServerConfigUsersPanel({
             style={{
               display: "flex",
               gap: 8,
-              height: "10px",
               flexWrap: "wrap",
             }}
           >
@@ -59,16 +64,16 @@ export default function ServerConfigUsersPanel({
           </div>
         </div>
       </div>
-      {snapshot.rootUser ? <ServerUserCard user={snapshot.rootUser} /> : null}
-      {snapshot.nonRootUsers.length > 0 ? (
+      {users.length > 0 ? (
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+            gridTemplateColumns:
+              "repeat(auto-fill, minmax(min(380px, 100%), 1fr))",
             gap: 16,
           }}
         >
-          {snapshot.nonRootUsers.map((user) => (
+          {users.map((user) => (
             <ServerUserCard key={user.username} user={user} />
           ))}
         </div>
@@ -79,7 +84,7 @@ export default function ServerConfigUsersPanel({
         >
           {snapshotLoadError
             ? "User inventory could not be fetched because the live server snapshot is unavailable."
-            : "No non-root users were included in the current snapshot."}
+            : "No users were included in the current snapshot."}
         </div>
       )}
     </div>
