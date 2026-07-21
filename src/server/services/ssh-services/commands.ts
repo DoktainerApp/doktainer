@@ -20,6 +20,7 @@ const commandRunContext = new AsyncLocalStorage<{
 type ExecOptions = {
   timeoutMs?: number;
   queueTimeoutMs?: number;
+  stdin?: string;
 };
 
 const REMOTE_JOB_DIR = "/tmp/doktainer-process-jobs";
@@ -278,7 +279,7 @@ export async function exec(
   options: ExecOptions = {},
 ): Promise<SSHExecCommandResponse> {
   const logSink = commandLogSink.getStore();
-  if (logSink) {
+  if (logSink && options.stdin === undefined) {
     let stdout = "";
     let code = 0;
 
@@ -309,7 +310,11 @@ export async function exec(
       try {
         const ssh = await getConnection(server);
         return await withCommandTimeout(
-          () => ssh.execCommand(command),
+          () =>
+            ssh.execCommand(
+              command,
+              options.stdin === undefined ? undefined : { stdin: options.stdin },
+            ),
           options.timeoutMs,
           () => {
             logCommandTimeout(server, command, options.timeoutMs!);
@@ -327,7 +332,11 @@ export async function exec(
         closeConnection(server.id);
         const ssh = await getConnection(server);
         return withCommandTimeout(
-          () => ssh.execCommand(command),
+          () =>
+            ssh.execCommand(
+              command,
+              options.stdin === undefined ? undefined : { stdin: options.stdin },
+            ),
           options.timeoutMs,
           () => {
             logCommandTimeout(server, command, options.timeoutMs!);

@@ -1340,6 +1340,35 @@ export interface ServerSystemUser {
   primaryGroup: string | null;
   isRoot: boolean;
   isSshUser: boolean;
+  passwordStatus: "set" | "locked" | "not-set" | "unknown";
+  sshKeys: ServerSystemSshKey[];
+  authorizedKeysRevision: string | null;
+}
+
+export interface ServerSystemSshKey {
+  fingerprint: string;
+  keyType: string;
+  comment: string;
+}
+
+export interface ServerSystemGroup {
+  name: string;
+  gid: number;
+  members: string[];
+  primaryUsers: string[];
+}
+
+export interface ServerSshAccessStatus {
+  available: boolean;
+  pubkeyAuthentication: boolean | null;
+  passwordAuthentication: boolean | null;
+  keyboardInteractiveAuthentication: boolean | null;
+  permitRootLogin: "no" | "prohibit-password" | "yes" | null;
+  permitEmptyPasswords: boolean | null;
+  revision: string | null;
+  managed: boolean;
+  temporaryRollbackScheduled: boolean;
+  error: string | null;
 }
 
 export interface ServerServiceStatus {
@@ -1432,6 +1461,10 @@ export interface ServerConfigSnapshot {
   rootUser: ServerSystemUser | null;
   nonRootUsers: ServerSystemUser[];
   systemGroups: string[];
+  systemGroupDetails: ServerSystemGroup[];
+  uidMin: number | null;
+  gidMin: number | null;
+  sshAccess: ServerSshAccessStatus;
   hasRootUser: boolean;
   sudoNonInteractive: boolean;
   docker: DockerRuntimeStatus;
@@ -1462,6 +1495,11 @@ export interface ServerSystemUserCreateBody {
   username: string;
   groups: string[];
   acknowledgePrivilegedGroups: boolean;
+  remoteLogin: boolean;
+  credential:
+    | { type: "none" }
+    | { type: "password"; password: string; requireChange: boolean }
+    | { type: "ssh-key"; publicKey: string; label?: string };
 }
 
 export interface ServerSystemGroupCreateBody {
@@ -1484,6 +1522,38 @@ export interface ServerSystemUserUpdateResult {
   removedGroups: string[];
   previousShell: string;
   shell: string;
+}
+
+export interface ServerSystemCredentialResult {
+  username: string;
+  passwordStatus?: ServerSystemUser["passwordStatus"];
+  sshKeys?: ServerSystemSshKey[];
+  authorizedKeysRevision?: string;
+}
+
+export interface ServerSystemUserDeleteBody {
+  expectedUid: number;
+  expectedGid: number;
+  expectedHome: string;
+  expectedShell: string;
+  confirmation: string;
+  removeHome: boolean;
+}
+
+export interface ServerSystemGroupDeleteBody {
+  expectedGid: number;
+  expectedMembers: string[];
+  expectedPrimaryUsers: string[];
+  confirmation: string;
+}
+
+export interface ServerSshAccessUpdateBody {
+  expectedRevision: string;
+  pubkeyAuthentication: boolean;
+  passwordAuthentication: boolean;
+  permitRootLogin: "no" | "prohibit-password";
+  permitEmptyPasswords: false;
+  temporaryMinutes: 15 | 30 | 60 | 240 | null;
 }
 
 export const servers = {
@@ -1541,6 +1611,91 @@ export const servers = {
       body,
       { timeoutMs: 30000 },
     ),
+  setSystemUserPassword: (
+    id: string,
+    username: string,
+    body: { password: string; requireChange: boolean },
+  ) =>
+    put<{
+      success: boolean;
+      data: ServerSystemCredentialResult;
+      message: string;
+    }>(
+      `/servers/${id}/system-users/${encodeURIComponent(username)}/password`,
+      body,
+      { timeoutMs: 30000 },
+    ),
+  disableSystemUserPassword: (id: string, username: string) =>
+    del<{
+      success: boolean;
+      data: ServerSystemCredentialResult;
+      message: string;
+    }>(
+      `/servers/${id}/system-users/${encodeURIComponent(username)}/password`,
+      undefined,
+      { timeoutMs: 30000 },
+    ),
+  addSystemUserSshKey: (
+    id: string,
+    username: string,
+    body: { publicKey: string; label?: string; expectedRevision: string },
+  ) =>
+    post<{
+      success: boolean;
+      data: ServerSystemCredentialResult;
+      message: string;
+    }>(
+      `/servers/${id}/system-users/${encodeURIComponent(username)}/ssh-keys`,
+      body,
+      { timeoutMs: 30000 },
+    ),
+  revokeSystemUserSshKey: (
+    id: string,
+    username: string,
+    body: { fingerprint: string; expectedRevision: string },
+  ) =>
+    del<{
+      success: boolean;
+      data: ServerSystemCredentialResult;
+      message: string;
+    }>(
+      `/servers/${id}/system-users/${encodeURIComponent(username)}/ssh-keys`,
+      body,
+      { timeoutMs: 30000 },
+    ),
+  deleteSystemUser: (
+    id: string,
+    username: string,
+    body: ServerSystemUserDeleteBody,
+  ) =>
+    del<{
+      success: boolean;
+      data: { username: string; uid: number; home: string; homeRemoved: boolean };
+      message: string;
+    }>(`/servers/${id}/system-users/${encodeURIComponent(username)}`, body, {
+      timeoutMs: 130000,
+    }),
+  deleteSystemGroup: (
+    id: string,
+    groupName: string,
+    body: ServerSystemGroupDeleteBody,
+  ) =>
+    del<{
+      success: boolean;
+      data: { groupName: string; gid: number };
+      message: string;
+    }>(`/servers/${id}/system-groups/${encodeURIComponent(groupName)}`, body, {
+      timeoutMs: 30000,
+    }),
+  updateSshAccess: (id: string, body: ServerSshAccessUpdateBody) =>
+    put<{
+      success: boolean;
+      data: {
+        status: ServerSshAccessStatus;
+        temporaryMinutes: number | null;
+      };
+      message: string;
+    }>(`/servers/${id}/ssh-access`, body, { timeoutMs: 60000 }),
   reset: (id: string, confirmation: string) =>
     post<{ success: boolean; message: string }>(
       `/servers/${id}/reset`,

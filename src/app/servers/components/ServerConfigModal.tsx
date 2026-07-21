@@ -15,7 +15,9 @@ import {
   getUser,
   type Server as ServerType,
   type ServerConfigSnapshot,
+  type ServerSshAccessUpdateBody,
   type ServerSystemUser,
+  type ServerSystemUserCreateBody,
   servers as serversApi,
   type WebStackAction,
   type WebStackComponentKey,
@@ -40,6 +42,7 @@ import { UserBadge } from "@/app/servers/components/server-config/ServerConfigPr
 import ServerConfigActionsPanel from "@/app/servers/components/server-config/ServerConfigActionsPanel";
 import ServerConfigMountsPanel from "@/app/servers/components/server-config/ServerConfigMountsPanel";
 import ServerConfigOverviewPanel from "@/app/servers/components/server-config/ServerConfigOverviewPanel";
+import ServerConfigSshAccessPanel from "@/app/servers/components/server-config/ServerConfigSshAccessPanel";
 import ServerConfigServicesPanel from "@/app/servers/components/server-config/ServerConfigServicesPanel";
 import ServerConfigUsersPanel from "@/app/servers/components/server-config/ServerConfigUsersPanel";
 import ServerConfigWebServerPanel from "@/app/servers/components/server-config/ServerConfigWebServerPanel";
@@ -86,6 +89,7 @@ export default function ServerConfigModal({
   const tabs: Array<{ id: ServerConfigTab; label: string }> = [
     { id: "overview", label: "Overview" },
     { id: "users", label: "Users" },
+    { id: "ssh-access", label: "SSH Access" },
     { id: "services", label: "Services" },
     { id: "web-server", label: "Web Server" },
     { id: "mounts", label: "Disk Mounts" },
@@ -134,6 +138,11 @@ export default function ServerConfigModal({
     (username: string) => `system-user:update:${username}`,
     [],
   );
+  const getSystemGroupDeleteActionKey = useCallback(
+    (groupName: string) => `system-group:delete:${groupName}`,
+    [],
+  );
+  const sshAccessActionKey = "ssh-access:update";
 
   const loadSnapshot = useCallback(async () => {
     setLoading(true);
@@ -549,8 +558,7 @@ export default function ServerConfigModal({
   };
 
   const handleSystemUserCreate = async (
-    username: string,
-    groups: string[],
+    options: Omit<ServerSystemUserCreateBody, "acknowledgePrivilegedGroups">,
     privileged: boolean,
   ) => {
     const actionKey = getSystemAccountActionKey("user");
@@ -559,8 +567,7 @@ export default function ServerConfigModal({
     setNotice(null);
     try {
       const res = await serversApi.createSystemUser(server.id, {
-        username,
-        groups,
+        ...options,
         acknowledgePrivilegedGroups: privileged,
       });
       publishNotice({
@@ -569,9 +576,11 @@ export default function ServerConfigModal({
         title: "System User Created",
         summary: res.message,
         details: [
-          `User: ${username}`,
-          `Groups: ${groups.length > 0 ? groups.join(", ") : "default group only"}`,
-          "No password was configured for the account.",
+          `User: ${options.username}`,
+          `Groups: ${options.groups.length > 0 ? options.groups.join(", ") : "default group only"}`,
+          options.remoteLogin
+            ? `Initial login: ${options.credential.type === "password" ? "password" : "SSH public key"}`
+            : "Remote login disabled",
         ],
       });
       onActionComplete(res.message);
@@ -584,7 +593,10 @@ export default function ServerConfigModal({
         tone: "error",
         title: "System User Creation Failed",
         summary: message,
-        details: [`User: ${username}`, `Server: ${server.name} (${server.ip})`],
+        details: [
+          `User: ${options.username}`,
+          `Server: ${server.name} (${server.ip})`,
+        ],
       });
       onActionComplete(message, "error");
     } finally {
@@ -623,6 +635,162 @@ export default function ServerConfigModal({
         title: "System Group Creation Failed",
         summary: message,
         details: [`Group: ${groupName}`, `Server: ${server.name} (${server.ip})`],
+      });
+      onActionComplete(message, "error");
+    } finally {
+      setActiveActionKey(null);
+    }
+  };
+
+  const handleSystemUserDelete = async (options: {
+    username: string;
+    expectedUid: number;
+    expectedGid: number;
+    expectedHome: string;
+    expectedShell: string;
+    confirmation: string;
+    removeHome: boolean;
+  }) => {
+    const actionKey = getSystemUserUpdateActionKey(options.username);
+    setActiveActionKey(actionKey);
+    setError("");
+    setNotice(null);
+    try {
+      const res = await serversApi.deleteSystemUser(
+        server.id,
+        options.username,
+        {
+          expectedUid: options.expectedUid,
+          expectedGid: options.expectedGid,
+          expectedHome: options.expectedHome,
+          expectedShell: options.expectedShell,
+          confirmation: options.confirmation,
+          removeHome: options.removeHome,
+        },
+      );
+      publishNotice({
+        tab: "users",
+        tone: "success",
+        title: "System User Deleted",
+        summary: res.message,
+        details: [
+          `User: ${res.data.username} (UID ${res.data.uid})`,
+          res.data.homeRemoved
+            ? `Home directory removed: ${res.data.home}`
+            : `Home directory preserved: ${res.data.home}`,
+        ],
+      });
+      onActionComplete(res.message);
+      await loadSnapshot();
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error ? err.message : "Failed to delete system user";
+      publishNotice({
+        tab: "users",
+        tone: "error",
+        title: "System User Deletion Failed",
+        summary: message,
+        details: [
+          `User: ${options.username}`,
+          "Refresh Server Config before retrying if the account changed or started a process.",
+        ],
+      });
+      onActionComplete(message, "error");
+    } finally {
+      setActiveActionKey(null);
+    }
+  };
+
+  const handleSystemGroupDelete = async (options: {
+    groupName: string;
+    expectedGid: number;
+    expectedMembers: string[];
+    expectedPrimaryUsers: string[];
+    confirmation: string;
+  }) => {
+    const actionKey = getSystemGroupDeleteActionKey(options.groupName);
+    setActiveActionKey(actionKey);
+    setError("");
+    setNotice(null);
+    try {
+      const res = await serversApi.deleteSystemGroup(
+        server.id,
+        options.groupName,
+        {
+          expectedGid: options.expectedGid,
+          expectedMembers: options.expectedMembers,
+          expectedPrimaryUsers: options.expectedPrimaryUsers,
+          confirmation: options.confirmation,
+        },
+      );
+      publishNotice({
+        tab: "users",
+        tone: "success",
+        title: "System Group Deleted",
+        summary: res.message,
+        details: [`Group: ${res.data.groupName} (GID ${res.data.gid})`],
+      });
+      onActionComplete(res.message);
+      await loadSnapshot();
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error ? err.message : "Failed to delete system group";
+      publishNotice({
+        tab: "users",
+        tone: "error",
+        title: "System Group Deletion Failed",
+        summary: message,
+        details: [
+          `Group: ${options.groupName}`,
+          "Refresh Server Config before retrying if membership changed.",
+        ],
+      });
+      onActionComplete(message, "error");
+    } finally {
+      setActiveActionKey(null);
+    }
+  };
+
+  const handleSshAccessUpdate = async (
+    options: ServerSshAccessUpdateBody,
+  ) => {
+    setActiveActionKey(sshAccessActionKey);
+    setError("");
+    setNotice(null);
+    try {
+      const res = await serversApi.updateSshAccess(server.id, options);
+      publishNotice({
+        tab: "ssh-access",
+        tone: "success",
+        title: options.temporaryMinutes
+          ? "Temporary Password Access Enabled"
+          : "SSH Access Policy Updated",
+        summary: res.message,
+        details: [
+          `Public key authentication: ${options.pubkeyAuthentication ? "enabled" : "disabled"}`,
+          `Password authentication: ${options.passwordAuthentication ? "enabled" : "disabled"}`,
+          `Root login: ${options.permitRootLogin === "no" ? "blocked" : "keys only"}`,
+          options.temporaryMinutes
+            ? `Host-side rollback scheduled after ${options.temporaryMinutes} minutes`
+            : "No temporary rollback scheduled",
+          "A fresh SSH connection was verified after reload.",
+        ],
+      });
+      onActionComplete(res.message);
+      await loadSnapshot();
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error ? err.message : "Failed to update SSH access";
+      publishNotice({
+        tab: "ssh-access",
+        tone: "error",
+        title: "SSH Access Update Failed",
+        summary: message,
+        details: [
+          `Server: ${server.name} (${server.ip})`,
+          "The backend attempted to restore the previous managed configuration before returning this error.",
+          "Keep the current SSH session open if the message reports that rollback could not be completed.",
+        ],
       });
       onActionComplete(message, "error");
     } finally {
@@ -693,25 +861,210 @@ export default function ServerConfigModal({
     }
   };
 
+  const handleSystemUserPassword = async (options: {
+    username: string;
+    action: "set" | "disable";
+    password?: string;
+    requireChange?: boolean;
+    noticeTab?: "users" | "ssh-access";
+  }) => {
+    const actionKey = getSystemUserUpdateActionKey(options.username);
+    setActiveActionKey(actionKey);
+    setError("");
+    setNotice(null);
+    try {
+      const res =
+        options.action === "set"
+          ? await serversApi.setSystemUserPassword(server.id, options.username, {
+              password: options.password ?? "",
+              requireChange: options.requireChange ?? true,
+            })
+          : await serversApi.disableSystemUserPassword(
+              server.id,
+              options.username,
+            );
+      publishNotice({
+        tab: options.noticeTab ?? "users",
+        tone: "success",
+        title:
+          options.action === "set"
+            ? "System User Password Updated"
+            : "System User Password Disabled",
+        summary: res.message,
+        details: [
+          `User: ${options.username}`,
+          options.action === "set" && options.requireChange
+            ? "Password change required at next login"
+            : null,
+          "The password value was not stored in the audit log.",
+        ].filter((value): value is string => Boolean(value)),
+      });
+      onActionComplete(res.message);
+      await loadSnapshot();
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error ? err.message : "Failed to update user password";
+      publishNotice({
+        tab: "users",
+        tone: "error",
+        title: "System User Password Action Failed",
+        summary: message,
+        details: [`User: ${options.username}`, `Server: ${server.name}`],
+      });
+      onActionComplete(message, "error");
+    } finally {
+      setActiveActionKey(null);
+    }
+  };
+
+  const handleSystemUserSshKey = async (options: {
+    username: string;
+    action: "add" | "revoke";
+    publicKey?: string;
+    label?: string;
+    fingerprint?: string;
+    expectedRevision: string;
+  }) => {
+    const actionKey = getSystemUserUpdateActionKey(options.username);
+    setActiveActionKey(actionKey);
+    setError("");
+    setNotice(null);
+    try {
+      const res =
+        options.action === "add"
+          ? await serversApi.addSystemUserSshKey(server.id, options.username, {
+              publicKey: options.publicKey ?? "",
+              label: options.label,
+              expectedRevision: options.expectedRevision,
+            })
+          : await serversApi.revokeSystemUserSshKey(
+              server.id,
+              options.username,
+              {
+                fingerprint: options.fingerprint ?? "",
+                expectedRevision: options.expectedRevision,
+              },
+            );
+      publishNotice({
+        tab: "users",
+        tone: "success",
+        title:
+          options.action === "add"
+            ? "SSH Public Key Added"
+            : "SSH Public Key Revoked",
+        summary: res.message,
+        details: [
+          `User: ${options.username}`,
+          options.fingerprint ? `Fingerprint: ${options.fingerprint}` : null,
+          "authorized_keys ownership and permissions were enforced.",
+        ].filter((value): value is string => Boolean(value)),
+      });
+      onActionComplete(res.message);
+      await loadSnapshot();
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error ? err.message : "Failed to update SSH public key";
+      publishNotice({
+        tab: "users",
+        tone: "error",
+        title: "SSH Public Key Action Failed",
+        summary: message,
+        details: [
+          `User: ${options.username}`,
+          "Refresh Server Config before retrying if authorized_keys changed outside Doktainer.",
+        ],
+      });
+      onActionComplete(message, "error");
+    } finally {
+      setActiveActionKey(null);
+    }
+  };
+
   const requestSystemUserCreateConfirm = (
-    username: string,
-    groups: string[],
+    options: Omit<ServerSystemUserCreateBody, "acknowledgePrivilegedGroups">,
   ) => {
-    const privilegedGroups = groups.filter((group) =>
+    const privilegedGroups = options.groups.filter((group) =>
       ["root", "docker", "sudo", "wheel"].includes(group),
     );
     const privileged = privilegedGroups.length > 0;
     setPendingConfirm({
       kind: "system-user",
-      username,
-      groups,
+      username: options.username,
+      groups: options.groups,
+      remoteLogin: options.remoteLogin,
+      credential: options.credential,
       privileged,
-      title: `Create system user ${username}`,
-      description: privileged
-        ? `This account will join privileged group(s): ${privilegedGroups.join(", ")}. This may grant administrative or root-equivalent host access.`
-        : `This creates a passwordless host account with a home directory and Bash shell${groups.length > 0 ? `, assigned to: ${groups.join(", ")}` : ""}.`,
+      title: `Create system user ${options.username}`,
+      description: [
+        options.remoteLogin
+          ? `SSH login will be initialized with ${options.credential.type === "password" ? "a password" : "a public key"}.`
+          : "Remote login will be disabled with a nologin shell.",
+        options.groups.length > 0
+          ? `Groups: ${options.groups.join(", ")}.`
+          : null,
+        privileged
+          ? `Privileged group access requires extra care: ${privilegedGroups.join(", ")}.`
+          : null,
+      ]
+        .filter(Boolean)
+        .join(" "),
       confirmLabel: "Create System User",
       tone: privileged ? "danger" : "info",
+    });
+  };
+
+  const requestSystemUserPasswordConfirm = (options: {
+    username: string;
+    action: "set" | "disable";
+    password?: string;
+    requireChange?: boolean;
+    noticeTab?: "users" | "ssh-access";
+  }) => {
+    setPendingConfirm({
+      kind: "system-user-password",
+      ...options,
+      title:
+        options.action === "set"
+          ? `Set password for ${options.username}`
+          : `Disable password for ${options.username}`,
+      description:
+        options.action === "set"
+          ? `The password will be sent once through the encrypted SSH connection and will${options.requireChange ? "" : " not"} require replacement at the next login.`
+          : "Password authentication will be locked for this account. SSH public keys are unaffected.",
+      confirmLabel:
+        options.action === "set" ? "Set Password" : "Disable Password",
+      tone: "warning",
+    });
+  };
+
+  const requestSystemUserSshKeyAddConfirm = (options: {
+    username: string;
+    publicKey: string;
+    label?: string;
+    expectedRevision: string;
+  }) => {
+    setPendingConfirm({
+      kind: "system-user-key-add",
+      ...options,
+      title: `Add SSH key for ${options.username}`,
+      description: `Add the public key${options.label ? ` labelled ${options.label}` : ""} to this account's authorized_keys file.`,
+      confirmLabel: "Add SSH Public Key",
+      tone: "warning",
+    });
+  };
+
+  const requestSystemUserSshKeyRevokeConfirm = (options: {
+    username: string;
+    fingerprint: string;
+    expectedRevision: string;
+  }) => {
+    setPendingConfirm({
+      kind: "system-user-key-revoke",
+      ...options,
+      title: `Revoke SSH key for ${options.username}`,
+      description: `Remove ${options.fingerprint} from this account. Existing sessions remain open, but future login with this key will fail.`,
+      confirmLabel: "Revoke SSH Public Key",
+      tone: "danger",
     });
   };
 
@@ -770,6 +1123,92 @@ export default function ServerConfigModal({
     });
   };
 
+  const requestSystemUserDeleteConfirm = (options: {
+    user: ServerSystemUser;
+    confirmation: string;
+    removeHome: boolean;
+  }) => {
+    const { user } = options;
+    if (
+      user.uid == null ||
+      user.gid == null ||
+      !user.home ||
+      !user.shell
+    ) {
+      return;
+    }
+    setPendingConfirm({
+      kind: "system-user-delete",
+      username: user.username,
+      expectedUid: user.uid,
+      expectedGid: user.gid,
+      expectedHome: user.home,
+      expectedShell: user.shell,
+      confirmation: options.confirmation,
+      removeHome: options.removeHome,
+      title: `Delete system user ${user.username}`,
+      description: options.removeHome
+        ? `Permanently delete ${user.username} and its home directory ${user.home}. The host will reject this if the account is protected, changed, or owns active processes.`
+        : `Delete ${user.username} while preserving ${user.home}. The host will reject this if the account is protected, changed, or owns active processes.`,
+      confirmLabel: options.removeHome
+        ? "Delete User & Home"
+        : "Delete User",
+      tone: "danger",
+    });
+  };
+
+  const requestSystemGroupDeleteConfirm = (options: {
+    groupName: string;
+    gid: number;
+    members: string[];
+    primaryUsers: string[];
+    confirmation: string;
+  }) => {
+    setPendingConfirm({
+      kind: "system-group-delete",
+      groupName: options.groupName,
+      expectedGid: options.gid,
+      expectedMembers: options.members,
+      expectedPrimaryUsers: options.primaryUsers,
+      confirmation: options.confirmation,
+      title: `Delete system group ${options.groupName}`,
+      description: `Permanently delete the empty group ${options.groupName} (GID ${options.gid}). System, privileged, changed, or in-use groups will be rejected by the host.`,
+      confirmLabel: "Delete Group",
+      tone: "danger",
+    });
+  };
+
+  const requestSshAccessUpdateConfirm = (
+    options: ServerSshAccessUpdateBody,
+  ) => {
+    const weakened =
+      options.passwordAuthentication ||
+      !options.pubkeyAuthentication ||
+      options.permitRootLogin !== "no";
+    setPendingConfirm({
+      kind: "ssh-access",
+      options,
+      title: options.temporaryMinutes
+        ? `Enable password login for ${options.temporaryMinutes} minutes`
+        : "Apply SSH access policy",
+      description: [
+        `Public keys: ${options.pubkeyAuthentication ? "enabled" : "disabled"}.`,
+        `Passwords: ${options.passwordAuthentication ? "enabled" : "disabled"}.`,
+        `Root login: ${options.permitRootLogin === "no" ? "blocked" : "keys only"}.`,
+        "Empty passwords: blocked.",
+        options.temporaryMinutes
+          ? `The host will restore the previous managed policy after ${options.temporaryMinutes} minutes.`
+          : null,
+      ]
+        .filter(Boolean)
+        .join(" "),
+      confirmLabel: options.temporaryMinutes
+        ? "Enable Temporary Access"
+        : "Apply SSH Policy",
+      tone: weakened ? "danger" : "warning",
+    });
+  };
+
   const renderActiveTab = () => {
     if (!snapshot) {
       return null;
@@ -789,12 +1228,32 @@ export default function ServerConfigModal({
           <ServerConfigUsersPanel
             snapshot={snapshot}
             snapshotLoadError={snapshotLoadError}
+            serverAuthType={server.authType}
             canManageSystemAccounts={canManageSystemAccounts}
             isActionRunning={isActionRunning}
             getSystemUserUpdateActionKey={getSystemUserUpdateActionKey}
             onRequestCreateUserConfirm={requestSystemUserCreateConfirm}
             onRequestCreateGroupConfirm={requestSystemGroupCreateConfirm}
             onRequestUpdateUserConfirm={requestSystemUserUpdateConfirm}
+            onRequestPasswordConfirm={requestSystemUserPasswordConfirm}
+            onRequestSshKeyAddConfirm={requestSystemUserSshKeyAddConfirm}
+            onRequestSshKeyRevokeConfirm={
+              requestSystemUserSshKeyRevokeConfirm
+            }
+            onRequestDeleteUserConfirm={requestSystemUserDeleteConfirm}
+            onRequestDeleteGroupConfirm={requestSystemGroupDeleteConfirm}
+          />
+        );
+      case "ssh-access":
+        return (
+          <ServerConfigSshAccessPanel
+            server={server}
+            snapshot={snapshot}
+            snapshotLoadError={snapshotLoadError}
+            canManageSystemAccounts={canManageSystemAccounts}
+            actionRunning={isActionRunning(sshAccessActionKey)}
+            onRequestApplyConfirm={requestSshAccessUpdateConfirm}
+            onRequestPasswordConfirm={requestSystemUserPasswordConfirm}
           />
         );
       case "services":
@@ -1069,7 +1528,13 @@ export default function ServerConfigModal({
               >
                 {pendingConfirm.kind === "system-user" ||
                 pendingConfirm.kind === "system-group" ||
-                pendingConfirm.kind === "system-user-update"
+                pendingConfirm.kind === "system-user-update" ||
+                pendingConfirm.kind === "system-user-password" ||
+                pendingConfirm.kind === "system-user-key-add" ||
+                pendingConfirm.kind === "system-user-key-revoke" ||
+                pendingConfirm.kind === "system-user-delete" ||
+                pendingConfirm.kind === "system-group-delete" ||
+                pendingConfirm.kind === "ssh-access"
                   ? "This changes host access control. Review the exact account and group names before continuing; the action will be recorded in the audit log."
                   : "Confirm this action only if you expect a brief service interruption or cleanup change on the host."}
               </div>
@@ -1121,10 +1586,76 @@ export default function ServerConfigModal({
 
                     if (currentConfirm.kind === "system-user") {
                       void handleSystemUserCreate(
-                        currentConfirm.username,
-                        currentConfirm.groups,
+                        {
+                          username: currentConfirm.username,
+                          groups: currentConfirm.groups,
+                          remoteLogin: currentConfirm.remoteLogin,
+                          credential: currentConfirm.credential,
+                        },
                         currentConfirm.privileged,
                       );
+                      return;
+                    }
+
+                    if (currentConfirm.kind === "system-user-password") {
+                      void handleSystemUserPassword({
+                        username: currentConfirm.username,
+                        action: currentConfirm.action,
+                        password: currentConfirm.password,
+                        requireChange: currentConfirm.requireChange,
+                        noticeTab: currentConfirm.noticeTab,
+                      });
+                      return;
+                    }
+
+                    if (currentConfirm.kind === "system-user-key-add") {
+                      void handleSystemUserSshKey({
+                        username: currentConfirm.username,
+                        action: "add",
+                        publicKey: currentConfirm.publicKey,
+                        label: currentConfirm.label,
+                        expectedRevision: currentConfirm.expectedRevision,
+                      });
+                      return;
+                    }
+
+                    if (currentConfirm.kind === "system-user-key-revoke") {
+                      void handleSystemUserSshKey({
+                        username: currentConfirm.username,
+                        action: "revoke",
+                        fingerprint: currentConfirm.fingerprint,
+                        expectedRevision: currentConfirm.expectedRevision,
+                      });
+                      return;
+                    }
+
+                    if (currentConfirm.kind === "system-user-delete") {
+                      void handleSystemUserDelete({
+                        username: currentConfirm.username,
+                        expectedUid: currentConfirm.expectedUid,
+                        expectedGid: currentConfirm.expectedGid,
+                        expectedHome: currentConfirm.expectedHome,
+                        expectedShell: currentConfirm.expectedShell,
+                        confirmation: currentConfirm.confirmation,
+                        removeHome: currentConfirm.removeHome,
+                      });
+                      return;
+                    }
+
+                    if (currentConfirm.kind === "system-group-delete") {
+                      void handleSystemGroupDelete({
+                        groupName: currentConfirm.groupName,
+                        expectedGid: currentConfirm.expectedGid,
+                        expectedMembers: currentConfirm.expectedMembers,
+                        expectedPrimaryUsers:
+                          currentConfirm.expectedPrimaryUsers,
+                        confirmation: currentConfirm.confirmation,
+                      });
+                      return;
+                    }
+
+                    if (currentConfirm.kind === "ssh-access") {
+                      void handleSshAccessUpdate(currentConfirm.options);
                       return;
                     }
 

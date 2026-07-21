@@ -3,6 +3,7 @@ export * from "./commands";
 export * from "./metrics";
 export * from "./platform";
 export * from "./server-config";
+export * from "./ssh-access";
 export * from "./web-stack";
 export * from "./docker-engine";
 export * from "./docker-networks";

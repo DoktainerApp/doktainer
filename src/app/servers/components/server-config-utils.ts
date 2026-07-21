@@ -1,6 +1,8 @@
 import type {
   Server as ServerType,
   ServerConfigSnapshot,
+  ServerSshAccessUpdateBody,
+  ServerSystemUserCreateBody,
   WebStackAction,
   WebStackComponentKey,
   WebStackComponentStatus,
@@ -9,6 +11,7 @@ import type {
 export type ServerConfigTab =
   | "overview"
   | "users"
+  | "ssh-access"
   | "services"
   | "web-server"
   | "mounts"
@@ -50,7 +53,42 @@ export type ServerPendingConfirm =
       kind: "system-user";
       username: string;
       groups: string[];
+      remoteLogin: boolean;
+      credential: ServerSystemUserCreateBody["credential"];
       privileged: boolean;
+      title: string;
+      description: string;
+      confirmLabel: string;
+      tone: "danger" | "warning" | "info";
+    }
+  | {
+      kind: "system-user-password";
+      action: "set" | "disable";
+      username: string;
+      password?: string;
+      requireChange?: boolean;
+      noticeTab?: "users" | "ssh-access";
+      title: string;
+      description: string;
+      confirmLabel: string;
+      tone: "danger" | "warning" | "info";
+    }
+  | {
+      kind: "system-user-key-add";
+      username: string;
+      publicKey: string;
+      label?: string;
+      expectedRevision: string;
+      title: string;
+      description: string;
+      confirmLabel: string;
+      tone: "danger" | "warning" | "info";
+    }
+  | {
+      kind: "system-user-key-revoke";
+      username: string;
+      fingerprint: string;
+      expectedRevision: string;
       title: string;
       description: string;
       confirmLabel: string;
@@ -73,6 +111,40 @@ export type ServerPendingConfirm =
       expectedGroups: string[];
       expectedShell: string;
       privileged: boolean;
+      title: string;
+      description: string;
+      confirmLabel: string;
+      tone: "danger" | "warning" | "info";
+    }
+  | {
+      kind: "system-user-delete";
+      username: string;
+      expectedUid: number;
+      expectedGid: number;
+      expectedHome: string;
+      expectedShell: string;
+      confirmation: string;
+      removeHome: boolean;
+      title: string;
+      description: string;
+      confirmLabel: string;
+      tone: "danger";
+    }
+  | {
+      kind: "system-group-delete";
+      groupName: string;
+      expectedGid: number;
+      expectedMembers: string[];
+      expectedPrimaryUsers: string[];
+      confirmation: string;
+      title: string;
+      description: string;
+      confirmLabel: string;
+      tone: "danger";
+    }
+  | {
+      kind: "ssh-access";
+      options: ServerSshAccessUpdateBody;
       title: string;
       description: string;
       confirmLabel: string;
@@ -440,6 +512,21 @@ export function createUnavailableServerConfigSnapshot(
     rootUser: null,
     nonRootUsers: [],
     systemGroups: [],
+    systemGroupDetails: [],
+    uidMin: null,
+    gidMin: null,
+    sshAccess: {
+      available: false,
+      pubkeyAuthentication: null,
+      passwordAuthentication: null,
+      keyboardInteractiveAuthentication: null,
+      permitRootLogin: null,
+      permitEmptyPasswords: null,
+      revision: null,
+      managed: false,
+      temporaryRollbackScheduled: false,
+      error: loadError,
+    },
     hasRootUser: false,
     sudoNonInteractive: false,
     docker: {

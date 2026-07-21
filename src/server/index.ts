@@ -84,6 +84,15 @@ const app = Fastify({
   trustProxy: process.env.TRUST_PROXY === "true",
   logger: {
     level: process.env.NODE_ENV === "production" ? "warn" : "info",
+    redact: {
+      paths: [
+        "req.body.password",
+        "req.body.credential.password",
+        "request.body.password",
+        "request.body.credential.password",
+      ],
+      censor: "[REDACTED]",
+    },
     transport:
       process.env.NODE_ENV !== "production"
         ? {

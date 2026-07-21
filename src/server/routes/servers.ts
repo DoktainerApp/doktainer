@@ -127,6 +127,20 @@ const ServerSystemUserCreateSchema = z
         message: "Group names must be unique",
       }),
     acknowledgePrivilegedGroups: z.boolean().default(false),
+    remoteLogin: z.boolean(),
+    credential: z.discriminatedUnion("type", [
+      z.object({ type: z.literal("none") }),
+      z.object({
+        type: z.literal("password"),
+        password: z.string().min(12).max(128),
+        requireChange: z.boolean().default(true),
+      }),
+      z.object({
+        type: z.literal("ssh-key"),
+        publicKey: z.string().trim().min(32).max(16_384),
+        label: z.string().trim().min(1).max(64).optional(),
+      }),
+    ]),
   })
   .superRefine((value, context) => {
     const selectedPrivilegedGroups = getPrivilegedSystemGroups(value.groups);
@@ -140,7 +154,39 @@ const ServerSystemUserCreateSchema = z
         message: `Explicit confirmation is required for privileged groups: ${selectedPrivilegedGroups.join(", ")}`,
       });
     }
+    if (!value.remoteLogin && value.credential.type !== "none") {
+      context.addIssue({
+        code: "custom",
+        path: ["credential"],
+        message: "Users without remote login cannot receive SSH credentials",
+      });
+    }
+    if (value.remoteLogin && value.credential.type === "none") {
+      context.addIssue({
+        code: "custom",
+        path: ["credential"],
+        message: "SSH login users require an initial password or public key",
+      });
+    }
   });
+const ServerSystemUserPasswordSchema = z.object({
+  password: z.string().min(12).max(128),
+  requireChange: z.boolean().default(true),
+});
+const AuthorizedKeysRevisionSchema = z
+  .string()
+  .regex(/^[a-f0-9]{64}$/, "Invalid authorized_keys revision");
+const ServerSystemUserSshKeyCreateSchema = z.object({
+  publicKey: z.string().trim().min(32).max(16_384),
+  label: z.string().trim().min(1).max(64).optional(),
+  expectedRevision: AuthorizedKeysRevisionSchema,
+});
+const ServerSystemUserSshKeyRevokeSchema = z.object({
+  expectedRevision: AuthorizedKeysRevisionSchema,
+});
+const SshKeyFingerprintSchema = z
+  .string()
+  .regex(/^SHA256:[A-Za-z0-9+/]{43}$/, "Invalid SSH key fingerprint");
 const ServerSystemUserUpdateSchema = z.object({
   groups: z
     .array(LinuxAccountNameSchema)
@@ -157,6 +203,46 @@ const ServerSystemUserUpdateSchema = z.object({
     }),
   expectedShell: z.string().trim().min(1).max(128),
   acknowledgePrivilegedGroups: z.boolean().default(false),
+});
+const ServerSystemUserDeleteSchema = z.object({
+  expectedUid: z.number().int().nonnegative(),
+  expectedGid: z.number().int().nonnegative(),
+  expectedHome: z.string().min(1).max(4096),
+  expectedShell: z.string().min(1).max(4096),
+  confirmation: LinuxAccountNameSchema,
+  removeHome: z.boolean().default(false),
+});
+const ServerSystemGroupDeleteSchema = z.object({
+  expectedGid: z.number().int().nonnegative(),
+  expectedMembers: z
+    .array(z.string().min(1).max(256).regex(/^[^,\r\n|]+$/))
+    .max(1024)
+    .refine((members) => new Set(members).size === members.length, {
+      message: "Expected group members must be unique",
+    }),
+  expectedPrimaryUsers: z
+    .array(z.string().min(1).max(256).regex(/^[^,\r\n|]+$/))
+    .max(1024)
+    .refine((members) => new Set(members).size === members.length, {
+      message: "Expected primary users must be unique",
+    }),
+  confirmation: LinuxAccountNameSchema,
+});
+const ServerSshAccessUpdateSchema = z.object({
+  expectedRevision: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/, "Invalid SSH configuration revision"),
+  pubkeyAuthentication: z.boolean(),
+  passwordAuthentication: z.boolean(),
+  permitRootLogin: z.enum(["no", "prohibit-password"]),
+  permitEmptyPasswords: z.literal(false),
+  temporaryMinutes: z.union([
+    z.literal(15),
+    z.literal(30),
+    z.literal(60),
+    z.literal(240),
+    z.null(),
+  ]),
 });
 const ServerSystemGroupCreateSchema = z
   .object({
@@ -665,6 +751,84 @@ export async function serverRoutes(app: FastifyInstance) {
     },
   );
 
+  app.put(
+    "/:id/ssh-access",
+    { preHandler: serverSystemAccountWriteAccess },
+    async (req, reply) => {
+      const { id } = req.params as { id: string };
+      const body = ServerSshAccessUpdateSchema.safeParse(req.body ?? {});
+      if (!body.success) {
+        return reply.status(400).send({
+          success: false,
+          error: body.error.flatten(),
+        });
+      }
+      const server = await getAccessibleServer(
+        req.userId,
+        id,
+        req.organizationId,
+      );
+      if (!server) {
+        return reply.status(403).send({
+          success: false,
+          error: "Forbidden — you do not have access to this server",
+        });
+      }
+      try {
+        const result = await ssh.applyServerSshAccessPolicy(server, body.data);
+        const message = body.data.temporaryMinutes
+          ? `Temporary SSH password access enabled for ${body.data.temporaryMinutes} minutes on ${server.name}`
+          : `SSH access policy updated on ${server.name}`;
+        await auditLog({
+          userId: req.userId,
+          organizationId: req.organizationId,
+          serverId: id,
+          action: "SERVER_SSH_ACCESS_UPDATE",
+          category: "SERVER",
+          level:
+            body.data.passwordAuthentication ||
+            body.data.permitRootLogin !== "no"
+              ? "WARNING"
+              : "SUCCESS",
+          message,
+          meta: {
+            pubkeyAuthentication: body.data.pubkeyAuthentication,
+            passwordAuthentication: body.data.passwordAuthentication,
+            permitRootLogin: body.data.permitRootLogin,
+            permitEmptyPasswords: false,
+            temporaryMinutes: body.data.temporaryMinutes,
+          },
+        });
+        return reply.send({ success: true, data: result, message });
+      } catch (err: unknown) {
+        const isConflict = err instanceof SystemAccountConflictError;
+        const message =
+          err instanceof SystemAccountInputError
+            ? err.message
+            : "The SSH access policy could not be applied safely. The previous managed policy was restored when possible.";
+        await auditLog({
+          userId: req.userId,
+          organizationId: req.organizationId,
+          serverId: id,
+          action: "SERVER_SSH_ACCESS_UPDATE_FAILED",
+          category: "SERVER",
+          level: isConflict ? "WARNING" : "ERROR",
+          message: `Failed to update SSH access policy on ${server.name}`,
+          meta: {
+            pubkeyAuthentication: body.data.pubkeyAuthentication,
+            passwordAuthentication: body.data.passwordAuthentication,
+            permitRootLogin: body.data.permitRootLogin,
+            temporaryMinutes: body.data.temporaryMinutes,
+            conflict: isConflict,
+          },
+        });
+        return reply
+          .status(isConflict ? 409 : 400)
+          .send({ success: false, error: message });
+      }
+    },
+  );
+
   app.post(
     "/:id/system-users",
     { preHandler: serverSystemAccountWriteAccess },
@@ -705,6 +869,12 @@ export async function serverRoutes(app: FastifyInstance) {
             username: body.data.username,
             groups: body.data.groups,
             privilegedGroups,
+            remoteLogin: body.data.remoteLogin,
+            credentialType: body.data.credential.type,
+            requirePasswordChange:
+              body.data.credential.type === "password"
+                ? body.data.credential.requireChange
+                : undefined,
           },
         });
         return reply.status(201).send({ success: true, message });
@@ -721,7 +891,12 @@ export async function serverRoutes(app: FastifyInstance) {
           category: "SERVER",
           level: "ERROR",
           message: `Failed to create system user ${body.data.username} on ${server.name}`,
-          meta: { username: body.data.username, groups: body.data.groups },
+          meta: {
+            username: body.data.username,
+            groups: body.data.groups,
+            remoteLogin: body.data.remoteLogin,
+            credentialType: body.data.credential.type,
+          },
         });
         return reply.status(400).send({ success: false, error: message });
       }
@@ -783,6 +958,85 @@ export async function serverRoutes(app: FastifyInstance) {
           meta: { groupName: body.data.groupName },
         });
         return reply.status(400).send({ success: false, error: message });
+      }
+    },
+  );
+
+  app.delete(
+    "/:id/system-groups/:groupName",
+    { preHandler: serverSystemAccountWriteAccess },
+    async (req, reply) => {
+      const { id, groupName } = req.params as {
+        id: string;
+        groupName: string;
+      };
+      const parsedGroupName = LinuxAccountNameSchema.safeParse(groupName);
+      const body = ServerSystemGroupDeleteSchema.safeParse(req.body ?? {});
+      if (!parsedGroupName.success) {
+        return reply.status(400).send({
+          success: false,
+          error: parsedGroupName.error.flatten(),
+        });
+      }
+      if (!body.success) {
+        return reply.status(400).send({
+          success: false,
+          error: body.error.flatten(),
+        });
+      }
+      if (body.data.confirmation !== parsedGroupName.data) {
+        return reply.status(400).send({
+          success: false,
+          error: "Type the exact group name to confirm deletion",
+        });
+      }
+      const server = await getAccessibleServer(
+        req.userId,
+        id,
+        req.organizationId,
+      );
+      if (!server) {
+        return reply.status(403).send({
+          success: false,
+          error: "Forbidden — you do not have access to this server",
+        });
+      }
+      try {
+        const result = await ssh.deleteServerSystemGroup(server, {
+          groupName: parsedGroupName.data,
+          ...body.data,
+        });
+        const message = `System group ${result.groupName} deleted from ${server.name}`;
+        await auditLog({
+          userId: req.userId,
+          organizationId: req.organizationId,
+          serverId: id,
+          action: "SERVER_SYSTEM_GROUP_DELETE",
+          category: "SERVER",
+          level: "WARNING",
+          message,
+          meta: { groupName: result.groupName, gid: result.gid },
+        });
+        return reply.send({ success: true, data: result, message });
+      } catch (err: unknown) {
+        const isConflict = err instanceof SystemAccountConflictError;
+        const message =
+          err instanceof SystemAccountInputError
+            ? err.message
+            : "The host could not delete the system group. Verify sudo access and group usage, then try again.";
+        await auditLog({
+          userId: req.userId,
+          organizationId: req.organizationId,
+          serverId: id,
+          action: "SERVER_SYSTEM_GROUP_DELETE_FAILED",
+          category: "SERVER",
+          level: isConflict ? "WARNING" : "ERROR",
+          message: `Failed to delete system group ${parsedGroupName.data} from ${server.name}`,
+          meta: { groupName: parsedGroupName.data, conflict: isConflict },
+        });
+        return reply
+          .status(isConflict ? 409 : 400)
+          .send({ success: false, error: message });
       }
     },
   );
@@ -866,6 +1120,364 @@ export async function serverRoutes(app: FastifyInstance) {
           message: `Failed to update system user ${parsedUsername.data} on ${server.name}`,
           meta: {
             username: parsedUsername.data,
+            conflict: isConflict,
+          },
+        });
+        return reply
+          .status(isConflict ? 409 : 400)
+          .send({ success: false, error: message });
+      }
+    },
+  );
+
+  app.delete(
+    "/:id/system-users/:username",
+    { preHandler: serverSystemAccountWriteAccess },
+    async (req, reply) => {
+      const { id, username } = req.params as {
+        id: string;
+        username: string;
+      };
+      const parsedUsername = LinuxAccountNameSchema.safeParse(username);
+      const body = ServerSystemUserDeleteSchema.safeParse(req.body ?? {});
+      if (!parsedUsername.success) {
+        return reply.status(400).send({
+          success: false,
+          error: parsedUsername.error.flatten(),
+        });
+      }
+      if (!body.success) {
+        return reply.status(400).send({
+          success: false,
+          error: body.error.flatten(),
+        });
+      }
+      if (body.data.confirmation !== parsedUsername.data) {
+        return reply.status(400).send({
+          success: false,
+          error: "Type the exact username to confirm deletion",
+        });
+      }
+      const server = await getAccessibleServer(
+        req.userId,
+        id,
+        req.organizationId,
+      );
+      if (!server) {
+        return reply.status(403).send({
+          success: false,
+          error: "Forbidden — you do not have access to this server",
+        });
+      }
+      try {
+        const result = await ssh.deleteServerSystemUser(server, {
+          username: parsedUsername.data,
+          ...body.data,
+        });
+        const message = `System user ${result.username} deleted from ${server.name}`;
+        await auditLog({
+          userId: req.userId,
+          organizationId: req.organizationId,
+          serverId: id,
+          action: "SERVER_SYSTEM_USER_DELETE",
+          category: "SERVER",
+          level: "WARNING",
+          message,
+          meta: {
+            username: result.username,
+            uid: result.uid,
+            home: result.home,
+            homeRemoved: result.homeRemoved,
+          },
+        });
+        return reply.send({ success: true, data: result, message });
+      } catch (err: unknown) {
+        const isConflict = err instanceof SystemAccountConflictError;
+        const message =
+          err instanceof SystemAccountInputError
+            ? err.message
+            : "The host could not delete the system user. Verify sudo access and active processes, then try again.";
+        await auditLog({
+          userId: req.userId,
+          organizationId: req.organizationId,
+          serverId: id,
+          action: "SERVER_SYSTEM_USER_DELETE_FAILED",
+          category: "SERVER",
+          level: isConflict ? "WARNING" : "ERROR",
+          message: `Failed to delete system user ${parsedUsername.data} from ${server.name}`,
+          meta: {
+            username: parsedUsername.data,
+            removeHome: body.data.removeHome,
+            conflict: isConflict,
+          },
+        });
+        return reply
+          .status(isConflict ? 409 : 400)
+          .send({ success: false, error: message });
+      }
+    },
+  );
+
+  app.put(
+    "/:id/system-users/:username/password",
+    { preHandler: serverSystemAccountWriteAccess },
+    async (req, reply) => {
+      const { id, username } = req.params as { id: string; username: string };
+      const parsedUsername = LinuxAccountNameSchema.safeParse(username);
+      const body = ServerSystemUserPasswordSchema.safeParse(req.body ?? {});
+      if (!parsedUsername.success) {
+        return reply.status(400).send({
+          success: false,
+          error: parsedUsername.error.flatten(),
+        });
+      }
+      if (!body.success) {
+        return reply.status(400).send({
+          success: false,
+          error: body.error.flatten(),
+        });
+      }
+      const server = await getAccessibleServer(
+        req.userId,
+        id,
+        req.organizationId,
+      );
+      if (!server) {
+        return reply.status(403).send({ success: false, error: "Forbidden" });
+      }
+      try {
+        const result = await ssh.setServerSystemUserPassword(server, {
+          username: parsedUsername.data,
+          ...body.data,
+        });
+        const message = `Password updated for system user ${result.username} on ${server.name}`;
+        await auditLog({
+          userId: req.userId,
+          organizationId: req.organizationId,
+          serverId: id,
+          action: "SERVER_SYSTEM_USER_PASSWORD_SET",
+          category: "SERVER",
+          level: "WARNING",
+          message,
+          meta: {
+            username: result.username,
+            requireChange: body.data.requireChange,
+          },
+        });
+        return reply.send({ success: true, data: result, message });
+      } catch (err: unknown) {
+        const message =
+          err instanceof SystemAccountInputError
+            ? err.message
+            : "The host could not update this password. Verify sudo and password-management support, then try again.";
+        await auditLog({
+          userId: req.userId,
+          organizationId: req.organizationId,
+          serverId: id,
+          action: "SERVER_SYSTEM_USER_PASSWORD_SET_FAILED",
+          category: "SERVER",
+          level: "ERROR",
+          message: `Failed to update password for ${parsedUsername.data} on ${server.name}`,
+          meta: { username: parsedUsername.data },
+        });
+        return reply.status(400).send({ success: false, error: message });
+      }
+    },
+  );
+
+  app.delete(
+    "/:id/system-users/:username/password",
+    { preHandler: serverSystemAccountWriteAccess },
+    async (req, reply) => {
+      const { id, username } = req.params as { id: string; username: string };
+      const parsedUsername = LinuxAccountNameSchema.safeParse(username);
+      if (!parsedUsername.success) {
+        return reply.status(400).send({
+          success: false,
+          error: parsedUsername.error.flatten(),
+        });
+      }
+      const server = await getAccessibleServer(
+        req.userId,
+        id,
+        req.organizationId,
+      );
+      if (!server) {
+        return reply.status(403).send({ success: false, error: "Forbidden" });
+      }
+      try {
+        const result = await ssh.disableServerSystemUserPassword(
+          server,
+          parsedUsername.data,
+        );
+        const message = `Password login disabled for system user ${result.username} on ${server.name}`;
+        await auditLog({
+          userId: req.userId,
+          organizationId: req.organizationId,
+          serverId: id,
+          action: "SERVER_SYSTEM_USER_PASSWORD_DISABLE",
+          category: "SERVER",
+          level: "WARNING",
+          message,
+          meta: { username: result.username },
+        });
+        return reply.send({ success: true, data: result, message });
+      } catch (err: unknown) {
+        const message =
+          err instanceof SystemAccountInputError
+            ? err.message
+            : "The host could not disable this password. Verify sudo access, then try again.";
+        await auditLog({
+          userId: req.userId,
+          organizationId: req.organizationId,
+          serverId: id,
+          action: "SERVER_SYSTEM_USER_PASSWORD_DISABLE_FAILED",
+          category: "SERVER",
+          level: "ERROR",
+          message: `Failed to disable password for ${parsedUsername.data} on ${server.name}`,
+          meta: { username: parsedUsername.data },
+        });
+        return reply.status(400).send({ success: false, error: message });
+      }
+    },
+  );
+
+  app.post(
+    "/:id/system-users/:username/ssh-keys",
+    { preHandler: serverSystemAccountWriteAccess },
+    async (req, reply) => {
+      const { id, username } = req.params as { id: string; username: string };
+      const parsedUsername = LinuxAccountNameSchema.safeParse(username);
+      const body = ServerSystemUserSshKeyCreateSchema.safeParse(req.body ?? {});
+      if (!parsedUsername.success) {
+        return reply.status(400).send({
+          success: false,
+          error: parsedUsername.error.flatten(),
+        });
+      }
+      if (!body.success) {
+        return reply.status(400).send({
+          success: false,
+          error: body.error.flatten(),
+        });
+      }
+      const server = await getAccessibleServer(
+        req.userId,
+        id,
+        req.organizationId,
+      );
+      if (!server) {
+        return reply.status(403).send({ success: false, error: "Forbidden" });
+      }
+      try {
+        const result = await ssh.addServerSystemUserSshKey(server, {
+          username: parsedUsername.data,
+          ...body.data,
+        });
+        const addedKey = result.sshKeys?.at(-1);
+        const message = `SSH public key added for system user ${result.username} on ${server.name}`;
+        await auditLog({
+          userId: req.userId,
+          organizationId: req.organizationId,
+          serverId: id,
+          action: "SERVER_SYSTEM_USER_SSH_KEY_ADD",
+          category: "SERVER",
+          level: "WARNING",
+          message,
+          meta: {
+            username: result.username,
+            fingerprint: addedKey?.fingerprint,
+            keyType: addedKey?.keyType,
+            label: addedKey?.comment,
+          },
+        });
+        return reply.status(201).send({ success: true, data: result, message });
+      } catch (err: unknown) {
+        const isConflict = err instanceof SystemAccountConflictError;
+        const message =
+          err instanceof SystemAccountInputError
+            ? err.message
+            : "The host could not add this SSH public key. Verify sudo access and home-directory permissions, then try again.";
+        await auditLog({
+          userId: req.userId,
+          organizationId: req.organizationId,
+          serverId: id,
+          action: "SERVER_SYSTEM_USER_SSH_KEY_ADD_FAILED",
+          category: "SERVER",
+          level: isConflict ? "WARNING" : "ERROR",
+          message: `Failed to add SSH key for ${parsedUsername.data} on ${server.name}`,
+          meta: { username: parsedUsername.data, conflict: isConflict },
+        });
+        return reply
+          .status(isConflict ? 409 : 400)
+          .send({ success: false, error: message });
+      }
+    },
+  );
+
+  app.delete(
+    "/:id/system-users/:username/ssh-keys",
+    { preHandler: serverSystemAccountWriteAccess },
+    async (req, reply) => {
+      const { id, username } = req.params as { id: string; username: string };
+      const parsedUsername = LinuxAccountNameSchema.safeParse(username);
+      const rawBody = req.body as Record<string, unknown> | undefined;
+      const fingerprint = SshKeyFingerprintSchema.safeParse(
+        rawBody?.fingerprint,
+      );
+      const body = ServerSystemUserSshKeyRevokeSchema.safeParse(req.body ?? {});
+      if (!parsedUsername.success || !fingerprint.success || !body.success) {
+        return reply.status(400).send({
+          success: false,
+          error: "Invalid username, fingerprint, or authorized_keys revision",
+        });
+      }
+      const server = await getAccessibleServer(
+        req.userId,
+        id,
+        req.organizationId,
+      );
+      if (!server) {
+        return reply.status(403).send({ success: false, error: "Forbidden" });
+      }
+      try {
+        const result = await ssh.revokeServerSystemUserSshKey(server, {
+          username: parsedUsername.data,
+          fingerprint: fingerprint.data,
+          expectedRevision: body.data.expectedRevision,
+        });
+        const message = `SSH public key revoked for system user ${result.username} on ${server.name}`;
+        await auditLog({
+          userId: req.userId,
+          organizationId: req.organizationId,
+          serverId: id,
+          action: "SERVER_SYSTEM_USER_SSH_KEY_REVOKE",
+          category: "SERVER",
+          level: "WARNING",
+          message,
+          meta: {
+            username: result.username,
+            fingerprint: fingerprint.data,
+          },
+        });
+        return reply.send({ success: true, data: result, message });
+      } catch (err: unknown) {
+        const isConflict = err instanceof SystemAccountConflictError;
+        const message =
+          err instanceof SystemAccountInputError
+            ? err.message
+            : "The host could not revoke this SSH public key. Verify sudo access and home-directory permissions, then try again.";
+        await auditLog({
+          userId: req.userId,
+          organizationId: req.organizationId,
+          serverId: id,
+          action: "SERVER_SYSTEM_USER_SSH_KEY_REVOKE_FAILED",
+          category: "SERVER",
+          level: isConflict ? "WARNING" : "ERROR",
+          message: `Failed to revoke SSH key for ${parsedUsername.data} on ${server.name}`,
+          meta: {
+            username: parsedUsername.data,
+            fingerprint: fingerprint.data,
             conflict: isConflict,
           },
         });
