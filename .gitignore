@@ -49,3 +49,7 @@ Thumbs.db
 .vscode/*
 !.vscode/extensions.json
 !.vscode/settings.json
+
+# Local agent instructions
+AGENTS.md
+AGENTS.local.md
