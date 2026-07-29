@@ -17,6 +17,10 @@
 
 Doktainer is an open-source, self-hosted Docker management platform that helps you manage servers, applications, containers, domains, SSL, backups, and deployments from a single web interface. Designed for individuals and teams who want full control over their infrastructure without vendor lock-in.
 
+<p align="center">
+  <img src="./images/previews/doktainer-dashboard.png" alt="Doktainer dashboard preview" width="100%"/>
+</p>
+
 ---
 
 ## ✨ Features

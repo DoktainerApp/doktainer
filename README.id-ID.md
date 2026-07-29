@@ -17,6 +17,10 @@
 
 Doktainer adalah platform manajemen Docker open-source dan self-hosted yang membantu Anda mengelola server, aplikasi, container, domain, SSL, backup, dan deployment dari satu antarmuka web. Dirancang untuk individu dan tim yang menginginkan kendali penuh atas infrastruktur mereka tanpa vendor lock-in.
 
+<p align="center">
+  <img src="./images/previews/doktainer-dashboard.png" alt="Pratinjau dashboard Doktainer" width="100%"/>
+</p>
+
 ---
 
 ## ✨ Fitur
