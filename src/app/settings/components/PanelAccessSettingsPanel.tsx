@@ -6,6 +6,7 @@ import {
   ChevronDown,
   Globe2,
   Loader2,
+  RotateCcw,
   ShieldCheck,
 } from "lucide-react";
 import {
@@ -60,7 +61,7 @@ export default function PanelAccessSettingsPanel({
   const [panelDomain, setPanelDomain] = useState(initialDomain);
   const [panelProxy, setPanelProxy] = useState<PanelAccessProxy>("NGINX");
   const [panelAutoSsl, setPanelAutoSsl] = useState(
-    settings.general.panelUrl.startsWith("https://") || !initialDomain,
+    Boolean(initialDomain) && settings.general.panelUrl.startsWith("https://"),
   );
   const [capabilities, setCapabilities] =
     useState<PanelAccessCapabilities | null>(null);
@@ -72,6 +73,13 @@ export default function PanelAccessSettingsPanel({
   const selectedCapability = capabilities?.proxies.find(
     (proxy) => proxy.type === panelProxy,
   );
+  const hasProvisionableProxy = Boolean(
+    capabilities?.proxies.some(
+      (proxy) => proxy.available && proxy.supportsProvisioning,
+    ),
+  );
+  const sslDisabled = !panelDomain.trim() || !hasProvisionableProxy;
+  const hasCustomDomain = Boolean(initialDomain);
   const canProvision = Boolean(
     panelDomain.trim() &&
     selectedCapability?.available &&
@@ -121,13 +129,41 @@ export default function PanelAccessSettingsPanel({
       const response = await settingsApi.provisionPanelDomain({
         domain: panelDomain.trim(),
         proxy: panelProxy,
-        autoSsl: panelAutoSsl,
+        autoSsl: panelAutoSsl && !sslDisabled,
       });
       setMessage(response.message || response.data.provision.message);
       onProvisioned?.(response.data.settings, response.message);
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "Panel domain provisioning failed",
+      );
+    } finally {
+      setProvisioning(false);
+    }
+  };
+
+  const resetPanelDomain = async () => {
+    if (
+      !window.confirm(
+        "Reset the custom panel domain? This only removes it from Doktainer settings; reverse-proxy and SSL configuration on the server will remain unchanged.",
+      )
+    ) {
+      return;
+    }
+
+    setProvisioning(true);
+    setError(null);
+    setMessage(null);
+
+    try {
+      const response = await settingsApi.resetPanelDomain();
+      setPanelDomain("");
+      setPanelAutoSsl(false);
+      setMessage(response.message || "Custom panel domain reset");
+      onProvisioned?.(response.data, response.message);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Failed to reset panel domain",
       );
     } finally {
       setProvisioning(false);
@@ -396,10 +432,25 @@ export default function PanelAccessSettingsPanel({
             </div>
           </div>
           <Toggle
-            checked={panelAutoSsl}
+            checked={panelAutoSsl && !sslDisabled}
             onChange={() => setPanelAutoSsl((current) => !current)}
+            disabled={sslDisabled}
           />
         </div>
+        {sslDisabled ? (
+          <div
+            style={{
+              marginTop: -8,
+              fontSize: 11,
+              color: "var(--text-muted)",
+              lineHeight: 1.5,
+            }}
+          >
+            {!panelDomain.trim()
+              ? "Enter a domain to enable HTTPS / SSL."
+              : "HTTPS / SSL is unavailable because no reverse proxy can be provisioned."}
+          </div>
+        ) : null}
         {capabilities?.autoSsl.reason ? (
           <div
             style={{
@@ -423,6 +474,21 @@ export default function PanelAccessSettingsPanel({
             paddingTop: 2,
           }}
         >
+          <button
+            type="button"
+            className="btn btn-ghost"
+            disabled={!hasCustomDomain || provisioning}
+            onClick={() => void resetPanelDomain()}
+            style={{
+              minWidth: 88,
+              opacity: hasCustomDomain && !provisioning ? 1 : 0.55,
+              cursor:
+                hasCustomDomain && !provisioning ? "pointer" : "not-allowed",
+            }}
+          >
+            <RotateCcw size={14} />
+            Reset
+          </button>
           <button
             type="button"
             className="btn btn-primary"

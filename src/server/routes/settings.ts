@@ -1032,6 +1032,46 @@ export async function settingsRoutes(app: FastifyInstance) {
     },
   );
 
+  app.post(
+    "/panel-access/reset",
+    { preHandler: [authenticate] },
+    async (req, reply) => {
+      // Do not use request headers here: this route can be reached through the
+      // custom domain that is being removed.
+      const panelUrl = resolvePublicAppOrigin({
+        fallbackOrigin: "http://localhost:3000",
+      });
+
+      await prisma.userSettings.upsert({
+        where: { userId: req.userId! },
+        update: { panelUrl },
+        create: { userId: req.userId!, panelUrl },
+      });
+
+      const saved = await ensureModularSettings(
+        req.userId!,
+        req.organizationId,
+      );
+
+      await auditLog({
+        userId: req.userId,
+        organizationId: req.organizationId,
+        action: "PANEL_DOMAIN_RESET",
+        category: "SYSTEM",
+        level: "WARNING",
+        message: "Custom panel domain was removed from Panel Access settings",
+        meta: { panelUrl },
+      });
+
+      return reply.send({
+        success: true,
+        data: serializeSettings(saved),
+        message:
+          "Custom panel domain was reset. Existing reverse-proxy and SSL configuration was left unchanged.",
+      });
+    },
+  );
+
   app.patch(
     "/",
     { preHandler: [authenticate], bodyLimit: 512 * 1024 },

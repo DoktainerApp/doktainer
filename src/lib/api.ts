@@ -1163,6 +1163,12 @@ export const settingsApi = {
       message?: string;
     }>("/settings/panel-access/provision", body, { timeoutMs: 30000 }),
 
+  resetPanelDomain: () =>
+    post<{ success: boolean; data: SettingsRecord; message?: string }>(
+      "/settings/panel-access/reset",
+      {},
+    ),
+
   update: (body: UpdateSettingsBody) =>
     patch<{ success: boolean; data: SettingsRecord; message?: string }>(
       "/settings",
