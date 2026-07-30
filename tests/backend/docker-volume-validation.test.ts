@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { formatDockerInspectMountBindings } from "../../src/server/services/docker-inspect-format";
 import { buildDockerRunCommand } from "../../src/server/services/ssh-services/docker-containers";
 
 const BASE_OPTS = {
@@ -56,4 +57,25 @@ test("volume validation only allows docker.sock when explicitly trusted", () => 
 
   assert.match(command, /-v' '/);
   assert.match(command, /\/var\/run\/docker\.sock:\/var\/run\/docker\.sock/);
+});
+
+test("docker inspect formatter preserves named volumes instead of host mountpoints", () => {
+  assert.equal(
+    formatDockerInspectMountBindings([
+      {
+        Type: "volume",
+        Name: "nakama-data",
+        Source: "/var/lib/docker/volumes/nakama-data/_data",
+        Destination: "/nakama/data",
+        RW: true,
+      },
+      {
+        Type: "bind",
+        Source: "/srv/doktainer/apps/site",
+        Destination: "/app",
+        RW: false,
+      },
+    ]),
+    "nakama-data:/nakama/data,/srv/doktainer/apps/site:/app:ro",
+  );
 });

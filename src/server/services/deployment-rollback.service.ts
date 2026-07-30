@@ -15,6 +15,10 @@ import {
   startDeploymentLockHeartbeat,
 } from "./deployment-lock.service";
 import { sanitizeDeploymentError } from "./deployment-error.service";
+import {
+  formatDockerInspectMountBindings,
+  type DockerInspectMount,
+} from "./docker-inspect-format";
 
 type RollbackRuntime = {
   image: string;
@@ -43,11 +47,7 @@ type DockerInspectRuntime = {
     >;
     NetworkMode?: string | null;
   };
-  Mounts?: Array<{
-    Source?: string;
-    Destination?: string;
-    RW?: boolean;
-  }>;
+  Mounts?: DockerInspectMount[];
 };
 
 type DockerPortBindings = NonNullable<
@@ -135,15 +135,6 @@ function formatPortBindings(bindings?: DockerPortBindings) {
         if (!hostPort) return [];
         return `${hostPort}:${containerPort}${protocol !== "tcp" ? `/${protocol}` : ""}`;
       });
-    })
-    .join(",");
-}
-
-function formatMountBindings(mounts?: DockerInspectRuntime["Mounts"]) {
-  return (mounts ?? [])
-    .flatMap((mount) => {
-      if (!mount.Source || !mount.Destination) return [];
-      return `${mount.Source}:${mount.Destination}${mount.RW === false ? ":ro" : ""}`;
     })
     .join(",");
 }
@@ -258,7 +249,7 @@ async function resolvePreviousRuntime(input: {
       image: inspect.Config?.Image?.trim() || input.container.image,
       ports: formatPortBindings(inspect.HostConfig?.PortBindings),
       env: (inspect.Config?.Env ?? []).filter(Boolean).join("\n"),
-      volumes: formatMountBindings(inspect.Mounts),
+      volumes: formatDockerInspectMountBindings(inspect.Mounts),
       network: inspect.HostConfig?.NetworkMode?.trim() || "bridge",
       restartPolicy:
         inspect.HostConfig?.RestartPolicy?.Name?.trim() ||
@@ -710,5 +701,4 @@ export async function rollbackContainerToDeployment(input: {
     await releaseDeploymentLock({ containerId: container.id, token: lock.token });
   }
 }
-
 

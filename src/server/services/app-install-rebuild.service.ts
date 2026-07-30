@@ -11,6 +11,10 @@ import {
   releaseDeploymentLock,
   startDeploymentLockHeartbeat,
 } from "./deployment-lock.service";
+import {
+  formatDockerInspectMountBindings,
+  type DockerInspectMount,
+} from "./docker-inspect-format";
 
 type DockerInspectRuntime = {
   Config?: {
@@ -26,11 +30,7 @@ type DockerInspectRuntime = {
     >;
     NetworkMode?: string | null;
   };
-  Mounts?: Array<{
-    Source?: string;
-    Destination?: string;
-    RW?: boolean;
-  }>;
+  Mounts?: DockerInspectMount[];
 };
 
 type DockerPortBindings = Record<
@@ -40,16 +40,6 @@ type DockerPortBindings = Record<
 
 function formatEnvLines(env?: string[] | null): string {
   return (env ?? []).filter(Boolean).join("\n");
-}
-
-function formatMountBindings(mounts?: DockerInspectRuntime["Mounts"]): string {
-  return (mounts ?? [])
-    .map((mount) => {
-      if (!mount.Source || !mount.Destination) return "";
-      return `${mount.Source}:${mount.Destination}${mount.RW === false ? ":ro" : ""}`;
-    })
-    .filter(Boolean)
-    .join(",");
 }
 
 function formatPortBindings(bindings?: DockerPortBindings): string {
@@ -122,7 +112,7 @@ async function resolveRuntimeConfig(install: {
       image: inspect.Config?.Image?.trim() || "",
       ports: formatPortBindings(inspect.HostConfig?.PortBindings),
       env: formatEnvLines(inspect.Config?.Env),
-      volumes: formatMountBindings(inspect.Mounts),
+      volumes: formatDockerInspectMountBindings(inspect.Mounts),
       network: inspect.HostConfig?.NetworkMode?.trim() || "bridge",
       restartPolicy:
         inspect.HostConfig?.RestartPolicy?.Name?.trim() || "unless-stopped",

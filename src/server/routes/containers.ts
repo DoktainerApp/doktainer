@@ -38,6 +38,10 @@ import {
   startDeploymentLockHeartbeat,
 } from "../services/deployment-lock.service";
 import { sanitizeDeploymentError } from "../services/deployment-error.service";
+import {
+  formatDockerInspectMountBindings,
+  type DockerInspectMount as DockerInspectRuntimeMount,
+} from "../services/docker-inspect-format";
 
 const DeploySourceTypeSchema = z.enum([
   "APP_INSTALLER",
@@ -972,11 +976,7 @@ type DockerInspectRuntime = {
     >;
     NetworkMode?: string | null;
   };
-  Mounts?: Array<{
-    Source?: string;
-    Destination?: string;
-    RW?: boolean;
-  }>;
+  Mounts?: DockerInspectRuntimeMount[];
 };
 
 type DockerPortBindings = Record<
@@ -1003,16 +1003,6 @@ function isGitRedeploySourceType(
 
 function formatEnvLines(env?: string[] | null): string {
   return (env ?? []).filter(Boolean).join("\n");
-}
-
-function formatMountBindings(mounts?: DockerInspectRuntime["Mounts"]): string {
-  return (mounts ?? [])
-    .map((mount) => {
-      if (!mount.Source || !mount.Destination) return "";
-      return `${mount.Source}:${mount.Destination}${mount.RW === false ? ":ro" : ""}`;
-    })
-    .filter(Boolean)
-    .join(",");
 }
 
 function formatPortBindings(bindings?: DockerPortBindings): string {
@@ -1130,7 +1120,7 @@ async function resolveContainerRuntimeConfig(container: {
       image: inspect.Config?.Image?.trim() || container.image,
       ports: formatPortBindings(inspect.HostConfig?.PortBindings),
       env: formatEnvLines(inspect.Config?.Env),
-      volumes: formatMountBindings(inspect.Mounts),
+      volumes: formatDockerInspectMountBindings(inspect.Mounts),
       network: inspect.HostConfig?.NetworkMode?.trim() || "bridge",
       restartPolicy:
         inspect.HostConfig?.RestartPolicy?.Name?.trim() ||
