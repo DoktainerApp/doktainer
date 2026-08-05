@@ -672,7 +672,11 @@ async function requestRaw(
 
   const isMultipartBody =
     typeof FormData !== "undefined" && options.body instanceof FormData;
-  if (options.body !== undefined && !isMultipartBody && !("Content-Type" in headers)) {
+  if (
+    options.body !== undefined &&
+    !isMultipartBody &&
+    !("Content-Type" in headers)
+  ) {
     headers["Content-Type"] = "application/json";
   }
 
@@ -1070,6 +1074,12 @@ export interface CreateApiKeyBody {
   expiresIn: ApiKeyExpiryOption;
 }
 
+export interface UpdateApiKeyBody {
+  name: string;
+  permissions: string[];
+  expiresIn?: ApiKeyExpiryOption;
+}
+
 export interface CreatedApiKeyRecord extends ApiKeyRecord {
   rawKey: string;
 }
@@ -1112,14 +1122,23 @@ export const apiKeys = {
 
   revoke: (id: string) =>
     del<{ success: boolean; message?: string }>(`/api-keys/${id}`),
+
+  remove: (id: string) =>
+    del<{ success: boolean; message?: string }>(`/api-keys/${id}/permanent`),
+
+  update: (id: string, body: UpdateApiKeyBody) =>
+    patch<{ success: boolean; data: ApiKeyRecord }>(`/api-keys/${id}`, body),
 };
 
 export const settingsApi = {
   get: () => get<{ success: boolean; data: SettingsRecord }>("/settings"),
 
   downloadDatabaseBackup: async () => {
-    const res = await requestRaw("/settings/database-backup", { method: "GET" });
-    if (!res.ok) throw new Error(await readApiErrorMessage(res, "Database backup failed"));
+    const res = await requestRaw("/settings/database-backup", {
+      method: "GET",
+    });
+    if (!res.ok)
+      throw new Error(await readApiErrorMessage(res, "Database backup failed"));
     const disposition = res.headers.get("content-disposition") || "";
     const serverFileName = disposition.match(/filename="?([^";]+)"?/i)?.[1];
     const timestamp = new Date()
@@ -1128,7 +1147,8 @@ export const settingsApi = {
       .replace(/\.\d{3}Z$/, "Z")
       .replace("T", "-");
     const fileName =
-      serverFileName && /^doktainer-database-\d{8}-\d{6}Z\.dump$/i.test(serverFileName)
+      serverFileName &&
+      /^doktainer-database-\d{8}-\d{6}Z\.dump$/i.test(serverFileName)
         ? serverFileName
         : `doktainer-database-${timestamp}.dump`;
     return { blob: await res.blob(), fileName };
@@ -1137,9 +1157,18 @@ export const settingsApi = {
   restoreDatabaseBackup: async (file: File) => {
     const body = new FormData();
     body.append("file", file);
-    const res = await requestRaw("/settings/database-restore", { method: "POST", body }, { timeoutMs: 120000 });
-    const json = await readJsonResponse<{ success?: boolean; message?: string; error?: string }>(res, "Database restore failed");
-    if (!res.ok) throw new Error(json.error || json.message || "Database restore failed");
+    const res = await requestRaw(
+      "/settings/database-restore",
+      { method: "POST", body },
+      { timeoutMs: 120000 },
+    );
+    const json = await readJsonResponse<{
+      success?: boolean;
+      message?: string;
+      error?: string;
+    }>(res, "Database restore failed");
+    if (!res.ok)
+      throw new Error(json.error || json.message || "Database restore failed");
     return json;
   },
 
@@ -1612,11 +1641,9 @@ export const servers = {
       success: boolean;
       data: ServerSystemUserUpdateResult;
       message: string;
-    }>(
-      `/servers/${id}/system-users/${encodeURIComponent(username)}`,
-      body,
-      { timeoutMs: 30000 },
-    ),
+    }>(`/servers/${id}/system-users/${encodeURIComponent(username)}`, body, {
+      timeoutMs: 30000,
+    }),
   setSystemUserPassword: (
     id: string,
     username: string,
@@ -1676,7 +1703,12 @@ export const servers = {
   ) =>
     del<{
       success: boolean;
-      data: { username: string; uid: number; home: string; homeRemoved: boolean };
+      data: {
+        username: string;
+        uid: number;
+        home: string;
+        homeRemoved: boolean;
+      };
       message: string;
     }>(`/servers/${id}/system-users/${encodeURIComponent(username)}`, body, {
       timeoutMs: 130000,

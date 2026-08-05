@@ -114,6 +114,24 @@ export async function apiKeysRoutes(app: FastifyInstance) {
   );
 
   // DELETE /api-keys/:id — revoke
+  app.patch(
+    "/:id",
+    { preHandler: [requireRole("DEVELOPER")] },
+    async (req, reply) => {
+      const { id } = req.params as { id: string };
+      const body = z.object({ name: z.string().min(1).max(64), permissions: z.array(z.string()), expiresIn: z.enum(["never", "30d", "90d", "1y"]).optional() }).safeParse(req.body);
+      if (!body.success) return reply.status(400).send({ success: false, error: body.error.flatten() });
+      const invalidPermissions = body.data.permissions.filter((permission) => !isValidApiKeyPermission(permission));
+      if (invalidPermissions.length > 0) return reply.status(400).send({ success: false, error: `Invalid API key permissions: ${invalidPermissions.join(", ")}` });
+      const key = await prisma.apiKey.findFirst({ where: { id, userId: req.userId!, organizationId: req.organizationId!, isActive: true } });
+      if (!key) return reply.status(404).send({ success: false, error: "Active API key not found" });
+      const expiresAt = body.data.expiresIn === undefined ? undefined : body.data.expiresIn === "never" ? null : new Date(Date.now() + (body.data.expiresIn === "30d" ? 30 : body.data.expiresIn === "90d" ? 90 : 365) * 86400000);
+      const updated = await prisma.apiKey.update({ where: { id: key.id }, data: { name: body.data.name.trim(), permissions: normalizeApiKeyPermissions(body.data.permissions), ...(expiresAt === undefined ? {} : { expiresAt }) } });
+      await auditLog({ userId: req.userId, organizationId: req.organizationId, action: "API_KEY_UPDATE", category: "AUTH", level: "WARNING", message: `API key "${key.name}" updated`, meta: { apiKeyId: key.id } });
+      return reply.send({ success: true, data: updated });
+    },
+  );
+
   app.delete(
     "/:id",
     { preHandler: [requireRole("DEVELOPER")] },
@@ -139,6 +157,44 @@ export async function apiKeysRoutes(app: FastifyInstance) {
       });
 
       return reply.send({ success: true, message: "API key revoked" });
+    },
+  );
+
+  // DELETE /api-keys/:id/permanent — remove a revoked key
+  app.delete(
+    "/:id/permanent",
+    { preHandler: [requireRole("DEVELOPER")] },
+    async (req, reply) => {
+      const { id } = req.params as { id: string };
+
+      const key = await prisma.apiKey.findFirst({
+        where: { id, userId: req.userId!, organizationId: req.organizationId! },
+        select: { id: true, name: true, isActive: true },
+      });
+      if (!key) {
+        return reply
+          .status(404)
+          .send({ success: false, error: "API key not found" });
+      }
+      if (key.isActive) {
+        return reply.status(409).send({
+          success: false,
+          error: "Revoke the API key before removing it",
+        });
+      }
+
+      await prisma.apiKey.delete({ where: { id: key.id } });
+      await auditLog({
+        userId: req.userId,
+        organizationId: req.organizationId,
+        action: "API_KEY_REMOVE",
+        category: "AUTH",
+        level: "WARNING",
+        message: `Revoked API key "${key.name}" permanently removed`,
+        meta: { apiKeyId: key.id },
+      });
+
+      return reply.send({ success: true, message: "API key removed" });
     },
   );
 }

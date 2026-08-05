@@ -4,21 +4,25 @@ import ConfirmActionDialog from "@/components/ConfirmActionDialog";
 import GuardedPage from "@/components/GuardedPage";
 import IssueDetailsSummary from "@/components/IssueDetailsSummary";
 import SearchField from "@/components/SearchField";
+import TablePagination from "@/components/TablePagination";
 import {
   apiKeys as apiKeysApi,
   type ApiKeyExpiryOption,
   type ApiKeyRecord,
   type CreateApiKeyBody,
 } from "@/lib/api";
+import { useTablePagination } from "@/lib/use-table-pagination";
 import {
   Activity,
   AlertCircle,
+  Ban,
   CheckCircle,
   Copy,
   Eye,
   EyeOff,
   Key,
   Loader2,
+  Pencil,
   Plus,
   RefreshCw,
   Shield,
@@ -172,6 +176,10 @@ export default function ApiKeysPage() {
     {},
   );
   const [revokingId, setRevokingId] = useState<string | null>(null);
+  const [removingId, setRemovingId] = useState<string | null>(null);
+  const [editingKey, setEditingKey] = useState<ApiKeyRecord | null>(null);
+  const [editSubmitting, setEditSubmitting] = useState(false);
+  const [editForm, setEditForm] = useState({ name: "", permissions: [] as string[], expiresIn: "keep" as ApiKeyExpiryOption | "keep" });
   const [confirmDialog, setConfirmDialog] =
     useState<PendingConfirmAction | null>(null);
 
@@ -191,8 +199,16 @@ export default function ApiKeysPage() {
   const filteredKeys = useMemo(() => {
     const query = search.trim().toLowerCase();
     if (!query) return keys;
-    return keys.filter((key) => [key.name, key.keyPrefix, key.isActive ? "active" : "revoked", ...key.permissions].some((value) => value.toLowerCase().includes(query)));
+
+    return keys.filter((key) =>
+      [key.name, key.keyPrefix, key.isActive ? "active" : "revoked", ...key.permissions]
+        .some((value) => value.toLowerCase().includes(query)),
+    );
   }, [keys, search]);
+  const pagination = useTablePagination({
+    items: filteredKeys,
+    resetKey: `${keys.length}|${search}`,
+  });
 
   useEffect(() => {
     void loadKeys();
@@ -329,6 +345,67 @@ export default function ApiKeysPage() {
         void revokeKey(id);
       },
     });
+  }
+
+  async function removeKey(id: string) {
+    setRemovingId(id);
+    setError("");
+
+    try {
+      await apiKeysApi.remove(id);
+      setKeys((current) => current.filter((key) => key.id !== id));
+      setSessionRawKeys((current) => {
+        const next = { ...current };
+        delete next[id];
+        return next;
+      });
+      if (revealedKeyId === id) setRevealedKeyId(null);
+      if (copiedKeyId === id) setCopiedKeyId(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to remove API key");
+    } finally {
+      setRemovingId(null);
+    }
+  }
+
+  function handleRemove(id: string) {
+    const target = keys.find((key) => key.id === id);
+    if (!target) return;
+
+    setConfirmDialog({
+      title: "Remove API Key",
+      description: `Permanently remove revoked API key "${target.name}"?`,
+      confirmLabel: "Remove Key",
+      tone: "danger",
+      note: "This cannot be undone. The removal will remain recorded in the audit log.",
+      onConfirm: () => {
+        void removeKey(id);
+      },
+    });
+  }
+
+  function openEdit(key: ApiKeyRecord) {
+    setEditForm({ name: key.name, permissions: key.permissions, expiresIn: "keep" });
+    setEditingKey(key);
+  }
+
+  async function handleEdit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!editingKey || !editForm.name.trim()) return;
+    setEditSubmitting(true);
+    try {
+      const response = await apiKeysApi.update(editingKey.id, {
+        name: editForm.name.trim(),
+        permissions: editForm.permissions,
+        ...(editForm.expiresIn === "keep" ? {} : { expiresIn: editForm.expiresIn }),
+      });
+      setKeys((current) => current.map((key) => key.id === editingKey.id ? response.data : key));
+      setEditingKey(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to update API key");
+    } finally {
+      setEditSubmitting(false);
+    }
   }
 
   return (
@@ -500,9 +577,16 @@ export default function ApiKeysPage() {
           className="card ui-responsive-toolbar"
           style={{ padding: "12px 16px" }}
         >
-          <SearchField placeholder="Search API keys, prefixes, or permissions..." value={search} onChange={(event) => setSearch(event.target.value)} containerStyle={{ flex: "1 1 360px", minWidth: 240 }} />
+          <SearchField
+            placeholder="Search API keys, prefixes, or permissions..."
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            containerStyle={{ flex: "1 1 360px", minWidth: 240 }}
+          />
           <div className="ui-toolbar-actions">
-            <span style={{ fontSize: 13, color: "var(--text-muted)" }}>{keys.length} API keys total</span>
+            <span style={{ fontSize: 13, color: "var(--text-muted)" }}>
+              {keys.length} API keys total
+            </span>
             <button
               className="btn btn-ghost"
               style={{ fontSize: 12 }}
@@ -577,13 +661,28 @@ export default function ApiKeysPage() {
             </p>
           </div>
         ) : filteredKeys.length === 0 ? (
-          <div className="card" style={{ padding: 24, textAlign: "center", color: "var(--text-secondary)" }}>
+          <div
+            className="card"
+            style={{
+              padding: 24,
+              textAlign: "center",
+              color: "var(--text-secondary)",
+            }}
+          >
             <Key size={20} style={{ marginBottom: 10, color: "#3b82f6" }} />
-            <p style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)" }}>No API keys match your search</p>
+            <p
+              style={{
+                fontSize: 14,
+                fontWeight: 700,
+                color: "var(--text-primary)",
+              }}
+            >
+              No API keys match your search
+            </p>
           </div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {filteredKeys.map((key) => {
+            {pagination.paginatedItems.map((key) => {
               const canReveal = Boolean(sessionRawKeys[key.id]);
               const isRevealed = revealedKeyId === key.id && canReveal;
               const rawValue = sessionRawKeys[key.id];
@@ -835,25 +934,48 @@ export default function ApiKeysPage() {
                       />
                       {key.requestCount.toLocaleString()} requests
                     </span>
-                    {key.isActive && (
-                      <button
-                        className="btn btn-danger"
-                        style={{ fontSize: 11, padding: "5px 12px" }}
-                        onClick={() => void handleRevoke(key.id)}
-                        disabled={revokingId === key.id}
-                      >
-                        {revokingId === key.id ? (
-                          <Loader2 size={11} className="animate-spin" />
-                        ) : (
-                          <Trash2 size={11} />
-                        )}
-                        Revoke
-                      </button>
-                    )}
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      {key.isActive ? (
+                        <>
+                        <button className="btn btn-ghost" style={{ fontSize: 11, padding: "5px 12px" }} onClick={() => openEdit(key)}>
+                          <Pencil size={11} /> Edit
+                        </button>
+                        <button className="btn btn-danger" style={{ fontSize: 11, padding: "5px 12px" }} onClick={() => void handleRevoke(key.id)} disabled={revokingId === key.id}>
+                          {revokingId === key.id ? <Loader2 size={11} className="animate-spin" /> : <Ban size={11} />}
+                          Revoke
+                        </button>
+                        </>
+                      ) : (
+                        <button
+                          className="btn btn-danger"
+                          style={{ fontSize: 11, padding: "5px 12px" }}
+                          onClick={() => handleRemove(key.id)}
+                          disabled={removingId === key.id}
+                        >
+                          {removingId === key.id ? (
+                            <Loader2 size={11} className="animate-spin" />
+                          ) : (
+                            <Trash2 size={11} />
+                          )}
+                          Remove
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
               );
             })}
+            <div className="card" style={{ overflow: "hidden" }}>
+              <TablePagination
+                currentPage={pagination.currentPage}
+                totalPages={pagination.totalPages}
+                totalItems={pagination.totalItems}
+                startItem={pagination.startItem}
+                endItem={pagination.endItem}
+                itemLabel="API keys"
+                onPageChange={pagination.setCurrentPage}
+              />
+            </div>
           </div>
         )}
       </div>
@@ -1200,6 +1322,30 @@ export default function ApiKeysPage() {
                 </div>
               </form>
             )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {editingKey && (
+        <div className="modal-overlay" onClick={() => !editSubmitting && setEditingKey(null)}>
+          <div className="modal-shell" style={{ maxWidth: 520 }} onClick={(event) => event.stopPropagation()}>
+            <div className="modal" style={{ padding: "clamp(18px, 3vw, 24px)" }}>
+              <h3 style={{ fontSize: 15, fontWeight: 700, color: "var(--text-primary)" }}>Edit API Key</h3>
+              <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4 }}>Update the key name, permissions, or expiry. Changes apply immediately.</p>
+              <form onSubmit={(event) => void handleEdit(event)} style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 18 }}>
+                <input className="input" aria-label="API key name" value={editForm.name} onChange={(event) => setEditForm((current) => ({ ...current, name: event.target.value }))} />
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {permissionOptions.map((option) => {
+                    const checked = editForm.permissions.includes(option.id);
+                    return <label key={option.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", borderRadius: 7, border: "1px solid var(--border)", background: checked ? "rgba(59,130,246,0.08)" : "var(--bg-input)", cursor: "pointer" }}><input type="checkbox" checked={checked} onChange={() => setEditForm((current) => ({ ...current, permissions: checked ? current.permissions.filter((value) => value !== option.id) : [...current.permissions, option.id] }))} /><span style={{ fontSize: 12, color: "var(--text-secondary)" }}>{option.label}</span></label>;
+                  })}
+                </div>
+                <select className="input" aria-label="API key expiry" value={editForm.expiresIn} onChange={(event) => setEditForm((current) => ({ ...current, expiresIn: event.target.value as ApiKeyExpiryOption | "keep" }))}>
+                  <option value="keep">Keep current expiry</option>{expiryOptions.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
+                </select>
+                <div style={{ display: "flex", gap: 10 }}><button type="button" className="btn btn-ghost" style={{ flex: 1 }} onClick={() => setEditingKey(null)} disabled={editSubmitting}>Cancel</button><button type="submit" className="btn btn-primary" style={{ flex: 1 }} disabled={editSubmitting || !editForm.name.trim()}>{editSubmitting ? <Loader2 size={12} className="animate-spin" /> : <Pencil size={12} />} Save Changes</button></div>
+              </form>
             </div>
           </div>
         </div>
