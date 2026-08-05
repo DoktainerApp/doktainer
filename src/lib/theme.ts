@@ -1,6 +1,6 @@
 export type ThemePreference = "dark" | "light" | "system";
 
-export const THEME_STORAGE_KEY = "vps_theme";
+export const THEME_STORAGE_KEY = "doktainer_theme";
 export const DEFAULT_THEME: ThemePreference = "dark";
 
 function isThemePreference(value: string | null): value is ThemePreference {

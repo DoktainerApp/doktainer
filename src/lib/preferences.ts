@@ -11,10 +11,10 @@ export {
   resolveThemePreference,
 } from "@/lib/theme";
 
-const SETTINGS_EVENT = "vps:settings-updated";
-const PANEL_NAME_KEY = "vps_panel_name";
-const PANEL_URL_KEY = "vps_panel_url";
-const SESSION_TIMEOUT_KEY = "vps_session_timeout_minutes";
+const SETTINGS_EVENT = "doktainer:settings-updated";
+const PANEL_NAME_KEY = "doktainer_panel_name";
+const PANEL_URL_KEY = "doktainer_panel_url";
+const SESSION_TIMEOUT_KEY = "doktainer_session_timeout_minutes";
 const DEFAULT_PANEL_NAME = process.env.NEXT_PUBLIC_PANEL_NAME || "DOKTAINER";
 
 function resolveDefaultPanelUrl() {

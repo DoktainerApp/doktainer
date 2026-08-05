@@ -1,6 +1,6 @@
-const TOKEN_KEY = "vps_token";
-const USER_KEY = "vps_user";
-const ORGANIZATION_STORAGE_KEY = "vps_active_organization";
+const TOKEN_KEY = "doktainer_token";
+const USER_KEY = "doktainer_user";
+const ORGANIZATION_STORAGE_KEY = "doktainer_active_organization";
 
 type SensitiveStorageKey =
   | typeof TOKEN_KEY
@@ -17,7 +17,9 @@ function getLocalStorage(): Storage | null {
   }
 }
 
-export function getSensitiveStorageItem(key: SensitiveStorageKey): string | null {
+export function getSensitiveStorageItem(
+  key: SensitiveStorageKey,
+): string | null {
   return getLocalStorage()?.getItem(key) ?? null;
 }
 
