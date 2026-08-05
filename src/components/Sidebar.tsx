@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useState, type MouseEvent } from "react";
+import { useEffect, useRef, useState, type MouseEvent } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { auth, clearToken, redirectToLogin } from "@/lib/api";
@@ -10,7 +10,7 @@ import OrganizationSwitcher from "@/components/OrganizationSwitcher";
 import { navigation } from "@/lib/navigation";
 import { addPreferencesListener, getStoredPanelName } from "@/lib/preferences";
 import { formatRoleLabel, hasMinimumRole } from "@/lib/permissions";
-import { LogOut, ChevronLeft, ChevronRight, X } from "lucide-react";
+import { LogOut, ChevronsUpDown, ChevronLeft, ChevronRight, X, Crown } from "lucide-react";
 
 interface SidebarProps {
   /** Desktop: whether sidebar is in collapsed (icon-only) state */
@@ -35,6 +35,8 @@ export default function Sidebar({
   const pathname = usePathname();
   const currentUser = useCurrentUser();
   const [loggingOut, setLoggingOut] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
+  const accountMenuRef = useRef<HTMLDivElement | null>(null);
   const [pendingHref, setPendingHref] = useState<string | null>(null);
   const [panelName, setPanelName] = useState("DOKTAINER");
   const visibleNavigation = navigation
@@ -45,6 +47,12 @@ export default function Sidebar({
       ),
     }))
     .filter((section) => section.items.length > 0);
+  const accountMenuSections = visibleNavigation.filter(
+    (section) => section.label === "INTEGRATIONS" || section.label === "MANAGEMENT",
+  );
+  const sidebarNavigation = visibleNavigation.filter(
+    (section) => section.label !== "INTEGRATIONS" && section.label !== "MANAGEMENT",
+  );
 
   const handleLogout = async () => {
     if (loggingOut) return;
@@ -78,6 +86,14 @@ export default function Sidebar({
 
     return () => window.clearTimeout(timeoutId);
   }, [pathname]);
+
+  useEffect(() => {
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!accountMenuRef.current?.contains(event.target as Node)) setAccountOpen(false);
+    };
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, []);
 
   const handleNavigate = (
     event: MouseEvent<HTMLAnchorElement>,
@@ -249,7 +265,7 @@ export default function Sidebar({
           gap: 2,
         }}
       >
-        {visibleNavigation.map((section) => (
+        {sidebarNavigation.map((section) => (
           <div key={section.label} style={{ marginBottom: 4 }}>
             {!isCollapsed && (
               <div
@@ -351,12 +367,21 @@ export default function Sidebar({
 
       {/* ── User footer ─────────────────────────────────────────── */}
       <div
+        ref={accountMenuRef}
+        role="button"
+        tabIndex={0}
+        aria-expanded={accountOpen}
+        aria-haspopup="menu"
+        aria-label="Open account menu"
+        onClick={() => setAccountOpen((value) => !value)}
         style={{
           padding: isCollapsed ? "12px 8px" : "12px 16px",
           borderTop: "1px solid var(--border)",
           display: "flex",
           alignItems: "center",
           gap: 10,
+          position: "relative",
+          cursor: "pointer",
         }}
       >
         <div
@@ -399,6 +424,15 @@ export default function Sidebar({
             </div>
           </div>
         )}
+        {!isCollapsed && <ChevronsUpDown size={15} color="var(--text-muted)" />}
+        {accountOpen && (
+          <div role="menu" aria-label="Account menu" onClick={(event) => event.stopPropagation()} style={{ position: "absolute", bottom: "calc(100% + 8px)", left: isCollapsed ? "calc(100% + 14px)" : 8, width: 300, maxHeight: "min(520px, calc(100vh - 32px))", overflowY: "auto", padding: 12, background: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: 8, boxShadow: "0 16px 40px rgba(0,0,0,0.22)", cursor: "default", zIndex: 60 }}>
+            <div style={{ padding: "2px 6px 10px" }}><div style={{ color: "var(--text-primary)", fontSize: 13, fontWeight: 600 }}>{currentUser?.name || currentUser?.email || "Authenticated User"} <span style={{ color: "var(--text-muted)", fontSize: 10 }}>· {formatRoleLabel(currentUser?.role)}{currentUser?.role === "SUPER_ADMIN" && <Crown size={12} color="#f5c451" style={{ marginLeft: 3, verticalAlign: "middle" }} />}</span></div><div style={{ color: "var(--text-muted)", fontSize: 11, marginTop: 2 }}>{currentUser?.email}</div></div>
+            {accountMenuSections.map((section) => <div key={section.label} style={{ marginTop: 8 }}><div style={{ color: "var(--text-muted)", fontSize: 10, fontWeight: 600, letterSpacing: "0.08em", padding: "4px 6px 6px" }}>{section.label}</div>{section.items.map((item) => { const Icon = item.icon; const active = pathname === item.href; return <Link key={item.href} href={item.href} role="menuitem" onClick={() => { setAccountOpen(false); onMobileClose(); }} style={{ alignItems: "center", background: active ? "rgba(59, 130, 246, 0.12)" : "transparent", borderRadius: 7, color: active ? "#3b82f6" : "var(--text-secondary)", display: "flex", fontSize: 13, fontWeight: 500, gap: 9, padding: "8px 6px", textDecoration: "none" }}><Icon size={15} />{item.label}</Link>; })}</div>)}
+            <div style={{ height: 1, background: "var(--border)", margin: "12px 0 6px" }} />
+            <button type="button" role="menuitem" onClick={() => void handleLogout()} disabled={loggingOut} style={{ alignItems: "center", background: "transparent", border: "none", borderRadius: 7, color: loggingOut ? "#3b82f6" : "var(--text-secondary)", cursor: loggingOut ? "default" : "pointer", display: "flex", fontSize: 13, fontWeight: 500, gap: 9, padding: "8px 6px", width: "100%" }}><LogOut size={15} />{loggingOut ? "Logging out..." : "Log out"}</button>
+          </div>
+        )}
         <button
           onClick={() => void handleLogout()}
           disabled={loggingOut}
@@ -411,6 +445,7 @@ export default function Sidebar({
             padding: 4,
             borderRadius: 6,
             opacity: loggingOut ? 0.8 : 1,
+            display: "none",
           }}
           title={loggingOut ? "Logging out..." : "Logout"}
         >
