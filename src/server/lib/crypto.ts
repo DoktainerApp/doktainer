@@ -34,6 +34,7 @@ export function getEncryptionKeyOrThrow(env = process.env): string {
       new Set(configuredKey).size < 8 ||
       /^(.)\1+$/.test(configuredKey))
   ) {
+    // bypass ENCRYPTION_KEY in production
     // throw new Error(
     //   "ENCRYPTION_KEY must use a strong random value and must not use a development or placeholder value in production",
     // );

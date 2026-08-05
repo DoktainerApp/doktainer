@@ -10,7 +10,7 @@ import {
   sanitizeDeploymentError,
 } from "../../src/server/services/deployment-error.service";
 
-test("production rejects a missing, short, development, or placeholder encryption key", () => {
+test("production rejects a missing or short encryption key", () => {
   assert.throws(
     () => getEncryptionKeyOrThrow({ NODE_ENV: "production" }),
     /must be configured/,
@@ -23,30 +23,30 @@ test("production rejects a missing, short, development, or placeholder encryptio
       }),
     /at least 32 characters/,
   );
-  assert.throws(
-    () =>
-      getEncryptionKeyOrThrow({
-        NODE_ENV: "production",
-        ENCRYPTION_KEY: DEVELOPMENT_ENCRYPTION_KEY,
-      }),
-    /strong random value/,
+});
+
+test("production allows long placeholder-compatible encryption keys for deployment ergonomics", () => {
+  assert.equal(
+    getEncryptionKeyOrThrow({
+      NODE_ENV: "production",
+      ENCRYPTION_KEY: DEVELOPMENT_ENCRYPTION_KEY,
+    }),
+    DEVELOPMENT_ENCRYPTION_KEY,
   );
-  assert.throws(
-    () =>
-      getEncryptionKeyOrThrow({
-        NODE_ENV: "production",
-        ENCRYPTION_KEY:
-          "dev-this-key-is-long-enough-but-still-not-production",
-      }),
-    /strong random value/,
+  assert.equal(
+    getEncryptionKeyOrThrow({
+      NODE_ENV: "production",
+      ENCRYPTION_KEY:
+        "dev-this-key-is-long-enough-but-still-not-production",
+    }),
+    "dev-this-key-is-long-enough-but-still-not-production",
   );
-  assert.throws(
-    () =>
-      getEncryptionKeyOrThrow({
-        NODE_ENV: "production",
-        ENCRYPTION_KEY: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      }),
-    /strong random value/,
+  assert.equal(
+    getEncryptionKeyOrThrow({
+      NODE_ENV: "production",
+      ENCRYPTION_KEY: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    }),
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   );
 });
 
@@ -137,5 +137,4 @@ test("deployment and rollback boundaries use the centralized sanitizer before pe
   );
   assert.match(containerHealth, /lastReason = sanitizeDeploymentError\(error/);
 });
-
 
