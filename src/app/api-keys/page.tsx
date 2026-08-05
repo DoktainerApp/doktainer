@@ -3,6 +3,7 @@
 import ConfirmActionDialog from "@/components/ConfirmActionDialog";
 import GuardedPage from "@/components/GuardedPage";
 import IssueDetailsSummary from "@/components/IssueDetailsSummary";
+import SearchField from "@/components/SearchField";
 import {
   apiKeys as apiKeysApi,
   type ApiKeyExpiryOption,
@@ -156,6 +157,7 @@ function maskKey(prefix: string) {
 
 export default function ApiKeysPage() {
   const [keys, setKeys] = useState<ApiKeyRecord[]>([]);
+  const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [showCreate, setShowCreate] = useState(false);
@@ -186,6 +188,11 @@ export default function ApiKeysPage() {
 
     return { active, revoked, totalRequests, expiringSoon };
   }, [keys]);
+  const filteredKeys = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    if (!query) return keys;
+    return keys.filter((key) => [key.name, key.keyPrefix, key.isActive ? "active" : "revoked", ...key.permissions].some((value) => value.toLowerCase().includes(query)));
+  }, [keys, search]);
 
   useEffect(() => {
     void loadKeys();
@@ -490,20 +497,12 @@ export default function ApiKeysPage() {
         </div>
 
         <div
-          className="card"
-          style={{
-            padding: "12px 16px",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: 12,
-            flexWrap: "wrap",
-          }}
+          className="card ui-responsive-toolbar"
+          style={{ padding: "12px 16px" }}
         >
-          <p style={{ fontSize: 13, color: "var(--text-muted)" }}>
-            {keys.length} API keys total
-          </p>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <SearchField placeholder="Search API keys, prefixes, or permissions..." value={search} onChange={(event) => setSearch(event.target.value)} containerStyle={{ flex: "1 1 360px", minWidth: 240 }} />
+          <div className="ui-toolbar-actions">
+            <span style={{ fontSize: 13, color: "var(--text-muted)" }}>{keys.length} API keys total</span>
             <button
               className="btn btn-ghost"
               style={{ fontSize: 12 }}
@@ -577,9 +576,14 @@ export default function ApiKeysPage() {
               call this panel without logging in through the browser.
             </p>
           </div>
+        ) : filteredKeys.length === 0 ? (
+          <div className="card" style={{ padding: 24, textAlign: "center", color: "var(--text-secondary)" }}>
+            <Key size={20} style={{ marginBottom: 10, color: "#3b82f6" }} />
+            <p style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)" }}>No API keys match your search</p>
+          </div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {keys.map((key) => {
+            {filteredKeys.map((key) => {
               const canReveal = Boolean(sessionRawKeys[key.id]);
               const isRevealed = revealedKeyId === key.id && canReveal;
               const rawValue = sessionRawKeys[key.id];

@@ -49,6 +49,7 @@ export default function UsersPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [activeTab, setActiveTab] = useState<UsersTabKey>("active-users");
+  const [search, setSearch] = useState("");
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [inviteError, setInviteError] = useState("");
   const [inviteResult, setInviteResult] = useState<{
@@ -81,17 +82,35 @@ export default function UsersPage() {
     () => users.filter((user) => !user.isActive),
     [users],
   );
+  const filteredActiveUsers = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    if (!query) return activeUsers;
+
+    return activeUsers.filter((user) =>
+      [user.name, user.email, user.role, ...user.serverAssignments.map((assignment) => assignment.server.name)].some((value) => value.toLowerCase().includes(query)),
+    );
+  }, [activeUsers, search]);
+  const filteredInvitations = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    if (!query) return invitations;
+    return invitations.filter((invitation) => [invitation.name, invitation.email, invitation.role, ...invitation.servers.map((server) => server.name)].some((value) => value.toLowerCase().includes(query)));
+  }, [invitations, search]);
+  const filteredArchivedUsers = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    if (!query) return archivedUsers;
+    return archivedUsers.filter((user) => [user.name, user.email, user.role, ...user.serverAssignments.map((assignment) => assignment.server.name)].some((value) => value.toLowerCase().includes(query)));
+  }, [archivedUsers, search]);
   const usersPagination = useTablePagination({
-    items: activeUsers,
-    resetKey: `${activeUsers.length}|${activeTab}`,
+    items: filteredActiveUsers,
+    resetKey: `${filteredActiveUsers.length}|${activeTab}|${search}`,
   });
   const invitationsPagination = useTablePagination({
-    items: invitations,
-    resetKey: `${invitations.length}|${activeTab}`,
+    items: filteredInvitations,
+    resetKey: `${filteredInvitations.length}|${activeTab}|${search}`,
   });
   const archivedUsersPagination = useTablePagination({
-    items: archivedUsers,
-    resetKey: `${archivedUsers.length}|${activeTab}`,
+    items: filteredArchivedUsers,
+    resetKey: `${filteredArchivedUsers.length}|${activeTab}|${search}`,
   });
 
   const loadData = useCallback(
@@ -394,6 +413,7 @@ export default function UsersPage() {
 
         <UsersToolbar
           activeTab={activeTab}
+          search={search}
           activeUsersCount={activeUsers.length}
           invitationsCount={invitations.length}
           archivedUsersCount={archivedUsers.length}
@@ -401,6 +421,7 @@ export default function UsersPage() {
           refreshing={refreshing}
           canInvite={canInvite}
           onTabChange={setActiveTab}
+          onSearchChange={setSearch}
           onRefresh={handleRefresh}
           onInvite={() => {
             setInviteError("");
@@ -422,6 +443,7 @@ export default function UsersPage() {
             totalItems={usersPagination.totalItems}
             startItem={usersPagination.startItem}
             endItem={usersPagination.endItem}
+            emptyMessage={search.trim() ? "No active users match your search." : "No active users found."}
             onPageChange={usersPagination.setCurrentPage}
             onEditAccess={(user) => {
               setModalError("");
@@ -446,6 +468,7 @@ export default function UsersPage() {
             totalItems={invitationsPagination.totalItems}
             startItem={invitationsPagination.startItem}
             endItem={invitationsPagination.endItem}
+            emptyMessage={search.trim() ? "No pending invitations match your search." : "No pending invitations."}
             onPageChange={invitationsPagination.setCurrentPage}
             onCopyFreshInviteLink={handleCopyFreshInviteLink}
             onRevokeInvitation={handleRevokeInvitation}
@@ -461,6 +484,7 @@ export default function UsersPage() {
             totalItems={archivedUsersPagination.totalItems}
             startItem={archivedUsersPagination.startItem}
             endItem={archivedUsersPagination.endItem}
+            emptyMessage={search.trim() ? "No archived users match your search." : "No archived users."}
             onPageChange={archivedUsersPagination.setCurrentPage}
           />
         ) : null}

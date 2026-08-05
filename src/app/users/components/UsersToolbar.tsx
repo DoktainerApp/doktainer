@@ -1,9 +1,11 @@
-import { Clock, Loader2, Lock, Plus, RefreshCw, Users } from "lucide-react";
+import SearchField from "@/components/SearchField";
+import { Loader2, Plus, RefreshCw } from "lucide-react";
 
 export type UsersTabKey = "active-users" | "pending-invites" | "archived-users";
 
 interface UsersToolbarProps {
   activeTab: UsersTabKey;
+  search: string;
   activeUsersCount: number;
   invitationsCount: number;
   archivedUsersCount: number;
@@ -11,12 +13,14 @@ interface UsersToolbarProps {
   refreshing: boolean;
   canInvite: boolean;
   onTabChange: (tab: UsersTabKey) => void;
+  onSearchChange: (value: string) => void;
   onRefresh: () => void | Promise<void>;
   onInvite: () => void;
 }
 
 export default function UsersToolbar({
   activeTab,
+  search,
   activeUsersCount,
   invitationsCount,
   archivedUsersCount,
@@ -24,81 +28,50 @@ export default function UsersToolbar({
   refreshing,
   canInvite,
   onTabChange,
+  onSearchChange,
   onRefresh,
   onInvite,
 }: UsersToolbarProps) {
-  const tabs = [
+  const tabs: Array<{ key: UsersTabKey; label: string }> = [
     {
-      key: "active-users" as const,
+      key: "active-users",
       label: `Active Users (${activeUsersCount})`,
-      icon: Users,
     },
     {
-      key: "pending-invites" as const,
+      key: "pending-invites",
       label: `Pending Invites (${invitationsCount})`,
-      icon: Clock,
     },
     {
-      key: "archived-users" as const,
+      key: "archived-users",
       label: `Archived Users (${archivedUsersCount})`,
-      icon: Lock,
     },
   ];
 
   return (
     <div
-      className="card"
-      style={{
-        padding: "12px 16px",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        gap: 12,
-        flexWrap: "wrap",
-      }}
+      className="card ui-responsive-toolbar users-toolbar"
+      style={{ padding: "12px 16px" }}
     >
-      <div
-        style={{
-          display: "flex",
-          gap: 4,
-          background: "var(--bg-card)",
-          borderRadius: 10,
-          padding: 4,
-          border: "1px solid var(--border)",
-        }}
+      <SearchField
+        placeholder="Search users, roles, emails, or servers..."
+        value={search}
+        onChange={(event) => onSearchChange(event.target.value)}
+        containerStyle={{ flex: "1 1 360px", minWidth: 240 }}
+      />
+      <select
+        className="input users-toolbar-filter"
+        aria-label="Filter user records"
+        value={activeTab}
+        onChange={(event) => onTabChange(event.target.value as UsersTabKey)}
+        style={{ fontSize: 12 }}
       >
-        {tabs.map((tab) => {
-          const Icon = tab.icon;
-          return (
-            <button
-              key={tab.key}
-              type="button"
-              onClick={() => onTabChange(tab.key)}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 7,
-                padding: "7px 16px",
-                borderRadius: 7,
-                border: "none",
-                cursor: "pointer",
-                fontSize: 13,
-                fontWeight: 500,
-                background:
-                  activeTab === tab.key
-                    ? "rgba(59,130,246,0.15)"
-                    : "transparent",
-                color: activeTab === tab.key ? "#3b82f6" : "var(--text-muted)",
-                transition: "all 0.2s",
-              }}
-            >
-              <Icon size={13} />
-              {tab.label}
-            </button>
-          );
-        })}
-      </div>
-      <div style={{ display: "flex", gap: 8 }}>
+        {tabs.map((tab) => (
+          <option key={tab.key} value={tab.key}>
+            {tab.label}
+          </option>
+        ))}
+      </select>
+      <div className="ui-toolbar-actions">
         <button
           className="btn btn-ghost"
           style={{ fontSize: 12 }}

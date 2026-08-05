@@ -20,6 +20,7 @@ interface ActiveUsersPanelProps {
   totalItems: number;
   startItem: number;
   endItem: number;
+  emptyMessage: string;
   onPageChange: (page: number) => void;
   onEditAccess: (user: UserRecord) => void;
   onEditRole: (user: UserRecord) => void;
@@ -38,6 +39,7 @@ export default function ActiveUsersPanel({
   totalItems,
   startItem,
   endItem,
+  emptyMessage,
   onPageChange,
   onEditAccess,
   onEditRole,
@@ -69,7 +71,7 @@ export default function ActiveUsersPanel({
             fontSize: 13,
           }}
         >
-          No active users found.
+          {emptyMessage}
         </div>
       ) : (
         <>

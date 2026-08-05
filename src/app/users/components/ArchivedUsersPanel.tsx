@@ -16,6 +16,7 @@ interface ArchivedUsersPanelProps {
   totalItems: number;
   startItem: number;
   endItem: number;
+  emptyMessage: string;
   onPageChange: (page: number) => void;
 }
 
@@ -27,6 +28,7 @@ export default function ArchivedUsersPanel({
   totalItems,
   startItem,
   endItem,
+  emptyMessage,
   onPageChange,
 }: ArchivedUsersPanelProps) {
   return (
@@ -77,7 +79,7 @@ export default function ArchivedUsersPanel({
             fontSize: 13,
           }}
         >
-          No archived users.
+          {emptyMessage}
         </div>
       ) : (
         <>

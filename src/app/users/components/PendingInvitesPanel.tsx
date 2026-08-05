@@ -17,6 +17,7 @@ interface PendingInvitesPanelProps {
   totalItems: number;
   startItem: number;
   endItem: number;
+  emptyMessage: string;
   onPageChange: (page: number) => void;
   onCopyFreshInviteLink: (invitationId: string) => void | Promise<void>;
   onRevokeInvitation: (invitationId: string) => void | Promise<void>;
@@ -32,6 +33,7 @@ export default function PendingInvitesPanel({
   totalItems,
   startItem,
   endItem,
+  emptyMessage,
   onPageChange,
   onCopyFreshInviteLink,
   onRevokeInvitation,
@@ -83,7 +85,7 @@ export default function PendingInvitesPanel({
             fontSize: 13,
           }}
         >
-          No pending invitations.
+          {emptyMessage}
         </div>
       ) : (
         <>

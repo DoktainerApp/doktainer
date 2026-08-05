@@ -378,6 +378,12 @@ body {
   flex-wrap: wrap;
 }
 
+.users-toolbar-filter {
+  flex: 0 1 200px;
+  width: min(200px, 100%);
+  align-self: flex-start;
+}
+
 .ui-toolbar-note {
   margin-left: auto;
   text-align: right;
@@ -425,6 +431,20 @@ body {
   .ui-toolbar-actions > a {
     flex: 1 1 160px;
     justify-content: center;
+  }
+
+  .users-toolbar .ui-toolbar-actions {
+    flex-direction: column;
+  }
+
+  .users-toolbar .ui-toolbar-actions > button {
+    width: 100%;
+    flex-basis: auto;
+  }
+
+  .users-toolbar-filter {
+    flex-basis: 100%;
+    width: 100%;
   }
 
   .ui-pill-switch,
