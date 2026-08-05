@@ -2,7 +2,7 @@ import { Globe, Loader2, Lock } from "lucide-react";
 import { SSLTabKey } from "@/app/ssl/components/ssl-utils";
 
 interface SSLStatePanelProps {
-  mode: "loading" | "empty";
+  mode: "loading" | "empty" | "no-results";
   activeTab: SSLTabKey;
   selectedServerId: string;
 }
@@ -24,6 +24,28 @@ export default function SSLStatePanel({
           {activeTab === "certs"
             ? "Loading certificates..."
             : "Loading domains waiting for SSL..."}
+        </p>
+      </div>
+    );
+  }
+
+  if (mode === "no-results") {
+    const Icon = activeTab === "certs" ? Lock : Globe;
+
+    return (
+      <div className="card" style={{ padding: 42, textAlign: "center" }}>
+        <Icon
+          size={34}
+          style={{
+            color: "var(--text-muted)",
+            margin: "0 auto 10px",
+            opacity: 0.4,
+          }}
+        />
+        <p style={{ color: "var(--text-muted)", fontSize: 14 }}>
+          {activeTab === "certs"
+            ? "No SSL certificates match your search."
+            : "No domains waiting for SSL match your search."}
         </p>
       </div>
     );

@@ -2,6 +2,7 @@
 
 import ConfirmActionDialog from "@/components/ConfirmActionDialog";
 import DashboardLayout from "@/components/DashboardLayout";
+import SearchField from "@/components/SearchField";
 import ToastViewport from "@/components/ToastViewport";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Globe, Loader2, Lock, Plus, RefreshCw } from "lucide-react";
@@ -51,6 +52,7 @@ export default function DomainsPage() {
   const [data, setData] = useState<Domain[]>([]);
   const [serverList, setServerList] = useState<Server[]>([]);
   const [selectedServerId, setSelectedServerId] = useState("");
+  const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState("");
@@ -294,10 +296,28 @@ export default function DomainsPage() {
       .length,
   };
   const hasPendingSslAction = syncing || renewing !== null || deleting !== null;
-  const domainsWithSsl = visibleData.filter((d) => d.sslEnabled && d.sslCert);
+  const filteredData = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    if (!query) return visibleData;
+
+    return visibleData.filter((domain) =>
+      [
+        domain.name,
+        domain.type,
+        domain.value,
+        domain.proxy,
+        domain.server?.name ?? "",
+        domain.sslCert?.status ?? "",
+        domain.sslCert?.issuer ?? "",
+      ].some((value) => value.toLowerCase().includes(query)),
+    );
+  }, [search, visibleData]);
+  const domainsWithSsl = filteredData.filter(
+    (domain) => domain.sslEnabled && domain.sslCert,
+  );
   const pagination = useTablePagination({
-    items: visibleData,
-    resetKey: `${activeTab}|${selectedServerId}`,
+    items: filteredData,
+    resetKey: `${activeTab}|${selectedServerId}|${search}`,
   });
 
   return (
@@ -425,6 +445,18 @@ export default function DomainsPage() {
               ? "Showing domain and SSL records for the selected server"
               : "Showing all domain and SSL records across all servers"}
           </p> */}
+        </div>
+
+        <div
+          className="card ui-responsive-toolbar"
+          style={{ padding: "12px 16px" }}
+        >
+          <SearchField
+            placeholder="Search domains, targets, or SSL status..."
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            containerStyle={{ flex: "1 1 360px", minWidth: 240 }}
+          />
         </div>
 
         {/* Tab switcher */}
@@ -575,9 +607,34 @@ export default function DomainsPage() {
           </div>
         )}
 
-        {!loading && visibleData.length > 0 && activeTab === "domains" && (
+        {!loading && visibleData.length > 0 && filteredData.length === 0 && (
+          <div
+            className="card"
+            style={{
+              padding: 48,
+              textAlign: "center",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+            }}
+          >
+            <Globe
+              size={36}
+              style={{
+                color: "var(--text-muted)",
+                marginBottom: 12,
+                opacity: 0.4,
+              }}
+            />
+            <p style={{ color: "var(--text-muted)", fontSize: 14 }}>
+              No domain records match your search.
+            </p>
+          </div>
+        )}
+
+        {!loading && filteredData.length > 0 && activeTab === "domains" && (
           <DomainsTable
-            domains={visibleData}
+            domains={filteredData}
             pagination={pagination}
             deleting={deleting}
             renewing={renewing}
@@ -587,7 +644,7 @@ export default function DomainsPage() {
           />
         )}
 
-        {!loading && activeTab === "ssl" && (
+        {!loading && filteredData.length > 0 && activeTab === "ssl" && (
           <SslCertificatesGrid
             domains={domainsWithSsl}
             renewing={renewing}

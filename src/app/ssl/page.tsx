@@ -2,6 +2,7 @@
 
 import ConfirmActionDialog from "@/components/ConfirmActionDialog";
 import DashboardLayout from "@/components/DashboardLayout";
+import SearchField from "@/components/SearchField";
 import ToastViewport from "@/components/ToastViewport";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
@@ -54,6 +55,7 @@ export default function SSLPage() {
   const [domains, setDomains] = useState<Domain[]>([]);
   const [serverList, setServerList] = useState<Server[]>([]);
   const [selectedServerId, setSelectedServerId] = useState("");
+  const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
@@ -175,6 +177,34 @@ export default function SSLPage() {
       ),
     [domains, selectedServerId],
   );
+
+  const filteredCerts = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    if (!query) return visibleCerts;
+
+    return visibleCerts.filter((cert) =>
+      [
+        cert.domain?.name ?? "",
+        cert.domain?.server?.name ?? "",
+        cert.issuer,
+        cert.status,
+      ].some((value) => value.toLowerCase().includes(query)),
+    );
+  }, [search, visibleCerts]);
+
+  const filteredIssueableDomains = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    if (!query) return issueableDomains;
+
+    return issueableDomains.filter((domain) =>
+      [
+        domain.name,
+        domain.value,
+        domain.proxy,
+        domain.server?.name ?? "",
+      ].some((value) => value.toLowerCase().includes(query)),
+    );
+  }, [issueableDomains, search]);
 
   const handleQuickIssue = async (domain: Domain) => {
     setIssuingDomainId(domain.id);
@@ -409,6 +439,22 @@ export default function SSLPage() {
           onChange={handleServerChange}
         />
 
+        <div
+          className="card ui-responsive-toolbar"
+          style={{ padding: "12px 16px" }}
+        >
+          <SearchField
+            placeholder={
+              activeTab === "certs"
+                ? "Search certificates, domains, or servers..."
+                : "Search domains, targets, or servers..."
+            }
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            containerStyle={{ flex: "1 1 360px", minWidth: 240 }}
+          />
+        </div>
+
         <SSLToolbar
           activeTab={activeTab}
           syncing={syncing}
@@ -430,34 +476,42 @@ export default function SSLPage() {
 
         {!loading &&
         activeTab === "domains" &&
-        issueableDomains.length === 0 ? (
+        filteredIssueableDomains.length === 0 ? (
           <SSLStatePanel
-            mode="empty"
+            mode={
+              issueableDomains.length > 0 && search.trim()
+                ? "no-results"
+                : "empty"
+            }
             activeTab={activeTab}
             selectedServerId={selectedServerId}
           />
         ) : null}
 
-        {!loading && activeTab === "domains" && issueableDomains.length > 0 ? (
+        {!loading && activeTab === "domains" && filteredIssueableDomains.length > 0 ? (
           <SSLDomainsGrid
-            domains={issueableDomains}
+            domains={filteredIssueableDomains}
             issuingDomainId={issuingDomainId}
             syncing={syncing}
             onQuickIssue={handleQuickIssue}
           />
         ) : null}
 
-        {!loading && activeTab === "certs" && visibleCerts.length === 0 ? (
+        {!loading && activeTab === "certs" && filteredCerts.length === 0 ? (
           <SSLStatePanel
-            mode="empty"
+            mode={
+              visibleCerts.length > 0 && search.trim()
+                ? "no-results"
+                : "empty"
+            }
             activeTab={activeTab}
             selectedServerId={selectedServerId}
           />
         ) : null}
 
-        {!loading && activeTab === "certs" && visibleCerts.length > 0 ? (
+        {!loading && activeTab === "certs" && filteredCerts.length > 0 ? (
           <SSLCertificatesGrid
-            certs={visibleCerts}
+            certs={filteredCerts}
             busyId={busyId}
             renewBusy={isRenewInProgress}
             renewOperations={renewOperations}
