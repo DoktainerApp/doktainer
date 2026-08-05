@@ -218,7 +218,7 @@ export default function S3StorageSettingsPanel({
 
   const filteredDestinations = destinations.filter((destination) => {
     const query = search.trim().toLowerCase();
-    return !query || [destination.name, destination.provider, destination.bucket, destination.region, destination.endpoint ?? "", destination.server?.name ?? ""].some((value) => value.toLowerCase().includes(query));
+    return !query || [destination.name, destination.provider, destination.bucket, destination.region, destination.endpoint ?? "", destination.targetServer?.name ?? ""].some((value) => value.toLowerCase().includes(query));
   });
   const totalItems = filteredDestinations.length;
   const totalPages = Math.max(1, Math.ceil(totalItems / PAGE_SIZE));
