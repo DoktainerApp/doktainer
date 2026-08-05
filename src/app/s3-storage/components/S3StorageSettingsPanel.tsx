@@ -17,6 +17,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import TablePagination from "@/components/TablePagination";
+import SearchField from "@/components/SearchField";
 import { FieldLabel } from "@/app/settings/components/SettingsPrimitives";
 import type {
   S3StorageDestinationInput,
@@ -213,12 +214,17 @@ export default function S3StorageSettingsPanel({
   const [draft, setDraft] = useState<DestinationDraft | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
+  const [search, setSearch] = useState("");
 
-  const totalItems = destinations.length;
+  const filteredDestinations = destinations.filter((destination) => {
+    const query = search.trim().toLowerCase();
+    return !query || [destination.name, destination.provider, destination.bucket, destination.region, destination.endpoint ?? "", destination.server?.name ?? ""].some((value) => value.toLowerCase().includes(query));
+  });
+  const totalItems = filteredDestinations.length;
   const totalPages = Math.max(1, Math.ceil(totalItems / PAGE_SIZE));
   const safePage = Math.min(currentPage, totalPages);
   const startIndex = (safePage - 1) * PAGE_SIZE;
-  const pagedDestinations = destinations.slice(
+  const pagedDestinations = filteredDestinations.slice(
     startIndex,
     startIndex + PAGE_SIZE,
   );
@@ -327,6 +333,10 @@ export default function S3StorageSettingsPanel({
           >
             <Plus size={14} /> Add Destination
           </button>
+        </div>
+
+        <div style={{ padding: "12px 20px", borderBottom: "1px solid var(--border)" }}>
+          <SearchField placeholder="Search destinations..." value={search} onChange={(event) => { setSearch(event.target.value); setCurrentPage(1); }} containerStyle={{ minWidth: 0 }} />
         </div>
 
         {destinations.length === 0 ? (

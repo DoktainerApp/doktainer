@@ -22,6 +22,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import TablePagination from "@/components/TablePagination";
+import SearchField from "@/components/SearchField";
 import {
   FieldLabel,
   Toggle,
@@ -297,13 +298,19 @@ export default function NotificationsSettingsPanel({
   const [draft, setDraft] = useState<NotificationProviderItem | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
+  const [search, setSearch] = useState("");
 
   const providers = settings.notifications.providers;
-  const totalItems = providers.length;
+  const filteredProviders = providers.filter((provider) => {
+    const query = search.trim().toLowerCase();
+    return !query || [provider.name, provider.type, provider.channel, ...provider.actions]
+      .filter(Boolean).some((value) => value.toLowerCase().includes(query));
+  });
+  const totalItems = filteredProviders.length;
   const totalPages = Math.max(1, Math.ceil(totalItems / PAGE_SIZE));
   const safePage = Math.min(currentPage, totalPages);
   const startIndex = (safePage - 1) * PAGE_SIZE;
-  const pagedProviders = providers.slice(startIndex, startIndex + PAGE_SIZE);
+  const pagedProviders = filteredProviders.slice(startIndex, startIndex + PAGE_SIZE);
   const startItem = totalItems === 0 ? 0 : startIndex + 1;
   const endItem = totalItems === 0 ? 0 : startIndex + pagedProviders.length;
 
@@ -374,6 +381,10 @@ export default function NotificationsSettingsPanel({
           >
             <Plus size={14} /> Add Notification
           </button>
+        </div>
+
+        <div style={{ padding: "12px 20px", borderBottom: "1px solid var(--border)" }}>
+          <SearchField placeholder="Search providers..." value={search} onChange={(event) => { setSearch(event.target.value); setCurrentPage(1); }} containerStyle={{ minWidth: 0 }} />
         </div>
 
         {totalItems === 0 ? (
