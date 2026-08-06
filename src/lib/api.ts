@@ -560,7 +560,7 @@ type ApiErrorPayload = {
   [key: string]: unknown;
 };
 
-function stringifyApiErrorValue(value: unknown): string {
+export function formatApiErrorValue(value: unknown): string {
   if (typeof value === "string") {
     return value;
   }
@@ -569,11 +569,47 @@ function stringifyApiErrorValue(value: unknown): string {
     return "";
   }
 
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return String(value);
+  if (Array.isArray(value)) {
+    return value
+      .filter(
+        (item): item is string =>
+          typeof item === "string" && item.trim() !== "",
+      )
+      .join(" ");
   }
+
+  if (typeof value === "object") {
+    const error = value as {
+      formErrors?: unknown;
+      fieldErrors?: unknown;
+      message?: unknown;
+    };
+    const formErrors = formatApiErrorValue(error.formErrors);
+
+    if (formErrors) {
+      return formErrors;
+    }
+
+    if (error.fieldErrors && typeof error.fieldErrors === "object") {
+      const fieldErrors = Object.values(error.fieldErrors).flatMap(
+        (messages) =>
+          Array.isArray(messages)
+            ? messages.filter(
+                (message): message is string =>
+                  typeof message === "string" && message.trim() !== "",
+              )
+            : [],
+      );
+
+      if (fieldErrors.length > 0) {
+        return fieldErrors.join(" ");
+      }
+    }
+
+    return formatApiErrorValue(error.message);
+  }
+
+  return String(value);
 }
 
 function buildResponseFallbackMessage(response: Response, fallback: string) {
@@ -620,8 +656,8 @@ async function readApiErrorMessage(
       fallbackMessage,
     );
     const message =
-      stringifyApiErrorValue(payload.error) ||
-      stringifyApiErrorValue(payload.message);
+      formatApiErrorValue(payload.error) ||
+      formatApiErrorValue(payload.message);
 
     return message || buildResponseFallbackMessage(response, fallbackMessage);
   } catch (error) {
@@ -641,8 +677,8 @@ async function request<T>(
 
   if (!res.ok) {
     throw new Error(
-      stringifyApiErrorValue(json.error) ||
-        stringifyApiErrorValue(json.message) ||
+      formatApiErrorValue(json.error) ||
+        formatApiErrorValue(json.message) ||
         buildResponseFallbackMessage(res, "Request failed"),
     );
   }
