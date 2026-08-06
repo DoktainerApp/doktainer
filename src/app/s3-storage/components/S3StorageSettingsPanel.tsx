@@ -1,12 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { type MouseEvent, useEffect, useRef, useState } from "react";
 import {
   Cloud,
   Database,
   HardDrive,
   Key,
   Loader2,
+  MoreVertical,
   Pencil,
   Plus,
   Power,
@@ -213,6 +214,12 @@ export default function S3StorageSettingsPanel({
 }: S3StorageSettingsPanelProps) {
   const [draft, setDraft] = useState<DestinationDraft | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [menuPosition, setMenuPosition] = useState<{
+    top: number;
+    left: number;
+  } | null>(null);
+  const actionMenuRef = useRef<HTMLDivElement>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [search, setSearch] = useState("");
 
@@ -261,6 +268,58 @@ export default function S3StorageSettingsPanel({
     setEditingId(null);
     setDraft(null);
   };
+
+  const toggleActionMenu = (
+    event: MouseEvent<HTMLButtonElement>,
+    destinationId: string,
+  ) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const menuWidth = 176;
+    const menuHeight = 132;
+    const left = Math.min(
+      window.innerWidth - menuWidth - 12,
+      Math.max(12, rect.right - menuWidth + rect.width),
+    );
+    const top = Math.min(window.innerHeight - menuHeight - 12, rect.bottom + 6);
+
+    if (openMenuId === destinationId) {
+      setOpenMenuId(null);
+      setMenuPosition(null);
+      return;
+    }
+
+    setMenuPosition({ top: Math.max(12, top), left });
+    setOpenMenuId(destinationId);
+  };
+
+  const closeActionMenu = () => {
+    setOpenMenuId(null);
+    setMenuPosition(null);
+  };
+
+  useEffect(() => {
+    if (!openMenuId) return;
+
+    const closeMenuOnOutsideClick = (event: globalThis.MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node) || actionMenuRef.current?.contains(target)) {
+        return;
+      }
+
+      const trigger =
+        target instanceof Element
+          ? target.closest("[data-action-menu-trigger]")
+          : null;
+      if (trigger?.getAttribute("data-action-menu-trigger") === openMenuId) {
+        return;
+      }
+
+      closeActionMenu();
+    };
+
+    document.addEventListener("mousedown", closeMenuOnOutsideClick);
+    return () => document.removeEventListener("mousedown", closeMenuOnOutsideClick);
+  }, [openMenuId]);
 
   const saveDraft = async () => {
     if (!draft) return;
@@ -514,81 +573,36 @@ export default function S3StorageSettingsPanel({
                             style={{
                               display: "flex",
                               justifyContent: "flex-end",
-                              gap: 8,
+                              gap: 6,
                               flexWrap: "wrap",
                             }}
                           >
-                            <button
-                              type="button"
-                              className="btn btn-ghost"
-                              onClick={() =>
-                                void onToggleDestination(destination)
-                              }
-                              style={{ padding: "7px 12px", fontSize: 12 }}
-                            >
-                              {destination.enabled ? (
-                                <Power color="#10b981" size={13} />
-                              ) : (
-                                <Power color="#ef4444" size={13} />
-                              )}
-                              {/* {destination.enabled ? "Disable" : "Enable"} */}
+                            <button type="button" className="btn btn-ghost" onClick={() => void onVerifyDestination({ id: destination.id, name: destination.name, provider: destination.provider, enabled: destination.enabled, accessKeyId: destination.accessKeyId, secretAccessKey: "", hasSecretAccessKey: destination.hasSecretAccessKey, region: destination.region, bucket: destination.bucket, endpoint: destination.endpoint, additionalFlags: [...destination.additionalFlags], serverId: destination.serverId })} disabled={isVerifying} title="Verify connection" style={{ padding: "4px 8px", fontSize: 11 }}>
+                              {isVerifying ? <Loader2 size={12} className="animate-spin" /> : <CloudCheck size={12} />}
                             </button>
                             <button
                               type="button"
                               className="btn btn-ghost"
-                              onClick={() => openEditModal(destination)}
-                              style={{ padding: "7px 12px", fontSize: 12 }}
+                              onClick={() => { openEditModal(destination); closeActionMenu(); }}
+                              title="Edit destination"
+                              style={{ padding: "4px 8px", fontSize: 11 }}
                             >
-                              <Pencil size={13} />
+                              <Pencil size={12} />
                             </button>
                             <button
                               type="button"
                               className="btn btn-ghost"
-                              onClick={() =>
-                                void onVerifyDestination({
-                                  id: destination.id,
-                                  name: destination.name,
-                                  provider: destination.provider,
-                                  enabled: destination.enabled,
-                                  accessKeyId: destination.accessKeyId,
-                                  secretAccessKey: "",
-                                  hasSecretAccessKey:
-                                    destination.hasSecretAccessKey,
-                                  region: destination.region,
-                                  bucket: destination.bucket,
-                                  endpoint: destination.endpoint,
-                                  additionalFlags: [
-                                    ...destination.additionalFlags,
-                                  ],
-                                  serverId: destination.serverId,
-                                })
-                              }
-                              disabled={isVerifying}
-                              style={{ padding: "7px 12px", fontSize: 12 }}
+                              onClick={(event) => toggleActionMenu(event, destination.id)}
+                              data-action-menu-trigger={destination.id}
+                              title="More actions"
+                              style={{ padding: "4px 8px", fontSize: 11 }}
                             >
-                              {isVerifying ? (
-                                <Loader2 size={13} className="animate-spin" />
-                              ) : (
-                                <CloudCheck size={13} />
-                              )}
+                              <MoreVertical size={12} />
                             </button>
-                            <button
-                              type="button"
-                              className="btn btn-ghost"
-                              onClick={() => onDeleteDestination(destination)}
-                              disabled={isDeleting}
-                              style={{
-                                padding: "7px 12px",
-                                fontSize: 12,
-                                color: "#ef4444",
-                              }}
-                            >
-                              {isDeleting ? (
-                                <Loader2 size={13} className="animate-spin" />
-                              ) : (
-                                <Trash2 size={13} />
-                              )}
-                            </button>
+                            {openMenuId === destination.id && menuPosition ? <div className="card" ref={actionMenuRef} onClick={(event) => event.stopPropagation()} style={{ position: "fixed", top: menuPosition.top, left: menuPosition.left, minWidth: 176, padding: 6, display: "flex", flexDirection: "column", gap: 4, zIndex: 160, boxShadow: "0 18px 40px rgba(2, 6, 23, 0.42)" }}>
+                              <button type="button" className="btn btn-ghost" onClick={() => { void onToggleDestination(destination); closeActionMenu(); }} style={{ fontSize: 12, justifyContent: "flex-start" }}><Power color={destination.enabled ? "#10b981" : "#ef4444"} size={12} />{destination.enabled ? "Disable destination" : "Enable destination"}</button>
+                              <button type="button" className="btn btn-ghost" onClick={() => { onDeleteDestination(destination); closeActionMenu(); }} disabled={isDeleting} style={{ fontSize: 12, justifyContent: "flex-start", color: "#ef4444" }}>{isDeleting ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}Delete destination</button>
+                            </div> : null}
                           </div>
                         </td>
                       </tr>
@@ -842,7 +856,10 @@ export default function S3StorageSettingsPanel({
                       />
                     </div>
                     <div style={{ gridColumn: "1 / -1" }}>
-                      <FieldLabel>Object prefix / folder</FieldLabel>
+                      <FieldLabel>
+                        Object prefix / folder
+                        {(draft.retentionDays || draft.maxBackupCount) && " *"}
+                      </FieldLabel>
                       <input
                         className="input"
                         value={draft.objectPrefix ?? ""}
@@ -919,7 +936,7 @@ export default function S3StorageSettingsPanel({
                     }}
                   >
                     <div>
-                      <FieldLabel>Destination name</FieldLabel>
+                      <FieldLabel>Destination name *</FieldLabel>
                       <input
                         className="input"
                         value={draft.name}
@@ -980,7 +997,7 @@ export default function S3StorageSettingsPanel({
                     }}
                   >
                     <div>
-                      <FieldLabel>Access Key ID</FieldLabel>
+                      <FieldLabel>Access Key ID *</FieldLabel>
                       <div style={{ position: "relative" }}>
                         <input
                           className="input"
@@ -1012,7 +1029,7 @@ export default function S3StorageSettingsPanel({
 
                     <div>
                       <FieldLabel>
-                        Secret Access Key
+                        Secret Access Key{!draft.hasSecretAccessKey && " *"}
                         {draft.hasSecretAccessKey
                           ? " (leave blank to keep existing key)"
                           : ""}
@@ -1039,7 +1056,7 @@ export default function S3StorageSettingsPanel({
                     </div>
 
                     <div>
-                      <FieldLabel>Bucket</FieldLabel>
+                      <FieldLabel>Bucket *</FieldLabel>
                       <input
                         className="input"
                         value={draft.bucket}
@@ -1055,7 +1072,7 @@ export default function S3StorageSettingsPanel({
                     </div>
 
                     <div>
-                      <FieldLabel>Region</FieldLabel>
+                      <FieldLabel>Region *</FieldLabel>
                       <input
                         className="input"
                         value={draft.region}
@@ -1072,7 +1089,7 @@ export default function S3StorageSettingsPanel({
 
                     <div>
                       <FieldLabel>
-                        Endpoint
+                        Endpoint{draft.provider !== "awsS3" && " *"}
                         {draft.provider === "awsS3"
                           ? " (optional for AWS S3)"
                           : " (required for S3-compatible providers)"}

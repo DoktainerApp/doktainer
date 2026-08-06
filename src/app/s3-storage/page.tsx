@@ -123,7 +123,6 @@ export default function S3StoragePage() {
   const upsertDestination = async (draft: DestinationDraft) => {
     const missing = [
       !draft.accessKeyId && "Access Key ID",
-      !draft.secretAccessKey && "Secret Access Key",
       !draft.region && "Region",
       !draft.bucket && "Bucket",
       !draft.name && "Destination Name",
@@ -179,7 +178,6 @@ export default function S3StoragePage() {
   const verifyDestination = async (draft: DestinationDraft) => {
     const missing = [
       !draft.accessKeyId && "Access Key ID",
-      !draft.secretAccessKey && "Secret Access Key",
       !draft.region && "Region",
       !draft.bucket && "Bucket",
       !draft.name && "Destination Name",
