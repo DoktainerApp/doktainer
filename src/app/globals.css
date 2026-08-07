@@ -921,6 +921,8 @@ body {
 
 /* Modal overlay */
 .modal-overlay {
+  /* Match Bootstrap-like dialog margins and keep the dialog clear of viewport edges. */
+  --modal-viewport-gutter: clamp(16px, 3vw, 28px);
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.7);
@@ -929,7 +931,7 @@ body {
   justify-content: center;
   z-index: 1000;
   animation: slide-in 0.2s ease-out;
-  padding: clamp(8px, 2vw, 16px);
+  padding: var(--modal-viewport-gutter);
   overflow-y: auto;
   overflow-x: hidden;
   box-sizing: border-box;
@@ -945,7 +947,9 @@ body {
   padding: 24px;
   width: 100%;
   max-width: 480px;
-  max-height: calc(100dvh - 16px);
+  max-height: calc(
+    100dvh - var(--modal-viewport-gutter) - var(--modal-viewport-gutter)
+  );
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
@@ -960,7 +964,9 @@ body {
   width: 100%;
   max-width: 480px;
   min-width: 0;
-  max-height: calc(100dvh - 16px);
+  max-height: calc(
+    100dvh - var(--modal-viewport-gutter) - var(--modal-viewport-gutter)
+  );
   --modal-close-size: 28px;
 }
 
@@ -970,13 +976,15 @@ body {
 }
 
 .modal-overlay-wide {
-  padding: 16px;
+  padding: var(--modal-viewport-gutter);
 }
 
 .modal-wide {
   width: 100%;
   max-width: none;
-  max-height: calc(100dvh - 16px);
+  max-height: calc(
+    100dvh - var(--modal-viewport-gutter) - var(--modal-viewport-gutter)
+  );
   box-sizing: border-box;
 }
 
@@ -1037,34 +1045,48 @@ body {
 @media (max-width: 640px) {
   .modal-overlay {
     align-items: flex-start;
-    padding: max(8px, env(safe-area-inset-top))
-      max(8px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom))
-      max(8px, env(safe-area-inset-left));
+    --modal-viewport-gutter-top: max(16px, env(safe-area-inset-top));
+    --modal-viewport-gutter-right: max(16px, env(safe-area-inset-right));
+    --modal-viewport-gutter-bottom: max(16px, env(safe-area-inset-bottom));
+    --modal-viewport-gutter-left: max(16px, env(safe-area-inset-left));
+    padding: var(--modal-viewport-gutter-top) var(--modal-viewport-gutter-right)
+      var(--modal-viewport-gutter-bottom) var(--modal-viewport-gutter-left);
   }
 
   .modal-shell {
     max-width: none;
-    max-height: calc(100dvh - 16px);
+    max-height: calc(
+      100dvh - var(--modal-viewport-gutter-top) -
+        var(--modal-viewport-gutter-bottom)
+    );
   }
 
   .modal {
-    max-height: calc(100dvh - 16px);
+    max-height: calc(
+      100dvh - var(--modal-viewport-gutter-top) -
+        var(--modal-viewport-gutter-bottom)
+    );
     padding: 20px !important;
   }
 
   .modal-overlay-wide {
-    padding: max(8px, env(safe-area-inset-top))
-      max(8px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom))
-      max(8px, env(safe-area-inset-left));
+    padding: var(--modal-viewport-gutter-top) var(--modal-viewport-gutter-right)
+      var(--modal-viewport-gutter-bottom) var(--modal-viewport-gutter-left);
   }
 
   .modal-shell-wide {
-    max-width: calc(100vw - 16px);
+    max-width: calc(
+      100vw - var(--modal-viewport-gutter-left) -
+        var(--modal-viewport-gutter-right)
+    );
   }
 
   .modal-wide {
     padding: 20px !important;
-    max-height: calc(100dvh - 16px);
+    max-height: calc(
+      100dvh - var(--modal-viewport-gutter-top) -
+        var(--modal-viewport-gutter-bottom)
+    );
   }
 
   .modal-close {
