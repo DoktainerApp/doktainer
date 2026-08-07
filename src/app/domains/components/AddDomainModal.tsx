@@ -21,11 +21,7 @@ import {
   DomainConfigMode,
   PortOption,
 } from "./domain-types";
-import {
-  detectAvailableProxies,
-  isIpv4WithPort,
-  parseInspectPortOptions,
-} from "./domain-utils";
+import { isIpv4WithPort, parseInspectPortOptions } from "./domain-utils";
 
 interface AddDomainModalProps {
   serverList: Server[];
@@ -84,6 +80,7 @@ export default function AddDomainModal({
   const [proxyCapabilityError, setProxyCapabilityError] = useState("");
   const [certbotInstalled, setCertbotInstalled] = useState(false);
   const [serverContainers, setServerContainers] = useState<Container[]>([]);
+  const [serverContainersLoading, setServerContainersLoading] = useState(false);
   const [portOptions, setPortOptions] = useState<PortOption[]>([]);
   const [containerInspectLoading, setContainerInspectLoading] = useState(false);
   const [availableProxies, setAvailableProxies] = useState<
@@ -175,6 +172,7 @@ export default function AddDomainModal({
       setProxyCapabilityError("");
       setAvailableProxies(null);
       setServerContainers([]);
+      setServerContainersLoading(false);
       setPortOptions([]);
       setCertbotInstalled(false);
       setForm((current) => {
@@ -203,32 +201,27 @@ export default function AddDomainModal({
     }
 
     setCapabilityLoading(true);
+    setServerContainersLoading(true);
     setProxyCapabilityError("");
 
+    const containersRequest = containersApi.list({ serverId: form.serverId });
     void Promise.all([
-      serversApi.getConfig(form.serverId),
-      containersApi.list({ serverId: form.serverId }),
+      serversApi.getDomainProxyCapability(form.serverId),
+      containersRequest,
     ])
-      .then(([configRes, containersRes]) => {
+      .then(([capabilityRes, containersRes]) => {
         if (cancelled) {
           return;
         }
 
-        const proxies = detectAvailableProxies(
-          configRes.data,
-          containersRes.data,
-        );
-        const hasCertbot = configRes.data.webServer.components.some(
-          (component) => component.key === "certbot" && component.installed,
-        );
+        const proxies: DomainProxy[] = ["NONE"];
+        if (containersRes.data.some((container) => `${container.name} ${container.image}`.toLowerCase().includes("traefik"))) proxies.push("TRAEFIK");
+        if (capabilityRes.data.nginx) proxies.push("NGINX");
+        if (capabilityRes.data.caddy) proxies.push("CADDY");
+        const hasCertbot = capabilityRes.data.certbot;
 
         setCertbotInstalled(hasCertbot);
         setAvailableProxies(proxies);
-        setServerContainers(
-          containersRes.data.filter(
-            (container) => container.status === "RUNNING",
-          ),
-        );
         setForm((current) => ({
           ...current,
           sslEnabled: hasCertbot ? current.sslEnabled : false,
@@ -244,8 +237,6 @@ export default function AddDomainModal({
 
         setAvailableProxies(["NONE"]);
         setCertbotInstalled(false);
-        setServerContainers([]);
-        setPortOptions([]);
         setForm((current) => ({ ...current, proxy: "NONE" }));
         setProxyCapabilityError(
           err instanceof Error
@@ -257,6 +248,17 @@ export default function AddDomainModal({
         if (!cancelled) {
           setCapabilityLoading(false);
         }
+      });
+
+    void containersRequest
+      .then((containersRes) => {
+        if (!cancelled) setServerContainers(containersRes.data.filter((container) => container.status === "RUNNING"));
+      })
+      .catch(() => {
+        if (!cancelled) setServerContainers([]);
+      })
+      .finally(() => {
+        if (!cancelled) setServerContainersLoading(false);
       });
 
     return () => {
@@ -629,6 +631,7 @@ export default function AddDomainModal({
               capabilityLoading={capabilityLoading}
               proxyCapabilityError={proxyCapabilityError}
               serverContainers={serverContainers}
+              serverContainersLoading={serverContainersLoading}
               portOptions={portOptions}
               containerInspectLoading={containerInspectLoading}
               selectableProxies={selectableProxies}

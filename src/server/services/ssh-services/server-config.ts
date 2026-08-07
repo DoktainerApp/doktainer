@@ -118,6 +118,33 @@ export interface ServerConfigSnapshot {
   fetchedAt: string;
 }
 
+export interface DomainProxyCapability {
+  nginx: boolean;
+  caddy: boolean;
+  certbot: boolean;
+}
+
+/** A focused probe for the domain form; avoids loading the full server snapshot. */
+export async function getDomainProxyCapability(
+  server: Server,
+): Promise<DomainProxyCapability> {
+  const result = await exec(
+    server,
+    `bash -lc ${escapeShellArg([
+      'has_command() { command -v "$1" >/dev/null 2>&1 && return 0; shift; for candidate in "$@"; do [ -x "$candidate" ] && return 0; done; return 1; }',
+      'is_active() { systemctl is-active --quiet "$1" 2>/dev/null; }',
+      'nginx=0; if has_command nginx /usr/sbin/nginx /usr/bin/nginx /usr/local/sbin/nginx /usr/local/bin/nginx /usr/local/nginx/sbin/nginx && is_active nginx; then nginx=1; fi',
+      'caddy=0; if has_command caddy /usr/bin/caddy /usr/sbin/caddy /usr/local/bin/caddy /usr/local/sbin/caddy && is_active caddy; then caddy=1; fi',
+      'certbot=0; if has_command certbot /snap/bin/certbot /usr/bin/certbot /usr/local/bin/certbot /root/.local/bin/certbot; then certbot=1; fi',
+      'printf "%s|%s|%s\\n" "$nginx" "$caddy" "$certbot"',
+    ].join("\n"))}`,
+    configCommandTimeout(CONFIG_FAST_TIMEOUT_MS),
+  );
+  const [nginx, caddy, certbot] = result.stdout.trim().split("|");
+
+  return { nginx: nginx === "1", caddy: caddy === "1", certbot: certbot === "1" };
+}
+
 export async function getServerConfigSnapshot(
   server: Server,
 ): Promise<ServerConfigSnapshot> {

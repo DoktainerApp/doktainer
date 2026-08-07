@@ -716,6 +716,28 @@ export async function serverRoutes(app: FastifyInstance) {
   );
 
   app.get(
+    "/:id/domain-proxy-capability",
+    { preHandler: serverReadAccess },
+    async (req, reply) => {
+      const { id } = req.params as { id: string };
+      const server = await getAccessibleServer(req.userId, id, req.organizationId);
+      if (!server) {
+        return reply.status(403).send({ success: false, error: "Forbidden" });
+      }
+
+      try {
+        const data = await ssh.getDomainProxyCapability(server);
+        return reply.send({ success: true, data });
+      } catch (err: unknown) {
+        return reply.status(500).send({
+          success: false,
+          error: err instanceof Error ? err.message : "Failed to inspect domain proxy capability",
+        });
+      }
+    },
+  );
+
+  app.get(
     "/:id/config",
     { preHandler: serverReadAccess },
     async (req, reply) => {

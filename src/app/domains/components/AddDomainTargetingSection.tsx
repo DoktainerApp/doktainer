@@ -1,4 +1,6 @@
 import { Container, DomainProxy } from "@/lib/api";
+import SearchableSelect, { type SearchableSelectOption } from "@/components/SearchableSelect";
+import { Loader2 } from "lucide-react";
 import { AddDomainFormState, PortOption } from "./domain-types";
 
 interface AddDomainTargetingSectionProps {
@@ -6,6 +8,7 @@ interface AddDomainTargetingSectionProps {
   capabilityLoading: boolean;
   proxyCapabilityError: string;
   serverContainers: Container[];
+  serverContainersLoading: boolean;
   portOptions: PortOption[];
   containerInspectLoading: boolean;
   selectableProxies: DomainProxy[];
@@ -23,6 +26,7 @@ export default function AddDomainTargetingSection({
   capabilityLoading,
   proxyCapabilityError,
   serverContainers,
+  serverContainersLoading,
   portOptions,
   containerInspectLoading,
   selectableProxies,
@@ -32,16 +36,22 @@ export default function AddDomainTargetingSection({
   linkedPortDomains,
   onChange,
 }: AddDomainTargetingSectionProps) {
+  const containerOptions: SearchableSelectOption[] = serverContainers.map((container) => {
+    const linkedDomains = linkedContainerDomains.get(container.id) ?? [];
+    const disabled = linkedDomains.length > 0 && !allowSharedTargetReuse;
+    return { value: container.id, label: `${container.name} (${container.image})`, keywords: `${container.name} ${container.image} ${container.dockerId ?? ""}`, description: disabled ? linkedDomains.length > 1 ? "Used by 1+ domains" : `Used by ${linkedDomains.join(", ")}` : undefined, disabled };
+  });
+
   return (
     <>
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "1fr 1fr",
+          gridTemplateColumns: "minmax(0, 1fr)",
           gap: 12,
         }}
       >
-        <div>
+        <div style={{ minWidth: 0 }}>
           <label
             style={{
               fontSize: 12,
@@ -52,18 +62,22 @@ export default function AddDomainTargetingSection({
           >
             Target Container *
           </label>
-          <select
-            className="input"
+          <SearchableSelect
             value={form.targetContainerId}
-            onChange={(event) =>
+            options={containerOptions}
+            onChange={(targetContainerId) =>
               onChange({
-                targetContainerId: event.target.value,
+                targetContainerId,
                 targetPort: "",
               })
             }
-            disabled={!form.serverId || capabilityLoading || !targetingEnabled}
+            placeholder="Select container..."
+            searchPlaceholder="Search containers..."
+            emptyText="No matching containers found"
+            disabled={!form.serverId || serverContainersLoading || !targetingEnabled}
             style={{ width: "100%" }}
-          >
+          />
+          {/*
             <option value="">— Select container —</option>
             {serverContainers.map((container) => {
               const linkedDomains =
@@ -83,9 +97,9 @@ export default function AddDomainTargetingSection({
                 </option>
               );
             })}
-          </select>
+          */}
         </div>
-        <div>
+        <div style={{ minWidth: 0 }}>
           <label
             style={{
               fontSize: 12,
@@ -136,7 +150,14 @@ export default function AddDomainTargetingSection({
         </div>
       </div>
 
-      {form.serverId && serverContainers.length === 0 && (
+      {form.serverId && serverContainersLoading && (
+        <div role="status" aria-live="polite" style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 8, padding: "8px 10px", border: "1px solid rgba(59,130,246,0.28)", borderRadius: 7, background: "rgba(59,130,246,0.08)", color: "var(--text-muted)", fontSize: 12 }}>
+          <Loader2 size={14} className="animate-spin" aria-hidden="true" />
+          Loading running containers from the selected server…
+        </div>
+      )}
+
+      {form.serverId && !serverContainersLoading && serverContainers.length === 0 && (
         <p style={{ fontSize: 11, color: "var(--text-muted)" }}>
           No running containers were found on the selected server.
         </p>
@@ -197,10 +218,11 @@ export default function AddDomainTargetingSection({
             );
           })}
         </div>
-        <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 6 }}>
+        <p style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "var(--text-muted)", marginTop: 6 }}>
+          {form.serverId && capabilityLoading && <Loader2 size={13} className="animate-spin" aria-hidden="true" />}
           {form.serverId
             ? capabilityLoading
-              ? "Inspecting selected server for available reverse proxies..."
+              ? "Checking reverse proxy availability on the selected server…"
               : "Choose container and port first, then pick one of the proxies detected on the selected server."
             : "Select Server Target first to enable proxy-aware validation."}
         </p>

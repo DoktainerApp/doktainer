@@ -15,6 +15,7 @@ export type SearchableSelectOption = {
   label: string;
   keywords?: string;
   description?: string;
+  disabled?: boolean;
 };
 
 type SearchableSelectProps = {
@@ -252,9 +253,11 @@ export default function SearchableSelect({
                         key={option.value}
                         type="button"
                         onClick={() => {
+                          if (option.disabled) return;
                           onChange(option.value);
                           setOpen(false);
                         }}
+                        disabled={option.disabled}
                         style={{
                           width: "100%",
                           border: "none",
@@ -262,7 +265,9 @@ export default function SearchableSelect({
                           background: active
                             ? "var(--bg-card-hover)"
                             : "transparent",
-                          color: "var(--text-primary)",
+                          color: option.disabled
+                            ? "var(--text-muted)"
+                            : "var(--text-primary)",
                           minHeight: OPTION_ROW_HEIGHT,
                           display: "flex",
                           alignItems: "center",
@@ -271,7 +276,8 @@ export default function SearchableSelect({
                           textAlign: "left",
                           borderRadius: 0,
                           padding: "9px 12px",
-                          cursor: "pointer",
+                          cursor: option.disabled ? "not-allowed" : "pointer",
+                          opacity: option.disabled ? 0.55 : 1,
                         }}
                       >
                         <span style={{ minWidth: 0 }}>

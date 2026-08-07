@@ -1651,6 +1651,11 @@ export const servers = {
       `/servers/${id}/docker`,
       { timeoutMs: 12000 },
     ),
+  getDomainProxyCapability: (id: string) =>
+    get<{
+      success: boolean;
+      data: { nginx: boolean; caddy: boolean; certbot: boolean };
+    }>(`/servers/${id}/domain-proxy-capability`, { timeoutMs: 10000 }),
   getConfig: (id: string) =>
     get<{ success: boolean; data: ServerConfigSnapshot }>(
       `/servers/${id}/config`,
