@@ -1,5 +1,5 @@
 import TablePagination from "@/components/TablePagination";
-import { Clock, Edit3, Loader2, Lock, Shield, Trash2 } from "lucide-react";
+import { Clock, Edit3, Loader2, Lock, Trash2 } from "lucide-react";
 import type { UserRecord } from "@/lib/api";
 import { getRoleMeta } from "@/app/users/components/user-role-config";
 import {
@@ -12,8 +12,7 @@ interface ActiveUsersPanelProps {
   loading: boolean;
   items: UserRecord[];
   currentUserId: string | undefined;
-  canManageAccess: boolean;
-  canManageRoles: boolean;
+  canManageUsers: boolean;
   mutatingKey: string | null;
   currentPage: number;
   totalPages: number;
@@ -22,8 +21,7 @@ interface ActiveUsersPanelProps {
   endItem: number;
   emptyMessage: string;
   onPageChange: (page: number) => void;
-  onEditAccess: (user: UserRecord) => void;
-  onEditRole: (user: UserRecord) => void;
+  onEdit: (user: UserRecord) => void;
   onDelete: (user: UserRecord) => void | Promise<void>;
 }
 
@@ -31,8 +29,7 @@ export default function ActiveUsersPanel({
   loading,
   items,
   currentUserId,
-  canManageAccess,
-  canManageRoles,
+  canManageUsers,
   mutatingKey,
   currentPage,
   totalPages,
@@ -41,8 +38,7 @@ export default function ActiveUsersPanel({
   endItem,
   emptyMessage,
   onPageChange,
-  onEditAccess,
-  onEditRole,
+  onEdit,
   onDelete,
 }: ActiveUsersPanelProps) {
   return (
@@ -98,13 +94,9 @@ export default function ActiveUsersPanel({
                     (assignment) => assignment.server.name,
                   ),
                 });
-                const canEditAccess =
-                  canManageAccess &&
-                  !(item.role === "SUPER_ADMIN" && currentUserId !== undefined);
-                const canEditRole =
-                  canManageRoles && item.role !== "SUPER_ADMIN";
+                const canEdit = canManageUsers && item.role !== "SUPER_ADMIN";
                 const canDeactivate =
-                  canManageRoles && item.role !== "SUPER_ADMIN" && !isSelf;
+                  canManageUsers && item.role !== "SUPER_ADMIN" && !isSelf;
 
                 return (
                   <tr key={item.id}>
@@ -243,29 +235,13 @@ export default function ActiveUsersPanel({
                         <button
                           className="btn btn-ghost"
                           style={{ padding: "5px 8px" }}
-                          title="Server access"
-                          onClick={() => onEditAccess(item)}
+                          title={canEdit ? "Edit user" : "Protected Super Admin account"}
+                          onClick={() => onEdit(item)}
                           disabled={
-                            !canEditAccess ||
-                            mutatingKey === `access:${item.id}`
+                            !canEdit || mutatingKey === `edit:${item.id}`
                           }
                         >
-                          {mutatingKey === `access:${item.id}` ? (
-                            <Loader2 size={11} className="animate-spin" />
-                          ) : (
-                            <Shield size={11} />
-                          )}
-                        </button>
-                        <button
-                          className="btn btn-ghost"
-                          style={{ padding: "5px 8px" }}
-                          title="Edit role"
-                          onClick={() => onEditRole(item)}
-                          disabled={
-                            !canEditRole || mutatingKey === `role:${item.id}`
-                          }
-                        >
-                          {mutatingKey === `role:${item.id}` ? (
+                          {mutatingKey === `edit:${item.id}` ? (
                             <Loader2 size={11} className="animate-spin" />
                           ) : (
                             <Edit3 size={11} />

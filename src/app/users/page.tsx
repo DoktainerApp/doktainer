@@ -11,6 +11,7 @@ import {
   UserInvitationRecord,
   UserRecord,
   UserRole,
+  UpdateUserBody,
   users as usersApi,
   servers as serversApi,
 } from "@/lib/api";
@@ -19,10 +20,9 @@ import { useTablePagination } from "@/lib/use-table-pagination";
 import { useToastManager } from "@/lib/use-toast-manager";
 import ActiveUsersPanel from "@/app/users/components/ActiveUsersPanel";
 import ArchivedUsersPanel from "@/app/users/components/ArchivedUsersPanel";
-import EditRoleModal from "@/app/users/components/EditRoleModal";
+import EditUserModal from "@/app/users/components/EditUserModal";
 import InviteUserModal from "@/app/users/components/InviteUserModal";
 import PendingInvitesPanel from "@/app/users/components/PendingInvitesPanel";
-import ServerAccessModal from "@/app/users/components/ServerAccessModal";
 import UsersRoleSummary from "@/app/users/components/UsersRoleSummary";
 import UsersToolbar, {
   type UsersTabKey,
@@ -57,12 +57,7 @@ export default function UsersPage() {
     email: string;
     expiresAt: string;
   } | null>(null);
-  const [editingRoleUser, setEditingRoleUser] = useState<UserRecord | null>(
-    null,
-  );
-  const [editingAccessUser, setEditingAccessUser] = useState<UserRecord | null>(
-    null,
-  );
+  const [editingUser, setEditingUser] = useState<UserRecord | null>(null);
   const [modalError, setModalError] = useState("");
   const [mutatingKey, setMutatingKey] = useState<string | null>(null);
   const [copiedInviteId, setCopiedInviteId] = useState<string | null>(null);
@@ -72,8 +67,7 @@ export default function UsersPage() {
   const canInvite =
     currentUser?.role === "SUPER_ADMIN" || currentUser?.role === "OPERATOR";
   const canViewUsers = canInvite;
-  const canManageAccess = canInvite;
-  const canManageRoles = currentUser?.role === "SUPER_ADMIN";
+  const canManageUsers = currentUser?.role === "SUPER_ADMIN";
   const activeUsers = useMemo(
     () => users.filter((user) => user.isActive),
     [users],
@@ -87,18 +81,39 @@ export default function UsersPage() {
     if (!query) return activeUsers;
 
     return activeUsers.filter((user) =>
-      [user.name, user.email, user.role, ...user.serverAssignments.map((assignment) => assignment.server.name)].some((value) => value.toLowerCase().includes(query)),
+      [
+        user.name,
+        user.email,
+        user.role,
+        ...user.serverAssignments.map((assignment) => assignment.server.name),
+      ].some((value) => value.toLowerCase().includes(query)),
     );
   }, [activeUsers, search]);
   const filteredInvitations = useMemo(() => {
     const query = search.trim().toLowerCase();
     if (!query) return invitations;
-    return invitations.filter((invitation) => [invitation.name, invitation.email, invitation.role, ...invitation.servers.map((server) => server.name)].some((value) => value.toLowerCase().includes(query)));
+
+    return invitations.filter((invitation) =>
+      [
+        invitation.name,
+        invitation.email,
+        invitation.role,
+        ...invitation.servers.map((server) => server.name),
+      ].some((value) => value.toLowerCase().includes(query)),
+    );
   }, [invitations, search]);
   const filteredArchivedUsers = useMemo(() => {
     const query = search.trim().toLowerCase();
     if (!query) return archivedUsers;
-    return archivedUsers.filter((user) => [user.name, user.email, user.role, ...user.serverAssignments.map((assignment) => assignment.server.name)].some((value) => value.toLowerCase().includes(query)));
+
+    return archivedUsers.filter((user) =>
+      [
+        user.name,
+        user.email,
+        user.role,
+        ...user.serverAssignments.map((assignment) => assignment.server.name),
+      ].some((value) => value.toLowerCase().includes(query)),
+    );
   }, [archivedUsers, search]);
   const usersPagination = useTablePagination({
     items: filteredActiveUsers,
@@ -208,58 +223,27 @@ export default function UsersPage() {
     }
   };
 
-  const handleRoleUpdate = async (role: Exclude<UserRole, "SUPER_ADMIN">) => {
-    if (!editingRoleUser) return;
+  const handleUserUpdate = async (payload: UpdateUserBody) => {
+    if (!editingUser) return;
     setModalError("");
-    setMutatingKey(`role:${editingRoleUser.id}`);
+    setMutatingKey(`edit:${editingUser.id}`);
     try {
-      await usersApi.updateRole(editingRoleUser.id, role);
-      const userName = editingRoleUser.name;
-      setEditingRoleUser(null);
+      await usersApi.update(editingUser.id, payload);
+      const userName = editingUser.name;
+      setEditingUser(null);
       await loadData(false);
       pushToast({
         tone: "success",
-        title: "Role Updated",
-        message: `${userName} role updated successfully`,
+        title: "User Updated",
+        message: `${userName} has been updated successfully`,
       });
     } catch (err: unknown) {
       const message =
-        err instanceof Error ? err.message : "Failed to update role";
+        err instanceof Error ? err.message : "Failed to update user";
       setModalError(message);
       pushToast({
         tone: "error",
-        title: "Role Update Failed",
-        message,
-      });
-    } finally {
-      setMutatingKey(null);
-    }
-  };
-
-  const handleAccessUpdate = async (payload: {
-    allServersAccess: boolean;
-    serverIds: string[];
-  }) => {
-    if (!editingAccessUser) return;
-    setModalError("");
-    setMutatingKey(`access:${editingAccessUser.id}`);
-    try {
-      await usersApi.updateServerAccess(editingAccessUser.id, payload);
-      const userName = editingAccessUser.name;
-      setEditingAccessUser(null);
-      await loadData(false);
-      pushToast({
-        tone: "success",
-        title: "Access Updated",
-        message: `Server access updated for ${userName}`,
-      });
-    } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : "Failed to update server access";
-      setModalError(message);
-      pushToast({
-        tone: "error",
-        title: "Access Update Failed",
+        title: "User Update Failed",
         message,
       });
     } finally {
@@ -435,23 +419,22 @@ export default function UsersPage() {
             loading={loading}
             items={usersPagination.paginatedItems}
             currentUserId={currentUser?.id}
-            canManageAccess={canManageAccess}
-            canManageRoles={canManageRoles}
+            canManageUsers={canManageUsers}
             mutatingKey={mutatingKey}
             currentPage={usersPagination.currentPage}
             totalPages={usersPagination.totalPages}
             totalItems={usersPagination.totalItems}
             startItem={usersPagination.startItem}
             endItem={usersPagination.endItem}
-            emptyMessage={search.trim() ? "No active users match your search." : "No active users found."}
+            emptyMessage={
+              search.trim()
+                ? "No active users match your search."
+                : "No active users found."
+            }
             onPageChange={usersPagination.setCurrentPage}
-            onEditAccess={(user) => {
+            onEdit={(user) => {
               setModalError("");
-              setEditingAccessUser(user);
-            }}
-            onEditRole={(user) => {
-              setModalError("");
-              setEditingRoleUser(user);
+              setEditingUser(user);
             }}
             onDelete={handleDeleteUser}
           />
@@ -468,7 +451,11 @@ export default function UsersPage() {
             totalItems={invitationsPagination.totalItems}
             startItem={invitationsPagination.startItem}
             endItem={invitationsPagination.endItem}
-            emptyMessage={search.trim() ? "No pending invitations match your search." : "No pending invitations."}
+            emptyMessage={
+              search.trim()
+                ? "No pending invitations match your search."
+                : "No pending invitations."
+            }
             onPageChange={invitationsPagination.setCurrentPage}
             onCopyFreshInviteLink={handleCopyFreshInviteLink}
             onRevokeInvitation={handleRevokeInvitation}
@@ -484,7 +471,11 @@ export default function UsersPage() {
             totalItems={archivedUsersPagination.totalItems}
             startItem={archivedUsersPagination.startItem}
             endItem={archivedUsersPagination.endItem}
-            emptyMessage={search.trim() ? "No archived users match your search." : "No archived users."}
+            emptyMessage={
+              search.trim()
+                ? "No archived users match your search."
+                : "No archived users."
+            }
             onPageChange={archivedUsersPagination.setCurrentPage}
           />
         ) : null}
@@ -511,30 +502,17 @@ export default function UsersPage() {
           result={inviteResult}
         />
       )}
-      {editingRoleUser && (
-        <EditRoleModal
-          key={editingRoleUser.id}
-          user={editingRoleUser}
-          onClose={() => {
-            setEditingRoleUser(null);
-            setModalError("");
-          }}
-          onSubmit={handleRoleUpdate}
-          submitting={mutatingKey === `role:${editingRoleUser.id}`}
-          error={modalError}
-        />
-      )}
-      {editingAccessUser && (
-        <ServerAccessModal
-          key={editingAccessUser.id}
-          user={editingAccessUser}
+      {editingUser && (
+        <EditUserModal
+          key={editingUser.id}
+          user={editingUser}
           availableServers={availableServers}
           onClose={() => {
-            setEditingAccessUser(null);
+            setEditingUser(null);
             setModalError("");
           }}
-          onSubmit={handleAccessUpdate}
-          submitting={mutatingKey === `access:${editingAccessUser.id}`}
+          onSubmit={handleUserUpdate}
+          submitting={mutatingKey === `edit:${editingUser.id}`}
           error={modalError}
         />
       )}

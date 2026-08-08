@@ -572,8 +572,7 @@ export function formatApiErrorValue(value: unknown): string {
   if (Array.isArray(value)) {
     return value
       .filter(
-        (item): item is string =>
-          typeof item === "string" && item.trim() !== "",
+        (item): item is string => typeof item === "string" && item.trim() !== "",
       )
       .join(" ");
   }
@@ -591,14 +590,13 @@ export function formatApiErrorValue(value: unknown): string {
     }
 
     if (error.fieldErrors && typeof error.fieldErrors === "object") {
-      const fieldErrors = Object.values(error.fieldErrors).flatMap(
-        (messages) =>
-          Array.isArray(messages)
-            ? messages.filter(
-                (message): message is string =>
-                  typeof message === "string" && message.trim() !== "",
-              )
-            : [],
+      const fieldErrors = Object.values(error.fieldErrors).flatMap((messages) =>
+        Array.isArray(messages)
+          ? messages.filter(
+              (message): message is string =>
+                typeof message === "string" && message.trim() !== "",
+            )
+          : [],
       );
 
       if (fieldErrors.length > 0) {
@@ -656,8 +654,7 @@ async function readApiErrorMessage(
       fallbackMessage,
     );
     const message =
-      formatApiErrorValue(payload.error) ||
-      formatApiErrorValue(payload.message);
+      formatApiErrorValue(payload.error) || formatApiErrorValue(payload.message);
 
     return message || buildResponseFallbackMessage(response, fallbackMessage);
   } catch (error) {
@@ -937,6 +934,13 @@ export interface UpdateUserServerAccessBody {
   serverIds: string[];
 }
 
+export interface UpdateUserBody extends UpdateUserServerAccessBody {
+  name: string;
+  email: string;
+  role: Exclude<UserRole, "SUPER_ADMIN">;
+  password?: string;
+}
+
 export interface UserInvitationRecord {
   id: string;
   name: string;
@@ -981,6 +985,9 @@ export const users = {
 
   create: (body: CreateUserBody) =>
     post<{ success: boolean; data: UserRecord }>("/users", body),
+
+  update: (id: string, body: UpdateUserBody) =>
+    patch<{ success: boolean; data: UserRecord }>(`/users/${id}`, body),
 
   updateRole: (id: string, role: Exclude<UserRole, "SUPER_ADMIN">) =>
     patch<{ success: boolean; data: Pick<UserRecord, "id" | "name" | "role"> }>(

@@ -32,6 +32,15 @@ const UserInvitationCreateSchema = z.object({
   expiresInDays: z.number().int().min(1).max(30).default(7),
 });
 
+const UserUpdateSchema = z.object({
+  email: z.string().trim().email(),
+  name: z.string().trim().min(2).max(120),
+  role: ManageableRoleSchema,
+  allServersAccess: z.boolean(),
+  serverIds: z.array(z.string()),
+  password: z.string().min(8).max(128).optional(),
+});
+
 function createInviteToken() {
   const raw = crypto.randomBytes(32).toString("hex");
   const hash = crypto.createHash("sha256").update(raw).digest("hex");
@@ -413,8 +422,147 @@ export async function usersRoutes(app: FastifyInstance) {
   );
 
   app.patch(
+    "/:id",
+    { preHandler: [requireRole("SUPER_ADMIN")] },
+    async (req, reply) => {
+      const { id } = req.params as { id: string };
+      const body = UserUpdateSchema.safeParse(req.body);
+      if (!body.success) {
+        return reply
+          .status(400)
+          .send({ success: false, error: body.error.flatten() });
+      }
+
+      const targetUser = await prisma.user.findUnique({
+        where: { id },
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          role: true,
+          allServersAccess: true,
+          organizationMemberships: { select: { organizationId: true } },
+        },
+      });
+      if (!targetUser) {
+        return reply
+          .status(404)
+          .send({ success: false, error: "User not found" });
+      }
+      if (targetUser.role === "SUPER_ADMIN") {
+        return reply.status(400).send({
+          success: false,
+          error: "Super Admin accounts are managed separately",
+        });
+      }
+
+      const membershipIds = targetUser.organizationMemberships.map(
+        (membership) => membership.organizationId,
+      );
+      if (
+        membershipIds.length !== 1 ||
+        membershipIds[0] !== req.organizationId
+      ) {
+        return reply.status(409).send({
+          success: false,
+          error: "Organization user account membership is invalid",
+        });
+      }
+
+      const existingEmailOwner = await prisma.user.findUnique({
+        where: { email: body.data.email },
+        select: { id: true },
+      });
+      if (existingEmailOwner && existingEmailOwner.id !== id) {
+        return reply
+          .status(409)
+          .send({ success: false, error: "Email already in use" });
+      }
+
+      let validServerIds: string[] = [];
+      try {
+        validServerIds = await resolveServerIds(
+          body.data.serverIds,
+          req.organizationId!,
+        );
+      } catch (error) {
+        return reply.status(400).send({
+          success: false,
+          error:
+            error instanceof Error ? error.message : "Invalid server selection",
+        });
+      }
+
+      const passwordHash = body.data.password
+        ? await bcrypt.hash(body.data.password, 12)
+        : undefined;
+      const updated = await prisma.$transaction(async (tx) => {
+        await tx.userServerAccess.deleteMany({ where: { userId: id } });
+
+        return tx.user.update({
+          where: { id },
+          data: {
+            name: body.data.name,
+            email: body.data.email,
+            role: body.data.role,
+            allServersAccess: body.data.allServersAccess,
+            ...(passwordHash ? { passwordHash } : {}),
+            serverAssignments:
+              body.data.allServersAccess || validServerIds.length === 0
+                ? undefined
+                : {
+                    create: validServerIds.map((serverId) => ({ serverId })),
+                  },
+          },
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            role: true,
+            isActive: true,
+            allServersAccess: true,
+            lastLogin: true,
+            createdAt: true,
+            serverAssignments: {
+              where: { server: { organizationId: req.organizationId! } },
+              select: {
+                serverId: true,
+                server: { select: { id: true, name: true } },
+              },
+              orderBy: { createdAt: "asc" },
+            },
+          },
+        });
+      });
+
+      await auditLog({
+        userId: req.userId,
+        organizationId: req.organizationId,
+        action: "USER_UPDATE",
+        category: "AUTH",
+        level: "INFO",
+        message: `User "${updated.email}" updated`,
+        meta: {
+          targetUserId: id,
+          changed: {
+            name: targetUser.name !== updated.name,
+            email: targetUser.email !== updated.email,
+            role: targetUser.role !== updated.role,
+            password: Boolean(body.data.password),
+            serverAccess:
+              targetUser.allServersAccess !== updated.allServersAccess ||
+              validServerIds.length > 0,
+          },
+        },
+      });
+
+      return reply.send({ success: true, data: updated });
+    },
+  );
+
+  app.patch(
     "/:id/server-access",
-    { preHandler: [requireRole("OPERATOR")] },
+    { preHandler: [requireRole("SUPER_ADMIN")] },
     async (req, reply) => {
       const { id } = req.params as { id: string };
       const body = ServerAccessSchema.safeParse(req.body);
