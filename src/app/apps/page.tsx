@@ -3,6 +3,7 @@
 import Link from "next/link";
 import {
   type FormEvent,
+  type ReactNode,
   useCallback,
   useEffect,
   useMemo,
@@ -347,6 +348,104 @@ function getTemplateVisual(template: AppTemplate | null) {
     fallbackLabel: fallbackLabel || categoryMeta.label,
     iconUrl: template.icon ?? appMeta.icon,
   };
+}
+
+function normalizeExternalUrl(value?: string) {
+  const trimmed = value?.trim();
+  if (!trimmed) return "";
+
+  if (/^https?:\/\//i.test(trimmed)) {
+    return trimmed;
+  }
+
+  return `https://${trimmed}`;
+}
+
+function getTemplateLinks(template: AppTemplate) {
+  return {
+    github: normalizeExternalUrl(template.presentation?.github),
+    dockerHub: normalizeExternalUrl(template.presentation?.["hub-docker"]),
+  };
+}
+
+function SimpleIcon({
+  src,
+  label,
+  size,
+}: {
+  src: string;
+  label: string;
+  size: number;
+}) {
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={src}
+      alt={label}
+      width={size}
+      height={size}
+      style={{ display: "block" }}
+    />
+  );
+}
+
+function MaskIcon({
+  src,
+  size,
+}: {
+  src: string;
+  size: number;
+}) {
+  return (
+    <span
+      aria-hidden="true"
+      style={{
+        width: size,
+        height: size,
+        display: "block",
+        background: "currentColor",
+        WebkitMask: `url("${src}") center / contain no-repeat`,
+        mask: `url("${src}") center / contain no-repeat`,
+      }}
+    />
+  );
+}
+
+function TemplateSourceLink({
+  href,
+  label,
+  children,
+}: {
+  href: string;
+  label: string;
+  children: ReactNode;
+}) {
+  if (!href) return null;
+
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      aria-label={label}
+      title={label}
+      onClick={(e) => e.stopPropagation()}
+      style={{
+        width: 26,
+        height: 26,
+        borderRadius: 7,
+        border: "1px solid var(--border)",
+        background: "var(--bg-input)",
+        display: "inline-grid",
+        placeItems: "center",
+        color: "var(--text-muted)",
+        textDecoration: "none",
+        flexShrink: 0,
+      }}
+    >
+      {children}
+    </a>
+  );
 }
 
 function AppIconBadge({
@@ -2336,6 +2435,7 @@ export default function AppsPage() {
             >
               {filtered.map((app) => {
                 const visual = getTemplateVisual(app);
+                const sourceLinks = getTemplateLinks(app);
                 const installCount = installCounts.get(app.id) ?? 0;
                 const visibleTags = app.tags.slice(0, 4);
                 const hiddenTagCount = Math.max(
@@ -2512,11 +2612,34 @@ export default function AppsPage() {
                           gap: 8,
                         }}
                       >
-                        <span
-                          style={{ fontSize: 10, color: "var(--text-muted)" }}
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 6,
+                            minHeight: 26,
+                          }}
                         >
-                          {visual.installs.toLocaleString()} installs
-                        </span>
+                          <TemplateSourceLink
+                            href={sourceLinks.github}
+                            label={`${app.name} GitHub repository`}
+                          >
+                            <MaskIcon
+                              src="https://cdn.simpleicons.org/github"
+                              size={14}
+                            />
+                          </TemplateSourceLink>
+                          <TemplateSourceLink
+                            href={sourceLinks.dockerHub}
+                            label={`${app.name} Docker Hub page`}
+                          >
+                            <SimpleIcon
+                              src="https://cdn.simpleicons.org/docker/2496ED"
+                              label=""
+                              size={14}
+                            />
+                          </TemplateSourceLink>
+                        </div>
                         <span
                           style={{
                             fontSize: 10,

@@ -14,6 +14,8 @@ export interface AppTemplatePresentation {
   icon?: string;
   color?: string;
   installs?: number;
+  github?: string;
+  "hub-docker"?: string;
 }
 
 export interface AppTemplate {
@@ -51,6 +53,8 @@ const BASE_APP_TEMPLATES: AppTemplate[] = [
     presentation: {
       icon: "https://cdn.simpleicons.org/wordpress/21759B",
       installs: 1240,
+      github: "https://github.com/WordPress/wordpress-develop",
+      "hub-docker": "https://hub.docker.com/_/wordpress",
     },
   },
   {
@@ -68,6 +72,8 @@ const BASE_APP_TEMPLATES: AppTemplate[] = [
     presentation: {
       icon: "https://cdn.simpleicons.org/ghost/21759B",
       installs: 870,
+      github: "https://github.com/TryGhost/Ghost",
+      "hub-docker": "https://hub.docker.com/_/ghost",
     },
   },
   {
@@ -85,6 +91,8 @@ const BASE_APP_TEMPLATES: AppTemplate[] = [
     presentation: {
       icon: "https://cdn.simpleicons.org/strapi/4945FF",
       installs: 620,
+      github: "https://github.com/strapi/strapi",
+      "hub-docker": "https://hub.docker.com/r/strapi/strapi",
     },
   },
   {
@@ -101,6 +109,8 @@ const BASE_APP_TEMPLATES: AppTemplate[] = [
     presentation: {
       icon: "https://cdn.simpleicons.org/drupal/0678BE",
       installs: 410,
+      github: "https://github.com/drupal/drupal",
+      "hub-docker": "https://hub.docker.com/_/drupal",
     },
   },
   {
@@ -117,6 +127,8 @@ const BASE_APP_TEMPLATES: AppTemplate[] = [
     presentation: {
       icon: "https://cdn.simpleicons.org/nginx/009639",
       installs: 980,
+      github: "https://github.com/nginx/nginx",
+      "hub-docker": "https://hub.docker.com/_/nginx",
     },
   },
   {
@@ -133,6 +145,8 @@ const BASE_APP_TEMPLATES: AppTemplate[] = [
     presentation: {
       icon: "https://cdn.simpleicons.org/apache/D22128",
       installs: 540,
+      github: "https://github.com/apache/httpd",
+      "hub-docker": "https://hub.docker.com/_/httpd",
     },
   },
   {
@@ -150,6 +164,8 @@ const BASE_APP_TEMPLATES: AppTemplate[] = [
     presentation: {
       icon: "https://cdn.simpleicons.org/caddy/1F88C0",
       installs: 760,
+      github: "https://github.com/caddyserver/caddy",
+      "hub-docker": "https://hub.docker.com/_/caddy",
     },
   },
   {
@@ -169,6 +185,8 @@ const BASE_APP_TEMPLATES: AppTemplate[] = [
     presentation: {
       icon: "https://cdn.simpleicons.org/nodedotjs/5FA04E",
       installs: 650,
+      github: "https://github.com/nodejs/node",
+      "hub-docker": "https://hub.docker.com/_/node",
     },
   },
   {
@@ -188,6 +206,8 @@ const BASE_APP_TEMPLATES: AppTemplate[] = [
     presentation: {
       icon: "https://cdn.simpleicons.org/bun/5FA04E",
       installs: 260,
+      github: "https://github.com/oven-sh/bun",
+      "hub-docker": "https://hub.docker.com/r/oven/bun",
     },
   },
   {
@@ -205,6 +225,8 @@ const BASE_APP_TEMPLATES: AppTemplate[] = [
     presentation: {
       icon: "https://cdn.simpleicons.org/fastapi/009688",
       installs: 330,
+      github: "https://github.com/tiangolo/uvicorn-gunicorn-fastapi-docker",
+      "hub-docker": "https://hub.docker.com/r/tiangolo/uvicorn-gunicorn-fastapi",
     },
   },
   {
@@ -222,6 +244,8 @@ const BASE_APP_TEMPLATES: AppTemplate[] = [
     presentation: {
       icon: "https://cdn.simpleicons.org/php/777BB4",
       installs: 290,
+      github: "https://github.com/php/php-src",
+      "hub-docker": "https://hub.docker.com/_/php",
     },
   },
   {
@@ -238,6 +262,8 @@ const BASE_APP_TEMPLATES: AppTemplate[] = [
     tags: ["PHP", "Framework", "CodeIgniter"],
     presentation: {
       icon: "https://cdn.simpleicons.org/codeigniter/FF2D20",
+      github: "https://github.com/shinsenter/codeigniter4",
+      "hub-docker": "https://hub.docker.com/r/shinsenter/codeigniter4",
     },
   },
   {
@@ -258,6 +284,8 @@ const BASE_APP_TEMPLATES: AppTemplate[] = [
     presentation: {
       icon: "https://cdn.simpleicons.org/laravel/5CD04E",
       installs: 150,
+      github: "",
+      "hub-docker": "https://hub.docker.com/r/laravelfans/laravel",
     },
     presets: [
       {
@@ -301,6 +329,8 @@ const BASE_APP_TEMPLATES: AppTemplate[] = [
     presentation: {
       icon: "https://cdn.simpleicons.org/laravel/5CD04E",
       installs: 230,
+      github: "https://github.com/bitnami/containers",
+      "hub-docker": "https://hub.docker.com/r/bitnami/laravel",
     },
     presets: [
       {
@@ -343,6 +373,8 @@ const BASE_APP_TEMPLATES: AppTemplate[] = [
     presentation: {
       icon: "https://cdn.simpleicons.org/django/092E20",
       installs: 410,
+      github: "https://github.com/django/django",
+      "hub-docker": "https://hub.docker.com/_/python",
     },
   },
   {
@@ -363,6 +395,8 @@ const BASE_APP_TEMPLATES: AppTemplate[] = [
     presentation: {
       icon: "https://cdn.simpleicons.org/flask/5FA04E",
       installs: 360,
+      github: "https://github.com/pallets/flask",
+      "hub-docker": "https://hub.docker.com/_/python",
     },
   },
   {
@@ -382,6 +416,8 @@ const BASE_APP_TEMPLATES: AppTemplate[] = [
     presentation: {
       icon: "https://cdn.simpleicons.org/goland/00ADD8",
       installs: 290,
+      github: "https://github.com/golang/go",
+      "hub-docker": "https://hub.docker.com/_/golang",
     },
   },
   {
@@ -401,6 +437,8 @@ const BASE_APP_TEMPLATES: AppTemplate[] = [
     presentation: {
       icon: "https://cdn.simpleicons.org/rust/5FA04E",
       installs: 220,
+      github: "https://github.com/rust-lang/rust",
+      "hub-docker": "https://hub.docker.com/_/rust",
     },
   },
   {
@@ -418,6 +456,8 @@ const BASE_APP_TEMPLATES: AppTemplate[] = [
     tags: ["DNS", "Adblock"],
     presentation: {
       icon: "https://cdn.simpleicons.org/adguard/68BC71",
+      github: "https://github.com/AdguardTeam/AdGuardHome",
+      "hub-docker": "https://hub.docker.com/r/adguard/adguardhome",
     },
   },
   {
@@ -435,6 +475,8 @@ const BASE_APP_TEMPLATES: AppTemplate[] = [
     tags: ["DNS", "Adblock"],
     presentation: {
       icon: "https://cdn.simpleicons.org/pihole/96060C",
+      github: "https://github.com/pi-hole/pi-hole",
+      "hub-docker": "https://hub.docker.com/r/pihole/pihole",
     },
   },
   {
@@ -451,6 +493,8 @@ const BASE_APP_TEMPLATES: AppTemplate[] = [
     tags: ["DNS", "Dynamic DNS"],
     presentation: {
       icon: "https://cdn.simpleicons.org/cloudflare/F38020",
+      github: "https://github.com/oznu/docker-cloudflare-ddns",
+      "hub-docker": "https://hub.docker.com/r/oznu/cloudflare-ddns",
     },
   },
   {
@@ -467,6 +511,8 @@ const BASE_APP_TEMPLATES: AppTemplate[] = [
     tags: ["Network", "Tunnel"],
     presentation: {
       icon: "https://cdn.simpleicons.org/cloudflare/F38020",
+      github: "https://github.com/cloudflare/cloudflared",
+      "hub-docker": "https://hub.docker.com/r/cloudflare/cloudflared",
     },
   },
 
@@ -485,6 +531,8 @@ const BASE_APP_TEMPLATES: AppTemplate[] = [
     presentation: {
       icon: "https://cdn.simpleicons.org/excalidraw/6965DB",
       installs: 430,
+      github: "https://github.com/excalidraw/excalidraw",
+      "hub-docker": "https://hub.docker.com/r/excalidraw/excalidraw",
     },
   },
 
@@ -502,6 +550,8 @@ const BASE_APP_TEMPLATES: AppTemplate[] = [
     tags: ["Database", "Admin"],
     presentation: {
       icon: "https://cdn.simpleicons.org/php/777BB4",
+      github: "https://github.com/php/php-src",
+      "hub-docker": "https://hub.docker.com/_/php",
     },
   },
   {
@@ -517,6 +567,8 @@ const BASE_APP_TEMPLATES: AppTemplate[] = [
     tags: ["Database", "Admin"],
     presentation: {
       icon: "https://cdn.simpleicons.org/phpmyadmin/6C78AF",
+      github: "https://github.com/phpmyadmin/phpmyadmin",
+      "hub-docker": "https://hub.docker.com/r/phpmyadmin/phpmyadmin",
     },
   },
   {
@@ -534,6 +586,8 @@ const BASE_APP_TEMPLATES: AppTemplate[] = [
     presentation: {
       icon: "https://cdn.simpleicons.org/phpmyadmin/F38020",
       installs: 620,
+      github: "https://github.com/phpmyadmin/phpmyadmin",
+      "hub-docker": "https://hub.docker.com/r/phpmyadmin/phpmyadmin",
     },
   },
   {
@@ -552,6 +606,8 @@ const BASE_APP_TEMPLATES: AppTemplate[] = [
     presentation: {
       icon: "https://cdn.simpleicons.org/postgresql/4169E1",
       installs: 870,
+      github: "https://github.com/postgres/postgres",
+      "hub-docker": "https://hub.docker.com/_/postgres",
     },
   },
   {
@@ -570,6 +626,8 @@ const BASE_APP_TEMPLATES: AppTemplate[] = [
     presentation: {
       icon: "https://cdn.simpleicons.org/mysql/4479A1",
       installs: 910,
+      github: "https://github.com/mysql/mysql-server",
+      "hub-docker": "https://hub.docker.com/_/mysql",
     },
   },
   {
@@ -588,6 +646,8 @@ const BASE_APP_TEMPLATES: AppTemplate[] = [
     presentation: {
       icon: "https://cdn.simpleicons.org/mariadb/003545",
       installs: 430,
+      github: "https://github.com/MariaDB/server",
+      "hub-docker": "https://hub.docker.com/_/mariadb",
     },
   },
   {
@@ -606,6 +666,8 @@ const BASE_APP_TEMPLATES: AppTemplate[] = [
     presentation: {
       icon: "https://cdn.simpleicons.org/mongodb/47A248",
       installs: 480,
+      github: "https://github.com/mongodb/mongo",
+      "hub-docker": "https://hub.docker.com/_/mongo",
     },
   },
   {
@@ -623,6 +685,8 @@ const BASE_APP_TEMPLATES: AppTemplate[] = [
     tags: ["Database", "PostgreSQL", "Supabase"],
     presentation: {
       icon: "https://cdn.simpleicons.org/supabase/3ECF8E",
+      github: "https://github.com/supabase/postgres",
+      "hub-docker": "https://hub.docker.com/r/supabase/postgres",
     },
   },
   {
@@ -640,6 +704,8 @@ const BASE_APP_TEMPLATES: AppTemplate[] = [
     tags: ["Database", "Supabase"],
     presentation: {
       icon: "https://cdn.simpleicons.org/supabase/3ECF8E",
+      github: "",
+      "hub-docker": "https://hub.docker.com/r/khulnasoft/supabase-all-in-one",
     },
   },
   {
@@ -657,6 +723,8 @@ const BASE_APP_TEMPLATES: AppTemplate[] = [
     presentation: {
       icon: "https://cdn.simpleicons.org/redis/DC382D",
       installs: 720,
+      github: "https://github.com/redis/redis",
+      "hub-docker": "https://hub.docker.com/_/redis",
     },
   },
   {
@@ -672,6 +740,8 @@ const BASE_APP_TEMPLATES: AppTemplate[] = [
     tags: ["Cache", "Memory"],
     presentation: {
       installs: 190,
+      github: "https://github.com/memcached/memcached",
+      "hub-docker": "https://hub.docker.com/_/memcached",
     },
   },
   {
@@ -689,6 +759,8 @@ const BASE_APP_TEMPLATES: AppTemplate[] = [
     presentation: {
       icon: "https://cdn.simpleicons.org/rabbitmq/FF6600",
       installs: 510,
+      github: "https://github.com/rabbitmq/rabbitmq-server",
+      "hub-docker": "https://hub.docker.com/_/rabbitmq",
     },
   },
   {
@@ -706,6 +778,8 @@ const BASE_APP_TEMPLATES: AppTemplate[] = [
     presentation: {
       icon: "https://cdn.simpleicons.org/grafana/F46800",
       installs: 430,
+      github: "https://github.com/grafana/grafana",
+      "hub-docker": "https://hub.docker.com/r/grafana/grafana",
     },
   },
   {
@@ -723,6 +797,8 @@ const BASE_APP_TEMPLATES: AppTemplate[] = [
     presentation: {
       icon: "https://cdn.simpleicons.org/prometheus/E6522C",
       installs: 390,
+      github: "https://github.com/prometheus/prometheus",
+      "hub-docker": "https://hub.docker.com/r/prom/prometheus",
     },
   },
   {
@@ -739,6 +815,8 @@ const BASE_APP_TEMPLATES: AppTemplate[] = [
     presentation: {
       icon: "https://cdn.simpleicons.org/grafana/F46800",
       installs: 180,
+      github: "https://github.com/grafana/loki",
+      "hub-docker": "https://hub.docker.com/r/grafana/loki",
     },
   },
   {
@@ -756,6 +834,8 @@ const BASE_APP_TEMPLATES: AppTemplate[] = [
     presentation: {
       icon: "https://cdn.simpleicons.org/uptimekuma/5CDD8B",
       installs: 520,
+      github: "https://github.com/louislam/uptime-kuma",
+      "hub-docker": "https://hub.docker.com/r/louislam/uptime-kuma",
     },
   },
   {
@@ -789,6 +869,8 @@ const BASE_APP_TEMPLATES: AppTemplate[] = [
     presentation: {
       icon: "https://cdn.simpleicons.org/traefikproxy/24A1C1",
       installs: 560,
+      github: "https://github.com/traefik/traefik",
+      "hub-docker": "https://hub.docker.com/_/traefik",
     },
   },
   {
@@ -806,6 +888,8 @@ const BASE_APP_TEMPLATES: AppTemplate[] = [
     presentation: {
       icon: "https://cdn.simpleicons.org/nginxproxymanager/F15833",
       installs: 610,
+      github: "https://github.com/NginxProxyManager/nginx-proxy-manager",
+      "hub-docker": "https://hub.docker.com/r/jc21/nginx-proxy-manager",
     },
   },
   {
@@ -836,6 +920,8 @@ const BASE_APP_TEMPLATES: AppTemplate[] = [
     presentation: {
       icon: "https://cdn.simpleicons.org/minio/C72E49",
       installs: 210,
+      github: "https://github.com/minio/minio",
+      "hub-docker": "https://hub.docker.com/r/minio/minio",
     },
   },
   {
@@ -853,6 +939,8 @@ const BASE_APP_TEMPLATES: AppTemplate[] = [
     presentation: {
       icon: "https://cdn.simpleicons.org/nextcloud/0082C9",
       installs: 700,
+      github: "https://github.com/nextcloud/server",
+      "hub-docker": "https://hub.docker.com/_/nextcloud",
     },
   },
   {
@@ -869,6 +957,8 @@ const BASE_APP_TEMPLATES: AppTemplate[] = [
     tags: ["Files", "UI"],
     presentation: {
       installs: 280,
+      github: "https://github.com/filebrowser/filebrowser",
+      "hub-docker": "https://hub.docker.com/r/filebrowser/filebrowser",
     },
   },
   {
@@ -887,6 +977,8 @@ const BASE_APP_TEMPLATES: AppTemplate[] = [
     presentation: {
       icon: "https://cdn.simpleicons.org/immich/4250AF",
       installs: 460,
+      github: "https://github.com/immich-app/immich",
+      "hub-docker": "ghcr.io/imagegenius/immich:latest",
     },
     presets: [
       {
@@ -921,6 +1013,8 @@ const BASE_APP_TEMPLATES: AppTemplate[] = [
     presentation: {
       icon: "https://cdn.simpleicons.org/n8n/EA4B71",
       installs: 680,
+      github: "https://github.com/n8n-io/n8n",
+      "hub-docker": "https://hub.docker.com/r/n8nio/n8n",
     },
     presets: [
       {
@@ -952,6 +1046,8 @@ const BASE_APP_TEMPLATES: AppTemplate[] = [
     tags: ["AI", "LLM", "Chat"],
     presentation: {
       installs: 590,
+      github: "https://github.com/open-webui/open-webui",
+      "hub-docker": "",
     },
     presets: [
       {
@@ -986,6 +1082,8 @@ const BASE_APP_TEMPLATES: AppTemplate[] = [
     presentation: {
       icon: "https://openclaw.ai/favicon-32.png",
       installs: 750,
+      github: "https://github.com/openclaw/openclaw",
+      "hub-docker": "",
     },
   },
   {
@@ -1004,6 +1102,8 @@ const BASE_APP_TEMPLATES: AppTemplate[] = [
     presentation: {
       icon: "https://openclaw.ai/favicon-32.png",
       installs: 750,
+      github: "https://github.com/openclaw/openclaw",
+      "hub-docker": "https://hub.docker.com/r/alpine/openclaw",
     },
   },
   {
@@ -1021,6 +1121,8 @@ const BASE_APP_TEMPLATES: AppTemplate[] = [
     presentation: {
       icon: "https://cdn.simpleicons.org/openrouter/2496ED",
       installs: 480,
+      github: "https://github.com/decolua/9router",
+      "hub-docker": "https://hub.docker.com/r/decolua/9router",
     },
     presets: [
       {
@@ -1052,6 +1154,8 @@ const BASE_APP_TEMPLATES: AppTemplate[] = [
     tags: ["Container", "Docker"],
     presentation: {
       icon: "https://cdn.simpleicons.org/docker/2496ED",
+      github: "https://github.com/moby/moby",
+      "hub-docker": "https://hub.docker.com/_/docker",
     },
   },
   {
@@ -1070,6 +1174,8 @@ const BASE_APP_TEMPLATES: AppTemplate[] = [
     presentation: {
       icon: "https://cdn.simpleicons.org/portainer/13BEF9",
       installs: 340,
+      github: "https://github.com/portainer/portainer",
+      "hub-docker": "https://hub.docker.com/r/portainer/portainer-ce",
     },
   },
   {
@@ -1087,6 +1193,8 @@ const BASE_APP_TEMPLATES: AppTemplate[] = [
     presentation: {
       icon: "https://cdn.simpleicons.org/gitea/609926",
       installs: 590,
+      github: "https://github.com/go-gitea/gitea",
+      "hub-docker": "https://hub.docker.com/r/gitea/gitea",
     },
   },
   {
@@ -1104,6 +1212,8 @@ const BASE_APP_TEMPLATES: AppTemplate[] = [
     presentation: {
       icon: "https://cdn.simpleicons.org/jenkins/D24939",
       installs: 620,
+      github: "https://github.com/jenkinsci/jenkins",
+      "hub-docker": "https://hub.docker.com/r/jenkins/jenkins",
     },
   },
   {
@@ -1121,6 +1231,8 @@ const BASE_APP_TEMPLATES: AppTemplate[] = [
     presentation: {
       icon: "https://cdn.simpleicons.org/docker/2496ED",
       installs: 150,
+      github: "https://github.com/distribution/distribution",
+      "hub-docker": "https://hub.docker.com/_/registry",
     },
   },
 
@@ -1139,6 +1251,8 @@ const BASE_APP_TEMPLATES: AppTemplate[] = [
     presentation: {
       icon: "https://cdn.simpleicons.org/maildotru/005FF9",
       installs: 220,
+      github: "https://github.com/mailhog/MailHog",
+      "hub-docker": "https://hub.docker.com/r/mailhog/mailhog",
     },
   },
   {
@@ -1156,6 +1270,8 @@ const BASE_APP_TEMPLATES: AppTemplate[] = [
     presentation: {
       icon: "https://cdn.simpleicons.org/redis/DC382D",
       installs: 200,
+      github: "https://github.com/RedisInsight/RedisInsight",
+      "hub-docker": "https://hub.docker.com/r/redislabs/redisinsight",
     },
   },
   {
@@ -1173,6 +1289,8 @@ const BASE_APP_TEMPLATES: AppTemplate[] = [
     presentation: {
       icon: "https://cdn.simpleicons.org/redis/DC382D",
       installs: 180,
+      github: "https://github.com/joeferner/redis-commander",
+      "hub-docker": "https://hub.docker.com/r/rediscommander/redis-commander",
     },
   },
 
@@ -1192,6 +1310,8 @@ const BASE_APP_TEMPLATES: AppTemplate[] = [
     presentation: {
       icon: "https://cdn.simpleicons.org/postgresql/4169E1",
       installs: 270,
+      github: "https://github.com/pgadmin-org/pgadmin4",
+      "hub-docker": "https://hub.docker.com/r/dpage/pgadmin4",
     },
   },
   {
@@ -1209,6 +1329,8 @@ const BASE_APP_TEMPLATES: AppTemplate[] = [
     presentation: {
       icon: "https://cdn.simpleicons.org/adminer/8C7EE0",
       installs: 320,
+      github: "https://github.com/vrana/adminer",
+      "hub-docker": "https://hub.docker.com/_/adminer",
     },
   },
 
@@ -1228,6 +1350,8 @@ const BASE_APP_TEMPLATES: AppTemplate[] = [
     presentation: {
       icon: "https://cdn.simpleicons.org/whatsapp/25D366",
       installs: 80,
+      github: "https://github.com/asternic/wuzapi",
+      "hub-docker": "https://hub.docker.com/r/asternic/wuzapi",
     },
   },
   {
@@ -1247,6 +1371,8 @@ const BASE_APP_TEMPLATES: AppTemplate[] = [
     presentation: {
       icon: "https://cdn.simpleicons.org/whatsapp/25D366",
       installs: 60,
+      github: "https://github.com/devlikeapro/waha",
+      "hub-docker": "https://hub.docker.com/r/devlikeapro/waha",
     },
   },
   {
@@ -1264,6 +1390,8 @@ const BASE_APP_TEMPLATES: AppTemplate[] = [
     presentation: {
       icon: "https://cdn.simpleicons.org/umami/00BFFF",
       installs: 50,
+      github: "https://github.com/umami-software/umami",
+      "hub-docker": "https://hub.docker.com/r/umamisoftware/umami",
     },
   },
 ];

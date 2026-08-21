@@ -598,12 +598,21 @@ const templatePresetSchema = z.object({
   restartPolicy: z.string().optional(),
 });
 
+const templatePresentationSchema = z.object({
+  icon: z.string().optional(),
+  color: z.string().optional(),
+  installs: z.number().optional(),
+  github: z.string().optional(),
+  "hub-docker": z.string().optional(),
+});
+
 const templateSnapshotSchema = z.object({
   id: z.string(),
   name: z.string(),
   desc: z.string(),
   category: z.string(),
   icon: z.string().url().optional(),
+  presentation: templatePresentationSchema.optional(),
   image: z.string().min(1),
   defaultPort: z.string(),
   defaultEnv: z.string(),

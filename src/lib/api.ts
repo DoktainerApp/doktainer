@@ -2861,6 +2861,8 @@ export interface AppTemplate {
     icon?: string;
     color?: string;
     installs?: number;
+    github?: string;
+    "hub-docker"?: string;
   };
   image: string;
   defaultPort: string;

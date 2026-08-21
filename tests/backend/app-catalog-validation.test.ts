@@ -44,6 +44,8 @@ test("generic app template keeps its explicit category", () => {
         icon: "icon.png",
         color: "#f59e0b",
         installs: 42,
+        github: "https://github.com/henrygd/beszel",
+        "hub-docker": "https://hub.docker.com/r/henrygd/beszel",
       },
     },
     "beszel",
@@ -57,6 +59,8 @@ test("generic app template keeps its explicit category", () => {
     icon: "https://raw.githubusercontent.com/DoktainerApp/templates/main/templates/beszel/icon.png",
     color: "#f59e0b",
     installs: 42,
+    github: "https://github.com/henrygd/beszel",
+    "hub-docker": "https://hub.docker.com/r/henrygd/beszel",
   });
 });
 

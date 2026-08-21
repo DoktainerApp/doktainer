@@ -214,13 +214,22 @@ function normalizePresentation(
   const icon = resolveRemoteAssetUrl(presentation.icon, baseUrl);
   const color = asString(presentation.color);
   const installs = asNumber(presentation.installs);
+  const github = asString(presentation.github);
+  const dockerHub =
+    asString(presentation["hub-docker"]) ??
+    asString(presentation.hubDocker) ??
+    asString(presentation.dockerHub);
 
-  if (!icon && !color && installs === undefined) return undefined;
+  if (!icon && !color && installs === undefined && !github && !dockerHub) {
+    return undefined;
+  }
 
   return {
     ...(icon ? { icon } : {}),
     ...(color ? { color } : {}),
     ...(installs !== undefined ? { installs } : {}),
+    ...(github ? { github } : {}),
+    ...(dockerHub ? { "hub-docker": dockerHub } : {}),
   };
 }
 
