@@ -41,6 +41,13 @@ const securityHeaders = [
 const nextConfig: NextConfig = {
   allowedDevOrigins: ["localhost", "127.0.0.1", "192.168.12.11"],
   devIndicators: false,
+  experimental: {
+    // Domain provisioning can include SSH, Nginx validation/reload, and
+    // Certbot work. Keep the same-origin rewrite alive long enough for the
+    // backend to return its structured result instead of a proxy-generated
+    // non-JSON 500 response.
+    proxyTimeout: 5 * 60 * 1000,
+  },
   async rewrites() {
     const backendUrl =
       process.env.INTERNAL_API_URL ||

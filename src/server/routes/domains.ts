@@ -1837,8 +1837,13 @@ export async function domainRoutes(app: FastifyInstance) {
     const willBeSharedNginx = isSharedNginxConfig(nextInput);
     const previousRootDomain = getDomainConfigAnchor([existing.name]);
     const nextRootDomain = getDomainConfigAnchor([nextInput.name]);
-    const previousSharedGroupNames =
+    const shouldReconcilePreviousShared =
       wasSharedNginx &&
+      (!willBeSharedNginx ||
+        existing.serverId !== (nextInput.serverId ?? null) ||
+        previousRootDomain !== nextRootDomain);
+    const previousSharedGroupNames =
+      shouldReconcilePreviousShared &&
       existing.serverId &&
       existing.targetContainerId &&
       existing.targetPort
@@ -1938,7 +1943,7 @@ export async function domainRoutes(app: FastifyInstance) {
     });
 
     if (
-      wasSharedNginx &&
+      shouldReconcilePreviousShared &&
       existing.serverId &&
       existing.targetContainerId &&
       existing.targetPort
