@@ -446,6 +446,80 @@ function extractNginxServerNameDomains(content: string): string[] {
   return Array.from(domains);
 }
 
+export interface NginxDomainTarget {
+  name: string;
+  host: string | null;
+  port: number | null;
+}
+
+function extractNginxServerBlocks(content: string): string[] {
+  const sanitized = content.replace(/^\s*#.*$/gm, "");
+  const blocks: string[] = [];
+  const serverPattern = /\bserver\s*\{/gi;
+
+  for (const match of sanitized.matchAll(serverPattern)) {
+    const matchIndex = match.index ?? -1;
+    const openingBrace = sanitized.indexOf("{", matchIndex);
+    if (openingBrace < 0) continue;
+
+    let depth = 0;
+    let quote: '"' | "'" | null = null;
+    let escaped = false;
+
+    for (let index = openingBrace; index < sanitized.length; index += 1) {
+      const character = sanitized[index];
+
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (character === "\\") {
+        escaped = true;
+        continue;
+      }
+      if (quote) {
+        if (character === quote) quote = null;
+        continue;
+      }
+      if (character === '"' || character === "'") {
+        quote = character;
+        continue;
+      }
+      if (character === "{") {
+        depth += 1;
+      } else if (character === "}") {
+        depth -= 1;
+        if (depth === 0) {
+          blocks.push(sanitized.slice(matchIndex, index + 1));
+          break;
+        }
+      }
+    }
+  }
+
+  return blocks;
+}
+
+export function extractNginxDomainTargets(
+  content: string,
+): NginxDomainTarget[] {
+  const serverBlocks = extractNginxServerBlocks(content);
+  const scopes = serverBlocks.length > 0 ? serverBlocks : [content];
+  const targets = new Map<string, NginxDomainTarget>();
+
+  for (const scope of scopes) {
+    const proxyPassTarget = extractProxyPassTarget(scope);
+    for (const name of extractNginxServerNameDomains(scope)) {
+      const existing = targets.get(name);
+      if (!existing || (!existing.host && proxyPassTarget.host)) {
+        targets.set(name, { name, ...proxyPassTarget });
+      }
+    }
+  }
+
+  return Array.from(targets.values());
+}
+
 async function listNginxDomains(server: Server): Promise<DiscoveredDomain[]> {
   const [configDump, fileDump] = await Promise.all([
     exec(
@@ -501,12 +575,11 @@ async function listNginxDomains(server: Server): Promise<DiscoveredDomain[]> {
       continue;
     }
 
-    const proxyPassTarget = extractProxyPassTarget(content);
     const managedMetadata = extractManagedNginxMetadata(content);
-    for (const domainName of extractNginxServerNameDomains(content)) {
+    for (const target of extractNginxDomainTargets(content)) {
       addDiscoveredDomain(
         domains,
-        domainName,
+        target.name,
         "NGINX",
         "NGINX",
         server.ip,
@@ -517,14 +590,14 @@ async function listNginxDomains(server: Server): Promise<DiscoveredDomain[]> {
           managedConfigMode: managedMetadata.managedConfigMode,
           managedPrimaryDomain: managedMetadata.managedPrimaryDomain,
           containerName:
-            deriveManagedNginxContainerName(path, domainName) ??
-            (proxyPassTarget.host &&
-            !isLocalhostHost(proxyPassTarget.host) &&
-            !isLikelyIpv4Host(proxyPassTarget.host) &&
-            !isLikelyIpv6Host(proxyPassTarget.host)
-              ? proxyPassTarget.host
+            deriveManagedNginxContainerName(path, target.name) ??
+            (target.host &&
+            !isLocalhostHost(target.host) &&
+            !isLikelyIpv4Host(target.host) &&
+            !isLikelyIpv6Host(target.host)
+              ? target.host
               : null),
-          targetPort: proxyPassTarget.port,
+          targetPort: target.port,
         },
       );
     }
