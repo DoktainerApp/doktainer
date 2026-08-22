@@ -4,6 +4,7 @@ import prisma from "../lib/prisma";
 
 export const DEFAULT_DEPLOYMENT_LOCK_TTL_MS = 15 * 60 * 1000;
 export const DEFAULT_DEPLOYMENT_LOCK_HEARTBEAT_MS = 60 * 1000;
+export const DEFAULT_DEPLOYMENT_LOCK_STALE_MS = 2 * 60 * 1000;
 
 export class DeploymentLockConflictError extends Error {
   constructor() {
@@ -15,17 +16,29 @@ export class DeploymentLockConflictError extends Error {
 export async function acquireDeploymentLock(input: {
   containerId: string;
   ttlMs?: number;
+  staleMs?: number;
 }) {
+  const now = new Date();
   const token = randomUUID();
   const expiresAt = new Date(
     Date.now() +
       Math.max(30_000, input.ttlMs ?? DEFAULT_DEPLOYMENT_LOCK_TTL_MS),
   );
+  const staleBefore = new Date(
+    now.getTime() -
+      Math.max(30_000, input.staleMs ?? DEFAULT_DEPLOYMENT_LOCK_STALE_MS),
+  );
 
   try {
     return await prisma.$transaction(async (tx) => {
       const reclaimed = await tx.deploymentLock.updateMany({
-        where: { containerId: input.containerId, expiresAt: { lte: new Date() } },
+        where: {
+          containerId: input.containerId,
+          OR: [
+            { expiresAt: { lte: now } },
+            { updatedAt: { lte: staleBefore } },
+          ],
+        },
         data: { token, expiresAt },
       });
 
@@ -42,6 +55,24 @@ export async function acquireDeploymentLock(input: {
     }
     throw error;
   }
+}
+
+export function isDeploymentLockActive(
+  lock: { expiresAt: Date; updatedAt: Date } | null,
+  options: { now?: Date; staleMs?: number } = {},
+) {
+  if (!lock) return false;
+
+  const now = options.now ?? new Date();
+  const staleMs = Math.max(
+    30_000,
+    options.staleMs ?? DEFAULT_DEPLOYMENT_LOCK_STALE_MS,
+  );
+
+  return (
+    lock.expiresAt.getTime() > now.getTime() &&
+    lock.updatedAt.getTime() > now.getTime() - staleMs
+  );
 }
 
 export async function releaseDeploymentLock(input: {
@@ -126,5 +157,3 @@ export function startDeploymentLockHeartbeat(
     },
   };
 }
-
-

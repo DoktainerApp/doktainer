@@ -42,6 +42,7 @@ import {
   startDeploymentLockHeartbeat,
 } from "../services/deployment-lock.service";
 import { sanitizeDeploymentError } from "../services/deployment-error.service";
+import { reconcileInterruptedRebuild } from "../services/deployment-recovery.service";
 import {
   formatDockerInspectMountBindings,
   type DockerInspectMount as DockerInspectRuntimeMount,
@@ -1766,13 +1767,18 @@ export async function containerRoutes(app: FastifyInstance) {
       );
       const container = await prisma.container.findFirst({
         where: { id, server: { organizationId: req.organizationId! } },
-        select: { id: true },
+        include: { server: true },
       });
       if (!container) {
         return reply
           .status(404)
           .send({ success: false, error: "Container not found" });
       }
+
+      await reconcileInterruptedRebuild({
+        container,
+        inspectRuntime: ssh.dockerInspect,
+      });
 
       const data = await listDeployments({
         containerId: id,
@@ -3805,6 +3811,11 @@ export async function containerRoutes(app: FastifyInstance) {
       let gitAccessToken: string | undefined;
 
       try {
+        await reconcileInterruptedRebuild({
+          container,
+          inspectRuntime: ssh.dockerInspect,
+        });
+
         if (container.sourceType === "APP_INSTALLER") {
           const install = await prisma.appInstall.findFirst({
             where: {
