@@ -470,7 +470,8 @@ body {
   --badge-border: rgba(16, 185, 129, 0.28);
 }
 
-.badge-offline {
+.badge-offline,
+.badge-danger {
   --badge-color: #dc2626;
   --badge-bg: rgba(239, 68, 68, 0.15);
   --badge-border: rgba(239, 68, 68, 0.28);
@@ -489,20 +490,16 @@ body {
 }
 
 .ui-badge {
-  /* --badge-color: var(--text-secondary);
-  --badge-bg: rgba(148, 163, 184, 0.1);
-  --badge-border: rgba(148, 163, 184, 0.5); */
-
   display: inline-flex;
   align-items: center;
   justify-content: center;
   max-width: 100%;
   min-height: 24px;
   padding: 3px 11px;
-  border: 1px solid var(--badge-border);
+  border: 1px solid var(--badge-border, rgba(148, 163, 184, 0.5));
   border-radius: 999px;
-  background: var(--badge-bg);
-  color: var(--badge-color);
+  background: var(--badge-bg, rgba(148, 163, 184, 0.1));
+  color: var(--badge-color, var(--text-secondary));
   font-size: 11px;
   font-weight: 600;
   line-height: 1.25;
