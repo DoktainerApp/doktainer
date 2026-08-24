@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { evaluateDockerHealth } from "../../src/server/services/container-health.service";
 
-test("docker health gate accepts a running image without a healthcheck", () => {
+test("docker health gate keeps a running image without a healthcheck unverified", () => {
   const result = evaluateDockerHealth({ State: { Status: "running" } });
-  assert.equal(result.healthy, true);
-  assert.equal(result.status, "healthy");
+  assert.equal(result.healthy, false);
+  assert.equal(result.status, "running_unverified");
 });
 
 test("docker health gate rejects unhealthy containers", () => {
@@ -27,5 +27,3 @@ test("docker runtime verification keeps polling while a container is restarting"
   assert.equal(result.healthy, false);
   assert.equal(result.status, "starting");
 });
-
-

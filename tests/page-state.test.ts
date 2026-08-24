@@ -7,8 +7,9 @@ import {
   writeCachedPageData,
   storeServerSelection,
 } from "../src/lib/page-state";
+import { sensitiveStorageKeys } from "../src/lib/browser-storage";
 
-const ORGANIZATION_STORAGE_KEY = "vps_active_organization";
+const ORGANIZATION_STORAGE_KEY = sensitiveStorageKeys.organization;
 
 class MemoryStorage implements Storage {
   private store = new Map<string, string>();

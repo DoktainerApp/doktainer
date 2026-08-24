@@ -444,6 +444,20 @@ export function withCommandLogSink<T>(
   );
 }
 
+export function withMutedCommandLog<T>(execute: () => Promise<T>): Promise<T> {
+  return commandLogSink.run(() => undefined, execute);
+}
+
+export function withNonCancellableCommandContext<T>(
+  execute: () => Promise<T>,
+): Promise<T> {
+  const current = commandRunContext.getStore();
+  return commandRunContext.run(
+    { runIdPrefix: current?.runIdPrefix },
+    execute,
+  );
+}
+
 export async function execStrictIsolated(
   server: Server,
   command: string,

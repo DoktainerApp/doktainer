@@ -73,4 +73,49 @@ export function sanitizeDeploymentError(
   return message.slice(0, 800);
 }
 
+export function sanitizeContainerConfigurationError(error: unknown) {
+  const message = redactDeploymentErrorDetails(error);
 
+  if (/minimum memory limit|memory limit.*(?:too small|at least)/i.test(message)) {
+    return "The memory limit is below the minimum supported by the Docker host.";
+  }
+
+  if (/memory.*(?:usage|used).*(?:exceed|larger|greater)|new memory limit.*current/i.test(message)) {
+    return "The memory limit is below the container's current memory usage.";
+  }
+
+  if (/memory.*swap|memoryswap/i.test(message)) {
+    return "Docker rejected the memory limit because it conflicts with the container's existing memory-swap limit.";
+  }
+
+  if (/invalid cpu|minimum cpu|cpu.*(?:too small|at least)/i.test(message)) {
+    return "The CPU limit is outside the range supported by the Docker host.";
+  }
+
+  if (/cgroup|kernel does not support|not supported.*(?:memory|cpu)/i.test(message)) {
+    return "This Docker host does not support updating the requested resource limit on a running container.";
+  }
+
+  if (/command queue timed out|command timed out|timed out after/i.test(message)) {
+    return "The Docker host did not apply the configuration before the operation timed out.";
+  }
+
+  if (/permission denied|docker\.sock|you must be root/i.test(message)) {
+    return "Docker access was denied for the configured SSH user.";
+  }
+
+  const daemonDetail = message.match(/error response from daemon:\s*([^\r\n]+)/i)?.[1];
+  if (daemonDetail) {
+    const safeDetail = daemonDetail
+      .replace(/\b[0-9a-f]{12,64}\b/gi, "[container]")
+      .trim()
+      .slice(0, 400);
+    if (safeDetail) {
+      return `Docker rejected the requested container configuration: ${safeDetail}`;
+    }
+  }
+
+  return sanitizeDeploymentError(error, {
+    fallback: "Failed to apply container configuration",
+  });
+}

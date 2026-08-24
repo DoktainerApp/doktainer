@@ -15,8 +15,16 @@ import {
   formatDockerInspectMountBindings,
   type DockerInspectMount,
 } from "./docker-inspect-format";
+import {
+  orchestratePreparedRuntimeReplacement,
+  resolveCurrentRuntimeSpec,
+  resolveRuntimeReplacementPlan,
+  RollbackRuntimeError,
+  type RuntimeReplacementSpec,
+} from "./deployment-rollback.service";
 
 type DockerInspectRuntime = {
+  Id?: string;
   Config?: {
     Image?: string;
     Env?: string[];
@@ -155,6 +163,7 @@ export async function rebuildAppInstall(options: {
   if (!install.containerName) {
     throw new Error("Install has no container name to rebuild");
   }
+  const containerName = install.containerName;
 
   const dockerStatus = await ssh.getDockerRuntimeStatus(install.server);
   if (!dockerStatus.available) {
@@ -181,6 +190,8 @@ export async function rebuildAppInstall(options: {
   let deploymentLockHeartbeat: ReturnType<
     typeof startDeploymentLockHeartbeat
   > | null = null;
+  let previousRuntime: RuntimeReplacementSpec | null = null;
+  let managedRuntimeFound = false;
 
   try {
     const currentContainer = await prisma.container.findFirst({
@@ -188,9 +199,19 @@ export async function rebuildAppInstall(options: {
         serverId: install.serverId,
         name: { equals: install.containerName, mode: "insensitive" },
       },
-      select: { id: true },
+      select: {
+        id: true,
+        name: true,
+        dockerId: true,
+        image: true,
+        ports: true,
+        envVars: true,
+        volumes: true,
+        restartPolicy: true,
+      },
     });
     if (currentContainer) {
+      managedRuntimeFound = true;
       const lock = await acquireDeploymentLock({ containerId: currentContainer.id });
       deploymentLockToken = lock.token;
       deploymentLockContainerId = currentContainer.id;
@@ -198,12 +219,18 @@ export async function rebuildAppInstall(options: {
         containerId: currentContainer.id,
         token: lock.token,
       });
+      previousRuntime = await resolveCurrentRuntimeSpec({
+        container: {
+          ...currentContainer,
+          server: install.server,
+        },
+      });
       const deployment = await createDeployment({
         containerId: currentContainer.id,
         organizationId: options.organizationId ?? install.server.organizationId,
         serverId: install.serverId,
         userId: options.userId,
-        status: "RUNNING",
+        status: "BUILDING",
         trigger: "REBUILD",
         version: runtimeConfig.image,
         image: runtimeConfig.image,
@@ -225,61 +252,138 @@ export async function rebuildAppInstall(options: {
       usedImageCache = true;
     }
 
-    try {
-      await ssh.dockerAction(install.server, install.containerName, "stop");
-    } catch {
-      // Best effort only.
+    const imageInspect = (await ssh.dockerInspect(
+      install.server,
+      runtimeConfig.image,
+    )) as DockerInspectRuntime;
+    const immutableImage = imageInspect.Id?.trim() || "";
+    if (!/^sha256:[a-f0-9]{64}$/i.test(immutableImage)) {
+      throw new Error(
+        "The rebuilt image could not be resolved to an immutable Docker image ID",
+      );
     }
 
-    try {
-      await ssh.dockerAction(install.server, install.containerName, "rm");
-    } catch {
-      // Best effort only.
-    }
+    const targetRuntime: RuntimeReplacementSpec = previousRuntime
+      ? {
+          ...previousRuntime,
+          image: immutableImage,
+          mountValidation: resolveAppMountValidation(install.appId),
+        }
+      : {
+          image: immutableImage,
+          ports: runtimeConfig.ports,
+          env: runtimeConfig.env,
+          volumes: runtimeConfig.volumes,
+          network: runtimeConfig.network,
+          networks: [runtimeConfig.network],
+          restartPolicy: runtimeConfig.restartPolicy,
+          command: runtimeConfig.command,
+          mountValidation: resolveAppMountValidation(install.appId),
+        };
 
-    const dockerId = await ssh.runContainer(install.server, {
-      name: install.containerName,
-      image: runtimeConfig.image,
-      ports: runtimeConfig.ports,
-      env: runtimeConfig.env,
-      volumes: runtimeConfig.volumes,
-      network: runtimeConfig.network,
-      restartPolicy: runtimeConfig.restartPolicy,
-      command: runtimeConfig.command,
-      mountValidation: resolveAppMountValidation(install.appId),
-    });
-
-    const normalizedDockerId = dockerId.trim().slice(0, 12);
-
-    deploymentLockHeartbeat?.assertOwned();
-
-    await prisma.container.updateMany({
-      where: {
-        serverId: install.serverId,
-        name: { equals: install.containerName, mode: "insensitive" },
-      },
-      data: {
-        image: runtimeConfig.image,
-        status: "RUNNING",
-        dockerId: normalizedDockerId || null,
-      },
-    });
-
-    const updated = await prisma.appInstall.update({
-      where: { id: install.id },
-      data: { status: "RUNNING", error: null },
-      include: {
-        server: { select: { name: true, ip: true, organizationId: true } },
-      },
-    });
-
-    if (deploymentId) {
-      await updateDeployment(deploymentId, {
-        status: "SUCCESS",
-        completedAt: new Date(),
-        image: runtimeConfig.image,
-      });
-    }
+    const updated =
+      currentContainer && deploymentId && previousRuntime
+        ? (
+            await (async () => {
+              const plan = await resolveRuntimeReplacementPlan({
+                containerId: currentContainer.id,
+                serverId: install.serverId,
+                targetRuntime,
+              });
+              await updateDeployment(deploymentId, {
+                status: "BUILDING",
+                image: runtimeConfig.image,
+                imageDigest: immutableImage,
+                strategy: plan.recordedStrategy,
+                eventMessage:
+                  "Latest image prepared; handing runtime replacement to the deployment orchestrator.",
+              });
+              return orchestratePreparedRuntimeReplacement({
+                container: {
+                  id: currentContainer.id,
+                  serverId: install.serverId,
+                  name: currentContainer.name,
+                  dockerId: currentContainer.dockerId,
+                  server: install.server,
+                },
+                deploymentId,
+                operationLabel: "rebuild",
+                targetRuntime,
+                previousRuntime,
+                plan,
+                finalize: async ({ dockerId }) => {
+                  deploymentLockHeartbeat?.assertOwned();
+                  await prisma.container.update({
+                    where: { id: currentContainer.id },
+                    data: {
+                      image: runtimeConfig.image,
+                      status: "RUNNING",
+                      dockerId: dockerId.trim().slice(0, 12) || null,
+                    },
+                  });
+                  const finalizedInstall = await prisma.appInstall.update({
+                    where: { id: install.id },
+                    data: { status: "RUNNING", error: null },
+                    include: {
+                      server: {
+                        select: { name: true, ip: true, organizationId: true },
+                      },
+                    },
+                  });
+                  await updateDeployment(deploymentId!, {
+                    status: "SUCCESS",
+                    completedAt: new Date(),
+                    image: runtimeConfig.image,
+                    imageDigest: immutableImage,
+                    configSnapshot: {
+                      ...targetRuntime,
+                      image: runtimeConfig.image,
+                      imageDigest: immutableImage,
+                    },
+                  });
+                  return finalizedInstall;
+                },
+              });
+            })()
+          ).result
+        : await (async () => {
+            for (const action of ["stop", "rm"] as const) {
+              await ssh
+                .dockerAction(install.server, containerName, action)
+                .catch(() => undefined);
+            }
+            const dockerId = await ssh.runContainer(install.server, {
+              name: containerName,
+              image: immutableImage,
+              ports: runtimeConfig.ports,
+              env: runtimeConfig.env,
+              volumes: runtimeConfig.volumes,
+              network: runtimeConfig.network,
+              restartPolicy: runtimeConfig.restartPolicy,
+              command: runtimeConfig.command,
+              mountValidation: resolveAppMountValidation(install.appId),
+            });
+            await prisma.container.updateMany({
+              where: {
+                serverId: install.serverId,
+                name: { equals: containerName, mode: "insensitive" },
+              },
+              data: {
+                image: runtimeConfig.image,
+                status: "RUNNING",
+                dockerId: dockerId.trim().slice(0, 12) || null,
+              },
+            });
+            return prisma.appInstall.update({
+              where: { id: install.id },
+              data: { status: "RUNNING", error: null },
+              include: {
+                server: {
+                  select: { name: true, ip: true, organizationId: true },
+                },
+              },
+            });
+          })();
 
     await auditLog({
       userId: options.userId,
@@ -331,26 +435,51 @@ export async function rebuildAppInstall(options: {
     }
     const message =
       error instanceof Error ? error.message : "Failed to rebuild app";
+    const runtimeError =
+      error instanceof RollbackRuntimeError ? error : null;
+    const runtimePreserved =
+      managedRuntimeFound && runtimeError?.recoveryMode !== "FAILED";
 
     await prisma.appInstall.update({
       where: { id: install.id },
-      data: { status: "FAILED", error: message },
+      data: {
+        status: runtimePreserved ? "RUNNING" : "FAILED",
+        error: message,
+      },
     });
 
-    await prisma.container.updateMany({
-      where: {
-        serverId: install.serverId,
-        name: { equals: install.containerName, mode: "insensitive" },
-      },
-      data: { status: "ERROR" },
-    });
+    if (runtimePreserved) {
+      if (runtimeError?.recoveryDockerId && deploymentLockContainerId) {
+        await prisma.container.update({
+          where: { id: deploymentLockContainerId },
+          data: {
+            status: "RUNNING",
+            dockerId:
+              runtimeError.recoveryDockerId.trim().slice(0, 12) || undefined,
+          },
+        });
+      }
+    } else {
+      await prisma.container.updateMany({
+        where: {
+          serverId: install.serverId,
+          name: { equals: install.containerName, mode: "insensitive" },
+        },
+        data: { status: "ERROR" },
+      });
+    }
 
     if (deploymentId) {
       await updateDeployment(deploymentId, {
-        status: "FAILED",
+        status: runtimePreserved ? "FAILED_ROLLED_BACK" : "FAILED",
         error: message,
         completedAt: new Date(),
         image: runtimeConfig.image,
+        rollbackReason: runtimePreserved
+          ? runtimeError?.recoveryMode === "RECREATED"
+            ? "Previous runtime was recreated after rebuild failure."
+            : "Rebuild failed before the previous runtime was removed."
+          : null,
       }).catch(() => undefined);
     }
 

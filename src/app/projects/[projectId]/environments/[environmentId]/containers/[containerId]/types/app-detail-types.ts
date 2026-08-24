@@ -22,8 +22,10 @@ export interface AppMetric {
 export interface AppAction {
   id:
     | "open"
+    | "edit"
     | "deploy"
     | "restart"
+    | "redeploy"
     | "rebuild"
     | "stop"
     | "start"
@@ -33,6 +35,8 @@ export interface AppAction {
   label: string;
   icon: LucideIcon;
   tone: "primary" | "ghost" | "danger";
+  disabled?: boolean;
+  disabledReason?: string;
 }
 
 export interface DeploymentSummary {
@@ -386,6 +390,7 @@ export interface AppDetail {
   name: string;
   image: string;
   status: string;
+  managementLabel: "Doktainer managed" | "Docker import";
   path: string;
   projectName: string;
   environmentName: string;

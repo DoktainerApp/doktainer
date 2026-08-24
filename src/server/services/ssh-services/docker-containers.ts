@@ -3,7 +3,7 @@ import { randomBytes } from "crypto";
 import { posix as pathPosix } from "path";
 import { TextDecoder } from "util";
 import { Server } from "@prisma/client";
-import { execStrict } from "./commands";
+import { execStrict, withMutedCommandLog } from "./commands";
 import {
   DOCKER_ACCESS_DENIED_MESSAGE,
   execDocker,
@@ -237,6 +237,18 @@ function validatePortMapping(entry: string): string {
     if (!/^(?:\d{1,3}\.){3}\d{1,3}$/.test(hostIp)) {
       throw new Error(`Invalid host IP in port mapping: ${entry}`);
     }
+    if (!hostPort) {
+      if (hostIp !== "127.0.0.1") {
+        throw new Error(
+          "Random host ports may only bind to the loopback address",
+        );
+      }
+      parsePortNumber(containerPort, "Container port");
+      return `${hostIp}::${containerPort}/${protocol}`.replace(
+        /\/tcp$/,
+        protocol === "tcp" && !entry.includes("/") ? "" : "/tcp",
+      );
+    }
     parsePortNumber(hostPort, "Host port");
     parsePortNumber(containerPort, "Container port");
     return `${hostIp}:${hostPort}:${containerPort}/${protocol}`.replace(
@@ -434,6 +446,8 @@ export function buildDockerRunCommand(opts: {
   restartPolicy: string;
   volumes?: string;
   network?: string;
+  cpuLimit?: number;
+  memoryLimitMb?: number;
   entrypoint?: string;
   commandArgs?: string[];
   command?: string;
@@ -452,6 +466,28 @@ export function buildDockerRunCommand(opts: {
   const network = validateNetworkName(opts.network);
   if (network) {
     args.push("--network", network);
+  }
+
+  if (opts.cpuLimit !== undefined) {
+    if (!Number.isFinite(opts.cpuLimit) || opts.cpuLimit < 0 || opts.cpuLimit > 256) {
+      throw new Error("CPU limit must be between 0 and 256");
+    }
+    if (opts.cpuLimit > 0) {
+      args.push("--cpus", String(opts.cpuLimit));
+    }
+  }
+
+  if (opts.memoryLimitMb !== undefined) {
+    if (
+      !Number.isInteger(opts.memoryLimitMb) ||
+      opts.memoryLimitMb < 0 ||
+      opts.memoryLimitMb > 1_048_576
+    ) {
+      throw new Error("Memory limit must be an integer between 0 and 1048576 MB");
+    }
+    if (opts.memoryLimitMb > 0) {
+      args.push("--memory", `${opts.memoryLimitMb}m`);
+    }
   }
 
   const entrypoint = opts.entrypoint?.trim();
@@ -925,6 +961,17 @@ export type GitBuildType =
   | "DOCKERFILE"
   | "COMPOSE";
 
+export type PreparedGitRuntime = {
+  image: string;
+  ports: string;
+  env: string;
+  volumes: string;
+  network: string;
+  restartPolicy: string;
+  entrypoint?: string;
+  commandArgs?: string[];
+};
+
 async function execContainerShell(
   server: Server,
   containerId: string,
@@ -1012,10 +1059,12 @@ export async function dockerInspect(
   server: Server,
   containerId: string,
 ): Promise<DockerContainerInspect> {
-  const stdout = await execDockerStrict(
-    server,
-    `docker inspect ${escapeShellArg(containerId)}`,
-    shortDockerCommandTimeout(DOCKER_INSPECT_TIMEOUT_MS),
+  const stdout = await withMutedCommandLog(() =>
+    execDockerStrict(
+      server,
+      `docker inspect ${escapeShellArg(containerId)}`,
+      shortDockerCommandTimeout(DOCKER_INSPECT_TIMEOUT_MS),
+    ),
   );
   const parsed = parseDockerJson<DockerContainerInspect[]>(
     stdout,
@@ -1169,12 +1218,123 @@ export async function dockerRename(
   );
 }
 
+export type DockerContainerUpdateOptions = {
+  restartPolicy?: string;
+  cpuLimit?: number;
+  memoryLimitMb?: number;
+  memorySwapLimitMb?: number;
+};
+
+export function buildDockerUpdateCommand(
+  containerId: string,
+  opts: DockerContainerUpdateOptions,
+): string | null {
+  const args: string[] = [];
+  if (opts.restartPolicy !== undefined) {
+    args.push("--restart", escapeShellArg(validateRestartPolicy(opts.restartPolicy)));
+  }
+  if (opts.cpuLimit !== undefined) {
+    if (!Number.isFinite(opts.cpuLimit) || opts.cpuLimit < 0 || opts.cpuLimit > 256) {
+      throw new Error("CPU limit must be between 0 and 256");
+    }
+    args.push("--cpus", escapeShellArg(String(opts.cpuLimit)));
+  }
+  if (opts.memoryLimitMb !== undefined) {
+    if (
+      !Number.isInteger(opts.memoryLimitMb) ||
+      opts.memoryLimitMb < 0 ||
+      opts.memoryLimitMb > 1_048_576
+    ) {
+      throw new Error("Memory limit must be a whole number between 0 and 1048576 MB");
+    }
+    args.push(
+      "--memory",
+      escapeShellArg(opts.memoryLimitMb === 0 ? "0" : `${opts.memoryLimitMb}m`),
+    );
+  }
+  if (opts.memorySwapLimitMb !== undefined) {
+    if (
+      !Number.isInteger(opts.memorySwapLimitMb) ||
+      opts.memorySwapLimitMb < -1 ||
+      opts.memorySwapLimitMb > 2_097_152
+    ) {
+      throw new Error(
+        "Memory-swap limit must be -1 or a whole number between 0 and 2097152 MB",
+      );
+    }
+    if (
+      opts.memoryLimitMb !== undefined &&
+      opts.memoryLimitMb > 0 &&
+      opts.memorySwapLimitMb > 0 &&
+      opts.memorySwapLimitMb < opts.memoryLimitMb
+    ) {
+      throw new Error("Memory-swap limit cannot be lower than memory limit");
+    }
+    args.push(
+      "--memory-swap",
+      escapeShellArg(
+        opts.memorySwapLimitMb === -1
+          ? "-1"
+          : opts.memorySwapLimitMb === 0
+            ? "0"
+            : `${opts.memorySwapLimitMb}m`,
+      ),
+    );
+  }
+  if (args.length === 0) return null;
+
+  return `docker update ${args.join(" ")} ${escapeShellArg(containerId)}`;
+}
+
+export async function dockerUpdateContainer(
+  server: Server,
+  containerId: string,
+  opts: DockerContainerUpdateOptions,
+): Promise<void> {
+  const command = buildDockerUpdateCommand(containerId, opts);
+  if (!command) return;
+
+  await execDockerStrict(
+    server,
+    command,
+    shortDockerCommandTimeout(DOCKER_ACTION_TIMEOUT_MS),
+  );
+}
+
+export async function dockerConnectNetwork(
+  server: Server,
+  containerId: string,
+  networkName: string,
+): Promise<void> {
+  const network = validateNetworkName(networkName);
+  if (!network) throw new Error("Network name is required");
+  await execDockerStrict(
+    server,
+    `docker network connect ${escapeShellArg(network)} ${escapeShellArg(containerId)}`,
+    shortDockerCommandTimeout(DOCKER_ACTION_TIMEOUT_MS),
+  );
+}
+
+export async function dockerDisconnectNetwork(
+  server: Server,
+  containerId: string,
+  networkName: string,
+): Promise<void> {
+  const network = validateNetworkName(networkName);
+  if (!network) throw new Error("Network name is required");
+  await execDockerStrict(
+    server,
+    `docker network disconnect ${escapeShellArg(network)} ${escapeShellArg(containerId)}`,
+    shortDockerCommandTimeout(DOCKER_ACTION_TIMEOUT_MS),
+  );
+}
+
 export async function getContainerMainProcessWorkingDirectory(
   server: Server,
   containerId: string,
 ): Promise<string | null> {
   const script = [
-    'CWD=$(readlink -f /proc/1/cwd 2>/dev/null || true)',
+    "CWD=$(readlink -f /proc/1/cwd 2>/dev/null || true)",
     'if [ -z "$CWD" ] || [ ! -d "$CWD" ]; then exit 0; fi',
     'CWD_B64=$(printf "%s" "$CWD" | base64 | tr -d "\\n")',
     'printf "__CWD__\t%s\n" "$CWD_B64"',
@@ -1542,6 +1702,8 @@ export async function runContainer(
     restartPolicy: string;
     volumes?: string;
     network?: string;
+    cpuLimit?: number;
+    memoryLimitMb?: number;
     entrypoint?: string;
     commandArgs?: string[];
     command?: string;
@@ -2118,7 +2280,7 @@ async function buildImageWithNixpacks(
     "fi",
     ...(buildEnvs.length > 0
       ? [
-          "echo \"[doktainer] Nixpacks build env overrides:\"",
+          'echo "[doktainer] Nixpacks build env overrides:"',
           ...buildEnvs.map(
             (value) => `printf "  - %s\\n" ${escapeShellArg(value)}`,
           ),
@@ -2245,10 +2407,7 @@ async function inspectSourceProject(
         const separatorIndex = line.indexOf("=");
         const key = line.slice(0, separatorIndex);
         const value = line.slice(separatorIndex + 1);
-        return [
-          key,
-          key === "PHP_REQUIRE" ? value : value === "1",
-        ];
+        return [key, key === "PHP_REQUIRE" ? value : value === "1"];
       }),
   ) as Record<string, string | boolean>;
 
@@ -2520,6 +2679,18 @@ export async function buildAndRunContainerFromDockerfileContent(
   };
 }
 
+export function toImmutableBuildImageTag(imageTag: string, commitSha: string) {
+  const suffix = commitSha.trim().slice(0, 12).toLowerCase();
+  if (!/^[a-f0-9]{7,12}$/.test(suffix)) {
+    throw new Error("A valid Git commit SHA is required for an immutable rebuild image");
+  }
+  const lastSlash = imageTag.lastIndexOf("/");
+  const lastColon = imageTag.lastIndexOf(":");
+  const repository =
+    lastColon > lastSlash ? imageTag.slice(0, lastColon) : imageTag;
+  return `${repository}:git-${suffix}`;
+}
+
 export async function deployContainerFromGitSource(
   server: Server,
   opts: {
@@ -2544,6 +2715,8 @@ export async function deployContainerFromGitSource(
     network?: string;
     deploymentPath?: string;
     composeEnvFiles?: ComposeEnvFileOverride[];
+    startRuntime?: boolean;
+    immutableImageTag?: boolean;
   },
 ): Promise<{
   deploymentPath: string;
@@ -2551,6 +2724,7 @@ export async function deployContainerFromGitSource(
   imageTag?: string;
   composeFilePath?: string;
   commitSha: string;
+  preparedRuntime?: PreparedGitRuntime;
 }> {
   const projectName = sanitizeProjectName(opts.projectName);
   const deploymentPath =
@@ -2568,7 +2742,7 @@ export async function deployContainerFromGitSource(
   const dockerContextPath = normalizeDockerBuildContextPath(
     opts.dockerContextPath || (buildType === "DOCKERFILE" ? buildPath : "."),
   );
-  const imageTag =
+  const requestedImageTag =
     opts.imageTag?.trim() ||
     `doktainer/${sanitizeProjectName(projectName)}:latest`;
   const runOverride = resolveRunOverride(opts.startCommand);
@@ -2622,6 +2796,10 @@ export async function deployContainerFromGitSource(
       `Repository was cloned but its commit SHA could not be resolved: ${formatDeploymentErrorMessage(error)}`,
     );
   }
+
+  const imageTag = opts.immutableImageTag
+    ? toImmutableBuildImageTag(requestedImageTag, commitSha)
+    : requestedImageTag;
 
   if (buildType === "COMPOSE") {
     try {
@@ -2740,27 +2918,34 @@ export async function deployContainerFromGitSource(
       ? ensureLaravelRuntimeEnv(opts.env)
       : opts.env;
 
-    const dockerId = await runContainer(server, {
-      name: opts.containerName?.trim() || projectName,
+    const preparedRuntime: PreparedGitRuntime = {
       image: imageTag,
-      ports: autoPorts,
-      env: runtimeEnv,
+      ports: autoPorts ?? "",
+      env: runtimeEnv ?? "",
       restartPolicy: opts.restartPolicy?.trim() || "unless-stopped",
-      volumes: opts.volumes,
-      network: opts.network,
+      volumes: opts.volumes ?? "",
+      network: opts.network?.trim() || "bridge",
       entrypoint: shouldApplyRuntimeOverride
         ? runOverride?.entrypoint
         : undefined,
       commandArgs: shouldApplyRuntimeOverride
         ? runOverride?.commandArgs
         : undefined,
-    });
+    };
+    const dockerId =
+      opts.startRuntime === false
+        ? undefined
+        : await runContainer(server, {
+            name: opts.containerName?.trim() || projectName,
+            ...preparedRuntime,
+          });
 
     return {
       deploymentPath,
       dockerId,
       imageTag,
       commitSha,
+      preparedRuntime,
     };
   }
 
@@ -2852,21 +3037,28 @@ export async function deployContainerFromGitSource(
       ? ensureLaravelRuntimeEnv(opts.env)
       : opts.env;
 
-    const dockerId = await runContainer(server, {
-      name: opts.containerName?.trim() || projectName,
+    const preparedRuntime: PreparedGitRuntime = {
       image: imageTag,
-      ports: autoPorts,
-      env: runtimeEnv,
+      ports: autoPorts ?? "",
+      env: runtimeEnv ?? "",
       restartPolicy: opts.restartPolicy?.trim() || "unless-stopped",
-      volumes: opts.volumes,
-      network: opts.network,
-    });
+      volumes: opts.volumes ?? "",
+      network: opts.network?.trim() || "bridge",
+    };
+    const dockerId =
+      opts.startRuntime === false
+        ? undefined
+        : await runContainer(server, {
+            name: opts.containerName?.trim() || projectName,
+            ...preparedRuntime,
+          });
 
     return {
       deploymentPath,
       dockerId,
       imageTag,
       commitSha,
+      preparedRuntime,
     };
   }
 
@@ -2885,27 +3077,34 @@ export async function deployContainerFromGitSource(
       defaultPort: "80",
     });
 
-    const dockerId = await runContainer(server, {
-      name: opts.containerName?.trim() || projectName,
+    const preparedRuntime: PreparedGitRuntime = {
       image: imageTag,
-      ports: autoPorts,
-      env: opts.env,
+      ports: autoPorts ?? "",
+      env: opts.env ?? "",
       restartPolicy: opts.restartPolicy?.trim() || "unless-stopped",
-      volumes: opts.volumes,
-      network: opts.network,
+      volumes: opts.volumes ?? "",
+      network: opts.network?.trim() || "bridge",
       entrypoint: shouldApplyRuntimeOverride
         ? runOverride?.entrypoint
         : undefined,
       commandArgs: shouldApplyRuntimeOverride
         ? runOverride?.commandArgs
         : undefined,
-    });
+    };
+    const dockerId =
+      opts.startRuntime === false
+        ? undefined
+        : await runContainer(server, {
+            name: opts.containerName?.trim() || projectName,
+            ...preparedRuntime,
+          });
 
     return {
       deploymentPath,
       dockerId,
       imageTag,
       commitSha,
+      preparedRuntime,
     };
   }
 
@@ -2951,26 +3150,33 @@ export async function deployContainerFromGitSource(
     exposedPorts: await inspectImageExposedPorts(server, imageTag),
   });
 
-  const dockerId = await runContainer(server, {
-    name: opts.containerName?.trim() || projectName,
+  const preparedRuntime: PreparedGitRuntime = {
     image: imageTag,
-    ports: autoPorts,
-    env: opts.env,
+    ports: autoPorts ?? "",
+    env: opts.env ?? "",
     restartPolicy: opts.restartPolicy?.trim() || "unless-stopped",
-    volumes: opts.volumes,
-    network: opts.network,
+    volumes: opts.volumes ?? "",
+    network: opts.network?.trim() || "bridge",
     entrypoint: shouldApplyRuntimeOverride
       ? runOverride?.entrypoint
       : undefined,
     commandArgs: shouldApplyRuntimeOverride
       ? runOverride?.commandArgs
       : undefined,
-  });
+  };
+  const dockerId =
+    opts.startRuntime === false
+      ? undefined
+      : await runContainer(server, {
+          name: opts.containerName?.trim() || projectName,
+          ...preparedRuntime,
+        });
 
   return {
     deploymentPath,
     dockerId,
     imageTag,
     commitSha,
+    preparedRuntime,
   };
 }

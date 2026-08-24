@@ -125,7 +125,7 @@ test("deployment and rollback boundaries use the centralized sanitizer before pe
 
   assert.match(
     rollbackService,
-    /const message = sanitizeDeploymentError\(error,[\s\S]*?updateDeployment\(rollback\.id,[\s\S]*?error: message/,
+    /const message = sanitizeDeploymentError\(error,[\s\S]*?updateDeployment\(deployment\.id,[\s\S]*?error: message/,
   );
   assert.match(
     containerRoutes,
@@ -138,3 +138,19 @@ test("deployment and rollback boundaries use the centralized sanitizer before pe
   assert.match(containerHealth, /lastReason = sanitizeDeploymentError\(error/);
 });
 
+test("internal Docker inspect output is muted from streamed process-job logs", () => {
+  const dockerContainers = readFileSync(
+    "src/server/services/ssh-services/docker-containers.ts",
+    "utf8",
+  );
+  const commands = readFileSync(
+    "src/server/services/ssh-services/commands.ts",
+    "utf8",
+  );
+
+  assert.match(commands, /export function withMutedCommandLog/);
+  assert.match(
+    dockerContainers,
+    /dockerInspect[\s\S]*?withMutedCommandLog\(\(\) =>[\s\S]*?docker inspect/,
+  );
+});

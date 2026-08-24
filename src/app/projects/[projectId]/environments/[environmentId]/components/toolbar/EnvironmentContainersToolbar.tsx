@@ -14,6 +14,7 @@ interface EnvironmentContainersToolbarProps {
   search: string;
   statusFilter: string;
   syncing: boolean;
+  canManage: boolean;
   onSearchChange: (value: string) => void;
   onStatusFilterChange: (value: string) => void;
   onSync: () => void | Promise<void>;
@@ -26,6 +27,7 @@ export default function EnvironmentContainersToolbar({
   search,
   statusFilter,
   syncing,
+  canManage,
   onSearchChange,
   onStatusFilterChange,
   onSync,
@@ -95,13 +97,14 @@ export default function EnvironmentContainersToolbar({
         <option value="STARTING">Starting</option>
         <option value="ERROR">Error</option>
       </select>
-      <div className="ui-toolbar-actions">
+      {canManage ? <div className="ui-toolbar-actions">
         <button
           type="button"
           className="btn btn-ghost"
           style={{ fontSize: 12 }}
           onClick={() => void onSync()}
           disabled={syncing}
+          title="Refresh Docker inventory only; deployment revision history is unchanged."
         >
           {syncing ? (
             <Loader2 size={12} className="animate-spin" />
@@ -191,7 +194,7 @@ export default function EnvironmentContainersToolbar({
             </div>
           ) : null}
         </div>
-      </div>
+      </div> : null}
     </section>
   );
 }

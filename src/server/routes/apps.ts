@@ -1220,7 +1220,15 @@ export async function appsRoutes(app: FastifyInstance) {
             data: {
               status: "FAILED",
               error: errorMessage,
+              failureReason: errorMessage,
               completedAt: new Date(),
+              events: {
+                create: {
+                  status: "FAILED",
+                  level: "ERROR",
+                  message: "App installation failed.",
+                },
+              },
             },
           }),
         ]);

@@ -1,4 +1,4 @@
-import { CheckCircle2 } from "lucide-react";
+import { AlertTriangle, CheckCircle2, CircleHelp } from "lucide-react";
 import type { HealthSummary } from "../../types/app-detail-types";
 import InfoRows from "./InfoRows";
 import PanelShell from "./PanelShell";
@@ -8,6 +8,16 @@ interface HealthPanelProps {
 }
 
 export default function HealthPanel({ health }: HealthPanelProps) {
+  const normalizedStatus = health.status.toLowerCase();
+  const isHealthy = normalizedStatus === "healthy";
+  const isWarning =
+    normalizedStatus === "unhealthy" || normalizedStatus === "starting";
+  const StatusIcon = isHealthy
+    ? CheckCircle2
+    : isWarning
+      ? AlertTriangle
+      : CircleHelp;
+
   return (
     <PanelShell title="Health">
       <InfoRows
@@ -17,13 +27,17 @@ export default function HealthPanel({ health }: HealthPanelProps) {
             value: (
               <span
                 style={{
-                  color: "var(--accent-green)",
+                  color: isHealthy
+                    ? "var(--accent-green)"
+                    : isWarning
+                      ? "var(--accent-amber)"
+                      : "var(--text-muted)",
                   display: "inline-flex",
                   alignItems: "center",
                   gap: 5,
                 }}
               >
-                <CheckCircle2 size={13} />
+                <StatusIcon size={13} />
                 {health.status}
               </span>
             ),

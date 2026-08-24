@@ -49,7 +49,7 @@ export interface DockerNetworkInspect {
   raw: Record<string, unknown>;
 }
 
-export async function listDockerNetworks(
+export async function listDockerNetworkSummaries(
   server: Server,
 ): Promise<DockerNetworkInfo[]> {
   const networkList = await execDockerStrict(
@@ -60,7 +60,7 @@ export async function listDockerNetworks(
 
   if (!networkList.trim()) return [];
 
-  const rawNetworks = networkList
+  return networkList
     .trim()
     .split("\n")
     .map((line) => {
@@ -69,9 +69,17 @@ export async function listDockerNetworks(
         name: name?.trim() || "",
         driver: driver?.trim() || "bridge",
         scope: scope?.trim() || "local",
-      };
+        containers: 0,
+      } satisfies DockerNetworkInfo;
     })
-    .filter((item) => item.name);
+    .filter((item) => item.name)
+    .sort((left, right) => left.name.localeCompare(right.name));
+}
+
+export async function listDockerNetworks(
+  server: Server,
+): Promise<DockerNetworkInfo[]> {
+  const rawNetworks = await listDockerNetworkSummaries(server);
 
   const inspected = await Promise.all(
     rawNetworks.map(async (network) => {

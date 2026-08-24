@@ -1903,6 +1903,82 @@ export interface Container {
   ramUsage?: string | null;
   createdAt: string;
   server?: { name: string; ip: string };
+  deploymentSummary?: {
+    activeRevision: DeploymentRecord | null;
+    currentOperation: DeploymentRecord | null;
+    latestAttempt: DeploymentRecord | null;
+    lastError: string | null;
+    redeployAvailable: boolean;
+    rollbackAvailable: boolean;
+  } | null;
+  capabilities?: ContainerCapabilities;
+}
+
+export interface ContainerCapability {
+  available: boolean;
+  reason: string | null;
+}
+
+export interface ContainerCapabilities {
+  managed: boolean;
+  managementLabel: "Doktainer managed" | "Docker import";
+  editConfiguration: ContainerCapability;
+  redeploy: ContainerCapability;
+  rebuild: ContainerCapability & {
+    mode: "ORCHESTRATED_SINGLE_CONTAINER" | "COMPOSE_RECREATE" | null;
+  };
+  rollback: ContainerCapability;
+}
+
+export interface ContainerConfigurationDraft {
+  name: string;
+  restartPolicy: "no" | "always" | "unless-stopped" | "on-failure";
+  cpuLimit: number;
+  memoryLimitMb: number;
+  networks: string[];
+}
+
+export interface ContainerConfiguration extends ContainerConfigurationDraft {
+  primaryNetwork: string | null;
+}
+
+export interface ContainerConfigurationPlan {
+  current: ContainerConfiguration;
+  draft: ContainerConfigurationDraft;
+  changes: Array<{
+    field: keyof ContainerConfigurationDraft;
+    label: string;
+    before: string | number | string[];
+    after: string | number | string[];
+    impact: "LIVE_UPDATE" | "LIVE_DISRUPTIVE";
+  }>;
+  addedNetworks: string[];
+  removedNetworks: string[];
+  warnings: string[];
+  blockedReasons: string[];
+  strategy: "NO_CHANGE" | "LIVE_UPDATE";
+  requiresDowntime: false;
+  expectedConfigRevision: string;
+}
+
+export interface ContainerConfigurationEditorData {
+  current: ContainerConfiguration;
+  draft: ContainerConfigurationDraft;
+  expectedConfigRevision: string;
+  availableNetworks: Array<{ name: string; driver: string; scope: string }>;
+  editableFields: Array<keyof ContainerConfigurationDraft>;
+  deferredFields: string[];
+  blockedReasons: string[];
+}
+
+export interface ContainerRedeployPlan {
+  revisionDeploymentId: string;
+  strategy: string;
+  blocked: boolean;
+  proxyTrafficContinuous: boolean;
+  directPortInterruptionPossible: boolean;
+  overlappingRuntime: boolean;
+  reason: string;
 }
 
 export interface ContainerProcess {
@@ -1963,16 +2039,25 @@ export interface ContainerDetails {
 
 export type DeploymentStatus =
   | "QUEUED"
+  | "BUILDING"
   | "RUNNING"
+  | "VALIDATING"
+  | "SWITCHING"
+  | "ACTIVE"
   | "SUCCESS"
   | "FAILED"
+  | "FAILED_ROLLED_BACK"
   | "CANCELLED"
-  | "ROLLED_BACK";
+  | "ROLLBACK_RUNNING"
+  | "ROLLED_BACK"
+  | "SUPERSEDED";
 
 export type DeploymentTrigger =
   | "MANUAL"
   | "GIT_WEBHOOK"
   | "REBUILD"
+  | "REDEPLOY"
+  | "CONFIG_APPLY"
   | "ROLLBACK"
   | "APP_INSTALLER";
 
@@ -1987,12 +2072,41 @@ export interface DeploymentRecord {
   branch: string | null;
   image: string | null;
   imageDigest: string | null;
+  projectId?: string | null;
+  environmentId?: string | null;
+  sourceSnapshot?: Record<string, unknown> | null;
   configSnapshot?: Record<string, unknown>;
+  configRevision?: string | null;
+  strategy?: string | null;
+  candidateRef?: string | null;
+  previousDeploymentId?: string | null;
+  rollbackArtifactAvailable?: boolean;
+  failureReason?: string | null;
+  rollbackReason?: string | null;
   error: string | null;
   startedAt: string | null;
   completedAt: string | null;
   createdAt: string;
+  updatedAt?: string;
   user: { id: string; name: string } | null;
+}
+
+export interface DeploymentEventRecord {
+  id: string;
+  deploymentId: string;
+  status: DeploymentStatus;
+  level: "INFO" | "WARNING" | "ERROR";
+  message: string;
+  metadata: Record<string, unknown> | null;
+  createdAt: string;
+}
+
+export interface ContainerDeploymentState {
+  activeRevision: DeploymentRecord | null;
+  currentOperation: DeploymentRecord | null;
+  latestAttempt: DeploymentRecord | null;
+  rollbackRevision: DeploymentRecord | null;
+  lock: { expiresAt: string; updatedAt: string } | null;
 }
 
 export interface ContainerMetrics {
@@ -2146,6 +2260,35 @@ export const containers = {
   },
   get: (id: string) =>
     get<{ success: boolean; data: Container }>(`/containers/${id}`),
+  configuration: (id: string) =>
+    get<{ success: boolean; data: ContainerConfigurationEditorData }>(
+      `/containers/${id}/configuration`,
+      { timeoutMs: 45000 },
+    ),
+  previewConfiguration: (id: string, draft: ContainerConfigurationDraft) =>
+    post<{ success: boolean; data: ContainerConfigurationPlan }>(
+      `/containers/${id}/configuration/preview`,
+      { draft },
+      { timeoutMs: 45000 },
+    ),
+  applyConfiguration: (
+    id: string,
+    body: {
+      draft: ContainerConfigurationDraft;
+      expectedConfigRevision: string;
+      idempotencyKey: string;
+    },
+  ) =>
+    post<{
+      success: boolean;
+      data: Container;
+      meta: {
+        deploymentId: string;
+        configRevision: string | null;
+        plan: ContainerConfigurationPlan;
+      };
+      message?: string;
+    }>(`/containers/${id}/configuration/apply`, body, { timeoutMs: 90000 }),
   deployments: (id: string, params?: { page?: number; pageSize?: number }) => {
     const qs = new URLSearchParams();
     if (params?.page) qs.set("page", String(params.page));
@@ -2160,6 +2303,31 @@ export const containers = {
         pageSize: number;
       };
     }>(`/containers/${id}/deployments${query ? `?${query}` : ""}`);
+  },
+  deploymentState: (id: string) =>
+    get<{ success: boolean; data: ContainerDeploymentState }>(
+      `/containers/${id}/deployment-state`,
+    ),
+  deploymentLogs: (
+    containerId: string,
+    deploymentId: string,
+    params?: { page?: number; pageSize?: number },
+  ) => {
+    const qs = new URLSearchParams();
+    if (params?.page) qs.set("page", String(params.page));
+    if (params?.pageSize) qs.set("pageSize", String(params.pageSize));
+    const query = qs.toString();
+    return get<{
+      success: boolean;
+      data: {
+        items: DeploymentEventRecord[];
+        total: number;
+        page: number;
+        pageSize: number;
+      };
+    }>(
+      `/containers/${containerId}/deployments/${deploymentId}/logs${query ? `?${query}` : ""}`,
+    );
   },
   rollbackDeployment: (containerId: string, deploymentId: string) =>
     post<{
@@ -2283,9 +2451,35 @@ export const containers = {
       `/containers/${id}/rebuild`,
       {},
     ),
+  redeployPlan: (id: string) =>
+    get<{ success: boolean; data: ContainerRedeployPlan }>(
+      `/containers/${id}/redeploy-plan`,
+    ),
+  redeploy: (id: string) =>
+    post<{
+      success: boolean;
+      data?: Container;
+      message?: string;
+      meta?: {
+        deploymentId: string;
+        revisionDeploymentId: string;
+        idempotentReplay: boolean;
+        strategy: string;
+        proxyTrafficContinuous: boolean;
+        directPortInterruptionPossible: boolean;
+        overlappingRuntime: boolean;
+      };
+    }>(`/containers/${id}/redeploy`, {
+      idempotencyKey: crypto.randomUUID(),
+    }),
   createRebuildJob: (id: string) =>
     post<{ success: boolean; data: ProcessJobRecord }>(
       `/containers/${id}/rebuild-job`,
+      {},
+    ),
+  createRedeployJob: (id: string) =>
+    post<{ success: boolean; data: ProcessJobRecord }>(
+      `/containers/${id}/redeploy-job`,
       {},
     ),
   logs: (id: string, tail?: number) =>

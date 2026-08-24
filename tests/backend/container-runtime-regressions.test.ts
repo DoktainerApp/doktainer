@@ -32,6 +32,23 @@ test("container detail runtime polling uses the lightweight metrics API", () => 
   assert.doesNotMatch(refreshBlock, /containersApi\.details/);
 });
 
+test("overview hydrates Docker inspect and does not synthesize HTTP health", () => {
+  const source = readSource(CONTAINER_DETAIL_PAGE);
+  const hydrationBlock = sourceBlock(
+    source,
+    "if (!appDetailId) return;",
+    "if (!appDetailId || containerRecord?.status",
+  );
+
+  assert.match(
+    hydrationBlock,
+    /activeTab === "overview"[\s\S]*?hydrateRuntimeDetail/,
+  );
+  assert.doesNotMatch(source, /httpStatus:\s*"200"/);
+  assert.match(source, /httpStatus:\s*"Not probed"/);
+  assert.match(source, /health:\s*getDockerHealthSummary\(detail\.inspect\)/);
+});
+
 test("metrics endpoint does not call heavy Docker detail commands", () => {
   const source = readSource(CONTAINER_ROUTES);
   const metricsRouteBlock = sourceBlock(

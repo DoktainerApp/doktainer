@@ -96,6 +96,7 @@ model Project {
 
   organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   environments   Environment[]
+  deployments    Deployment[]
 
   @@unique([organizationId, slug])
   @@index([organizationId])
@@ -116,6 +117,7 @@ model Environment {
   project     Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
   server      Server            @relation(fields: [serverId], references: [id], onDelete: Restrict)
   containers  Container[]
+  deployments Deployment[]
 
   @@unique([projectId, slug])
   @@index([projectId])
@@ -511,7 +513,10 @@ model Deployment {
   containerId     String
   organizationId  String
   serverId        String
+  projectId       String?
+  environmentId   String?
   userId          String?
+  idempotencyKey  String?
   status          DeploymentStatus
   trigger         DeploymentTrigger
   version         String?
@@ -519,22 +524,56 @@ model Deployment {
   branch          String?
   image           String?
   imageDigest     String?
+  sourceSnapshot  Json?
   configSnapshot  Json
+  configRevision  String?
   rollbackSnapshotEnc String?
+  strategy        String?
+  candidateRef    String?
+  previousDeploymentId String?
+  failureReason   String?
+  rollbackReason  String?
+  logReference    String?
   error           String?
   startedAt       DateTime?
   completedAt     DateTime?
   createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
 
   container       Container         @relation(fields: [containerId], references: [id], onDelete: Cascade)
   organization    Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   server          Server             @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  project         Project?           @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  environment     Environment?       @relation(fields: [environmentId], references: [id], onDelete: SetNull)
   user            User?              @relation(fields: [userId], references: [id], onDelete: SetNull)
+  previousDeployment Deployment?      @relation("DeploymentPredecessor", fields: [previousDeploymentId], references: [id], onDelete: SetNull)
+  nextDeployments  Deployment[]       @relation("DeploymentPredecessor")
+  events           DeploymentEvent[]
 
+  @@unique([containerId, idempotencyKey])
   @@index([containerId, createdAt])
+  @@index([containerId, status, createdAt])
   @@index([organizationId, createdAt])
   @@index([serverId, createdAt])
+  @@index([projectId, createdAt])
+  @@index([environmentId, createdAt])
+  @@index([previousDeploymentId])
   @@map("deployments")
+}
+
+model DeploymentEvent {
+  id            String               @id @default(cuid())
+  deploymentId  String
+  status        DeploymentStatus
+  level         DeploymentEventLevel @default(INFO)
+  message       String
+  metadata      Json?
+  createdAt     DateTime             @default(now())
+
+  deployment Deployment @relation(fields: [deploymentId], references: [id], onDelete: Cascade)
+
+  @@index([deploymentId, createdAt])
+  @@map("deployment_events")
 }
 
 model DeploymentLock {
@@ -552,17 +591,32 @@ model DeploymentLock {
 
 enum DeploymentStatus {
   QUEUED
+  BUILDING
   RUNNING
+  VALIDATING
+  SWITCHING
+  ACTIVE
   SUCCESS
   FAILED
+  FAILED_ROLLED_BACK
   CANCELLED
+  ROLLBACK_RUNNING
   ROLLED_BACK
+  SUPERSEDED
+}
+
+enum DeploymentEventLevel {
+  INFO
+  WARNING
+  ERROR
 }
 
 enum DeploymentTrigger {
   MANUAL
   GIT_WEBHOOK
   REBUILD
+  REDEPLOY
+  CONFIG_APPLY
   ROLLBACK
   APP_INSTALLER
 }

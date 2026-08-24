@@ -53,10 +53,27 @@ function formatDeploymentDuration(item: DeploymentRecord) {
 function formatDeploymentStatus(
   status: DeploymentRecord["status"],
 ): DeploymentHistoryItem["status"] {
-  if (status === "SUCCESS") return "Success";
+  if (
+    status === "SUCCESS" ||
+    status === "ACTIVE" ||
+    status === "SUPERSEDED"
+  ) {
+    return "Success";
+  }
   if (status === "FAILED") return "Failed";
-  if (status === "RUNNING" || status === "QUEUED") return "Running";
-  return status === "ROLLED_BACK" ? "Rolled Back" : "Failed";
+  if (
+    status === "QUEUED" ||
+    status === "BUILDING" ||
+    status === "RUNNING" ||
+    status === "VALIDATING" ||
+    status === "SWITCHING" ||
+    status === "ROLLBACK_RUNNING"
+  ) {
+    return "Running";
+  }
+  return status === "ROLLED_BACK" || status === "FAILED_ROLLED_BACK"
+    ? "Rolled Back"
+    : "Failed";
 }
 
 function formatDeploymentTrigger(trigger: DeploymentRecord["trigger"]) {
@@ -64,9 +81,21 @@ function formatDeploymentTrigger(trigger: DeploymentRecord["trigger"]) {
     MANUAL: "Manual deploy",
     GIT_WEBHOOK: "Git webhook",
     REBUILD: "Rebuild",
+    REDEPLOY: "Redeploy",
+    CONFIG_APPLY: "Configuration apply",
     ROLLBACK: "Rollback",
     APP_INSTALLER: "App installer",
   }[trigger];
+}
+
+export function isDeploymentRollbackAvailable(item: DeploymentRecord) {
+  return (
+    (item.status === "SUCCESS" ||
+      item.status === "ACTIVE" ||
+      item.status === "SUPERSEDED") &&
+    Boolean(item.image) &&
+    item.rollbackArtifactAvailable === true
+  );
 }
 
 function mapDeploymentHistory(items: DeploymentRecord[]) {
@@ -78,8 +107,8 @@ function mapDeploymentHistory(items: DeploymentRecord[]) {
     commit: item.commitSha || "-",
     branch: item.branch || "-",
     duration: formatDeploymentDuration(item),
-    deployedAt: formatDate(item.createdAt),
-    canRollback: item.status === "SUCCESS" && Boolean(item.image),
+    deployedAt: formatDate(item.completedAt ?? item.createdAt),
+    canRollback: isDeploymentRollbackAvailable(item),
   }));
 }
 

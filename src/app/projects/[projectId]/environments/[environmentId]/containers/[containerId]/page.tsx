@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { useCurrentUser } from "@/lib/auth-state";
+import { getRoleCapabilities } from "@/lib/rbac";
 import ConfirmActionDialog from "@/components/ConfirmActionDialog";
 import DashboardLayout from "@/components/DashboardLayout";
 import IssueDetailsSummary from "@/components/IssueDetailsSummary";
@@ -24,6 +26,7 @@ import {
   type ProjectRecord,
 } from "@/lib/api";
 import ContainerFileManagerModal from "@/components/containers/modals/ContainerFileManagerModal";
+import EditContainerConfigurationModal from "./components/configuration/EditContainerConfigurationModal";
 import AdvancedTabPanel from "./components/advanced/AdvancedTabPanel";
 import DeploymentsTabPanel from "./components/deployments/DeploymentsTabPanel";
 import DeploymentDetailsModal from "./components/deployments/DeploymentDetailsModal";
@@ -76,11 +79,82 @@ function formatStatus(value: string) {
   return value.charAt(0) + value.slice(1).toLowerCase();
 }
 
+function formatDeploymentPhase(value: DeploymentRecord["status"]) {
+  return value
+    .toLowerCase()
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
 function formatDateTime(value: string | null | undefined) {
   if (!value) return "-";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "-";
   return date.toLocaleString();
+}
+
+function formatDeploymentDuration(deployment: DeploymentRecord | undefined) {
+  if (!deployment?.startedAt || !deployment.completedAt) return "-";
+  const duration =
+    new Date(deployment.completedAt).getTime() -
+    new Date(deployment.startedAt).getTime();
+  if (!Number.isFinite(duration) || duration < 0) return "-";
+  const seconds = Math.floor(duration / 1000);
+  return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+}
+
+function findActiveDeployment(deployments: DeploymentRecord[]) {
+  return (
+    deployments.find((item) => item.status === "ACTIVE") ??
+    deployments.find(
+      (item) => item.status === "SUCCESS" || item.status === "SUPERSEDED",
+    )
+  );
+}
+
+function isDeploymentInProgress(status: DeploymentRecord["status"]) {
+  return [
+    "QUEUED",
+    "BUILDING",
+    "RUNNING",
+    "VALIDATING",
+    "SWITCHING",
+    "ROLLBACK_RUNNING",
+  ].includes(status);
+}
+
+function getDockerHealthSummary(inspect: Record<string, unknown>) {
+  const state = inspect.State;
+  if (!state || typeof state !== "object" || Array.isArray(state)) {
+    return {
+      status: "Unavailable",
+      responseTime: "-",
+      httpStatus: "Not probed",
+      lastCheck: "Docker inspect unavailable",
+    };
+  }
+
+  const stateRecord = state as Record<string, unknown>;
+  const health = stateRecord.Health;
+  const dockerHealth =
+    health && typeof health === "object" && !Array.isArray(health)
+      ? (health as Record<string, unknown>).Status
+      : null;
+  const runtimeStatus = stateRecord.Status;
+
+  return {
+    status:
+      typeof dockerHealth === "string" && dockerHealth.trim()
+        ? formatStatus(dockerHealth)
+        : "Not configured",
+    responseTime: "-",
+    httpStatus: "Not probed",
+    lastCheck:
+      typeof dockerHealth === "string" && dockerHealth.trim()
+        ? "From Docker healthcheck"
+        : `Runtime ${typeof runtimeStatus === "string" ? runtimeStatus : "unknown"}; no healthcheck`,
+  };
 }
 
 function formatSourcePath(container: Container) {
@@ -348,7 +422,9 @@ function buildAppDetail({
   metrics?: RuntimeMetricSource | null;
 }): AppDetail {
   const status = formatStatus(container.status);
-  const isRunning = container.status === "RUNNING";
+  const activeRevision = container.deploymentSummary?.activeRevision;
+  const currentOperation = container.deploymentSummary?.currentOperation;
+  const deployedAt = activeRevision?.completedAt ?? activeRevision?.createdAt;
   const metricSource = metrics ?? detail;
   const serverName = detail?.server.name ?? container.server?.name ?? "-";
   const serverIp = detail?.server.ip ?? container.server?.ip ?? "-";
@@ -365,13 +441,15 @@ function buildAppDetail({
     name: container.name,
     image: container.image,
     status,
+    managementLabel:
+      container.capabilities?.managementLabel ?? "Docker import",
     path: formatSourcePath(container),
     projectName: project.name,
     environmentName: environment.name,
     serverName,
     serverIp,
     owner: "-",
-    lastDeployed: formatDateTime(container.createdAt),
+    lastDeployed: deployedAt ? formatDateTime(deployedAt) : "Never",
     openUrl:
       getDomainUrl(domains, container) ?? getContainerWebUiUrl(container),
     domains: getLinkedDomains(domains, container),
@@ -393,18 +471,26 @@ function buildAppDetail({
     terminal: createTerminalData(container, detail),
     metrics: buildMetrics(metricSource, container),
     deployment: {
-      status: isRunning ? "Success" : status,
-      commit: "-",
-      branch: "-",
-      message: container.sourceType ?? "Manual container",
-      deployedAt: formatDateTime(container.createdAt),
-      duration: "-",
+      status: currentOperation
+        ? formatDeploymentPhase(currentOperation.status)
+        : activeRevision
+          ? "Success"
+          : "No deployment",
+      commit: activeRevision?.commitSha ?? "-",
+      branch: activeRevision?.branch ?? "-",
+      message: currentOperation
+        ? `${currentOperation.trigger} deployment in progress`
+        : activeRevision?.trigger ?? container.sourceType ?? "Manual container",
+      deployedAt: deployedAt ? formatDateTime(deployedAt) : "-",
+      duration: formatDeploymentDuration(activeRevision ?? undefined),
     },
     health: {
-      status: isRunning ? "Healthy" : status,
+      status: container.status === "RUNNING" ? "Unknown" : status,
       responseTime: "-",
-      httpStatus: isRunning ? "200" : "-",
-      lastCheck: runtimeNotice ? "Runtime unavailable" : "Loaded just now",
+      httpStatus: "Not probed",
+      lastCheck: runtimeNotice
+        ? "Runtime unavailable"
+        : "Awaiting Docker inspect",
     },
     replicas: 1,
     runtimeContainers: [
@@ -421,16 +507,27 @@ function buildAppDetail({
   };
 }
 
-function createRebuildTimeline(activeStep: number): ProcessLogStep[] {
+function createDeploymentOperationTimeline(
+  operation: "redeploy" | "rebuild",
+  activeStep: number,
+): ProcessLogStep[] {
+  const operationLabel =
+    operation === "redeploy"
+      ? "Redeploy current revision"
+      : "Rebuild from source";
   const steps = [
-    { id: "prepare", label: "Preparing rebuild request", progress: 10 },
     {
-      id: "rebuild",
-      label: "Waiting for rebuild process",
+      id: "prepare",
+      label: `Preparing ${operationLabel.toLowerCase()}`,
+      progress: 10,
+    },
+    {
+      id: operation,
+      label: `Waiting for ${operationLabel.toLowerCase()}`,
       progress: "Running",
     },
     { id: "sync", label: "Refreshing container detail", progress: 85 },
-    { id: "complete", label: "Rebuild completed", progress: 100 },
+    { id: "complete", label: `${operationLabel} completed`, progress: 100 },
   ];
 
   return steps.map((step, index) => ({
@@ -444,14 +541,46 @@ function createRebuildTimeline(activeStep: number): ProcessLogStep[] {
   }));
 }
 
-function createFailedRebuildTimeline(activeStep: number): ProcessLogStep[] {
-  return createRebuildTimeline(activeStep).map((step, index) =>
-    index === activeStep
-      ? { ...step, status: "error" as const }
-      : index < activeStep
-        ? { ...step, status: "success" as const }
-        : { ...step, status: "pending" as const },
+function createFailedDeploymentOperationTimeline(
+  operation: "redeploy" | "rebuild",
+  activeStep: number,
+): ProcessLogStep[] {
+  return createDeploymentOperationTimeline(operation, activeStep).map(
+    (step, index) =>
+      index === activeStep
+        ? { ...step, status: "error" as const }
+        : index < activeStep
+          ? { ...step, status: "success" as const }
+          : { ...step, status: "pending" as const },
   );
+}
+
+function describeRedeployJobResult(result: unknown) {
+  if (!result || typeof result !== "object" || Array.isArray(result)) return [];
+  const response = result as {
+    message?: unknown;
+    meta?: {
+      strategy?: unknown;
+      proxyTrafficContinuous?: unknown;
+      directPortInterruptionPossible?: unknown;
+    };
+  };
+  const lines: string[] = [];
+  if (typeof response.meta?.strategy === "string") {
+    lines.push(`[redeploy] Strategy: ${response.meta.strategy}`);
+  }
+  if (response.meta?.proxyTrafficContinuous === true) {
+    lines.push("[redeploy] Managed proxy traffic stayed on a validated runtime");
+  }
+  if (response.meta?.directPortInterruptionPossible === true) {
+    lines.push(
+      "[redeploy] Direct host-port traffic may have been briefly interrupted",
+    );
+  }
+  if (typeof response.message === "string") {
+    lines.push(`[redeploy] ${response.message}`);
+  }
+  return lines;
 }
 
 export default function AppContainerDetailPage() {
@@ -461,6 +590,9 @@ export default function AppContainerDetailPage() {
     containerId: string;
   }>();
   const router = useRouter();
+  const currentUser = useCurrentUser();
+  const roleCapabilities = getRoleCapabilities(currentUser?.role);
+  const canMutateContainers = roleCapabilities.canManageDeveloperTools;
   const [activeTab, setActiveTab] = useState<AppDetailTab>("overview");
   const [terminalWasOpened, setTerminalWasOpened] = useState(false);
   const [appDetail, setAppDetail] = useState<AppDetail | null>(null);
@@ -483,6 +615,7 @@ export default function AppContainerDetailPage() {
     null,
   );
   const [showFileManager, setShowFileManager] = useState(false);
+  const [showConfigurationEditor, setShowConfigurationEditor] = useState(false);
   const [error, setError] = useState("");
   const [actionError, setActionError] = useState("");
   const [runtimeNotice, setRuntimeNotice] = useState("");
@@ -640,14 +773,44 @@ export default function AppContainerDetailPage() {
       deploymentHistoryRef.current = response.data.items;
       setAppDetail((current) =>
         current
-          ? {
-              ...current,
-              deployments: createDeploymentsData(
-                container,
-                runtimeDetailRef.current,
-                response.data.items,
-              ),
-            }
+          ? (() => {
+              const records = response.data.items;
+              const active =
+                findActiveDeployment(records) ??
+                container.deploymentSummary?.activeRevision ??
+                undefined;
+              const inProgress =
+                records.find((item) =>
+                  isDeploymentInProgress(item.status),
+                ) ?? container.deploymentSummary?.currentOperation ?? undefined;
+              const deployedAt = active?.completedAt ?? active?.createdAt;
+
+              return {
+                ...current,
+                lastDeployed: deployedAt
+                  ? formatDateTime(deployedAt)
+                  : "Never",
+                deployment: {
+                  status: inProgress
+                    ? formatDeploymentPhase(inProgress.status)
+                    : active
+                      ? "Success"
+                      : "No deployment",
+                  commit: active?.commitSha ?? "-",
+                  branch: active?.branch ?? "-",
+                  message: inProgress
+                    ? `${inProgress.trigger} deployment in progress`
+                    : active?.trigger ?? "No successful deployment",
+                  deployedAt: deployedAt ? formatDateTime(deployedAt) : "-",
+                  duration: formatDeploymentDuration(active),
+                },
+                deployments: createDeploymentsData(
+                  container,
+                  runtimeDetailRef.current,
+                  records,
+                ),
+              };
+            })()
           : current,
       );
     } catch {
@@ -680,6 +843,7 @@ export default function AppContainerDetailPage() {
 
   const requestRollback = useCallback(
     (deploymentId: string) => {
+      if (!canMutateContainers) return;
       const deployment = appDetail?.deployments.history.find(
         (item) => item.id === deploymentId,
       );
@@ -696,7 +860,7 @@ export default function AppContainerDetailPage() {
         },
       });
     },
-    [appDetail, runRollback],
+    [appDetail, canMutateContainers, runRollback],
   );
 
   const openDeploymentDetails = useCallback(
@@ -762,12 +926,6 @@ export default function AppContainerDetailPage() {
           ? {
               ...current,
               metrics: buildMetrics(metrics, container),
-              health: {
-                ...current.health,
-                status: "Healthy",
-                httpStatus: "200",
-                lastCheck: "Updated just now",
-              },
               runtimeContainers: [
                 {
                   name: container.name,
@@ -869,6 +1027,7 @@ export default function AppContainerDetailPage() {
           serverName: detail.server.name,
           serverIp: detail.server.ip,
           metrics: buildMetrics(detail, container),
+          health: getDockerHealthSummary(detail.inspect),
           runtime: createRuntimeData(container, detail),
           deployments: createDeploymentsData(
             container,
@@ -986,10 +1145,6 @@ export default function AppContainerDetailPage() {
                       recentLogs: nextLogStream,
                     })
                 : current.logsDetail,
-              health: {
-                ...current.health,
-                lastCheck: "Refreshed just now",
-              },
             }
           : current,
       );
@@ -1024,22 +1179,75 @@ export default function AppContainerDetailPage() {
     const isStopped =
       containerRecord?.status === "STOPPED" ||
       containerRecord?.status === "ERROR";
+    const deploymentBusy = Boolean(
+      containerRecord?.deploymentSummary?.currentOperation,
+    );
 
     return headerActions
-      .filter((action) => !(isStopped && action.id === "stop"))
+      .filter((action) => {
+        if (action.id === "open") return Boolean(appDetail?.openUrl);
+        if (!canMutateContainers) return false;
+        return !(isStopped && action.id === "stop");
+      })
       .map((action) =>
         action.id === "restart" && isStopped
           ? { ...action, id: "start" as const, label: "Start" }
           : action,
+      )
+      .map((action) =>
+        action.id !== "open" && deploymentBusy
+          ? {
+              ...action,
+              disabled: true,
+              disabledReason:
+                "Another deployment operation is currently running.",
+            }
+          : action,
       );
-  }, [containerRecord?.status]);
+  }, [appDetail?.openUrl, canMutateContainers, containerRecord]);
 
   const headerMenuActions = useMemo(
-    () =>
-      primaryActions.filter((action) =>
-        ["files", "rebuild", "remove"].includes(action.id),
-      ),
-    [],
+    () => {
+      const deploymentBusy = Boolean(
+        containerRecord?.deploymentSummary?.currentOperation,
+      );
+      const capabilities = containerRecord?.capabilities;
+
+      return primaryActions
+        .filter((action) => {
+          if (action.id === "files") {
+            return containerRecord?.status === "RUNNING";
+          }
+          if (!canMutateContainers) return false;
+          if (action.id === "edit") {
+            return Boolean(capabilities?.editConfiguration.available);
+          }
+          if (action.id === "redeploy") {
+            return Boolean(capabilities?.redeploy.available);
+          }
+          if (action.id === "rebuild") {
+            return Boolean(capabilities?.rebuild.available);
+          }
+          return action.id === "remove";
+        })
+        .map((action) => {
+          const composeRebuild =
+            action.id === "rebuild" &&
+            capabilities?.rebuild.mode === "COMPOSE_RECREATE";
+          const adjusted = composeRebuild
+            ? { ...action, label: "Rebuild Compose project" }
+            : action;
+          return deploymentBusy && action.id !== "files"
+            ? {
+                ...adjusted,
+                disabled: true,
+                disabledReason:
+                  "Another deployment operation is currently running.",
+              }
+            : adjusted;
+        });
+    },
+    [canMutateContainers, containerRecord],
   );
 
   const handleTabChange = useCallback((tab: AppDetailTab) => {
@@ -1147,18 +1355,23 @@ export default function AppContainerDetailPage() {
     [params.containerId],
   );
 
-  const runRebuild = useCallback(async () => {
-    if (!containerRecord) return;
+  const runDeploymentOperation = useCallback(
+    async (operation: "redeploy" | "rebuild") => {
+      if (!containerRecord) return;
 
+    const isRedeploy = operation === "redeploy";
+    const operationLabel = isRedeploy
+      ? "Redeploy current revision"
+      : "Rebuild from source";
     setActing(true);
-    setActiveAction("rebuild");
+    setActiveAction(operation);
     setActionError("");
     rebuildJobIdRef.current = null;
     rebuildCancelRequestedRef.current = false;
     const baseTerminalLines = [
-      `[rebuild] Starting rebuild for ${containerRecord.name}`,
-      `[rebuild] Source: ${containerRecord.sourceType ?? "unknown"}`,
-      `[rebuild] Server ID: ${containerRecord.serverId}`,
+      `[${operation}] Starting ${operationLabel.toLowerCase()} for ${containerRecord.name}`,
+      `[${operation}] Source: ${containerRecord.sourceType ?? "unknown"}`,
+      `[${operation}] Server ID: ${containerRecord.serverId}`,
     ];
     let latestTerminalLines = [...baseTerminalLines];
 
@@ -1174,12 +1387,13 @@ export default function AppContainerDetailPage() {
     };
 
     openProcessLogs({
-      title: `Rebuild Logs - ${containerRecord.name}`,
-      description:
-        "Rebuild progress, inventory sync, and terminal-style output for this request.",
+      title: `${operationLabel} logs - ${containerRecord.name}`,
+      description: isRedeploy
+        ? "Runtime replacement from the stored current revision. No source fetch or image build is performed."
+        : "Source rebuild progress, inventory sync, and terminal-style output for this request.",
       imageUrl: "/assets/images/img-chibi-fixing.png",
       imageAlt: "Illustration of a character fixing something",
-      timelineLogs: createRebuildTimeline(0),
+      timelineLogs: createDeploymentOperationTimeline(operation, 0),
       terminalLogs: latestTerminalLines,
       initialTab: "timeline",
       statusLabel: "Starting",
@@ -1188,30 +1402,31 @@ export default function AppContainerDetailPage() {
     try {
       latestTerminalLines = [
         ...baseTerminalLines,
-        "[rebuild] Creating backend rebuild job",
+        `[${operation}] Creating backend ${operation} job`,
       ];
       updateProcessLogs({
-        timelineLogs: createRebuildTimeline(1),
+        timelineLogs: createDeploymentOperationTimeline(operation, 1),
         terminalLogs: latestTerminalLines,
         statusLabel: "Starting",
       });
 
-      const jobResponse = await containersApi.createRebuildJob(
-        params.containerId,
-      );
+      const jobResponse = isRedeploy
+        ? await containersApi.createRedeployJob(params.containerId)
+        : await containersApi.createRebuildJob(params.containerId);
       const job = jobResponse.data;
       rebuildJobIdRef.current = job.id;
       let finalStatus = job.status;
       let finalError = job.error;
+      let finalResult = job.result;
 
       updateProcessTerminal(
         [
           ...latestTerminalLines,
-          `[job] Rebuild job created: ${job.id}`,
-          "[job] Streaming backend rebuild logs",
+          `[job] ${operationLabel} job created: ${job.id}`,
+          `[job] Streaming backend ${operation} logs`,
         ],
         {
-          timelineLogs: createRebuildTimeline(1),
+          timelineLogs: createDeploymentOperationTimeline(operation, 1),
           statusLabel: "Streaming",
         },
       );
@@ -1244,13 +1459,14 @@ export default function AppContainerDetailPage() {
       await containersApi.streamJob(job.id, {
         onLog: (entry) => {
           updateProcessTerminal([...latestTerminalLines, entry.message], {
-            timelineLogs: createRebuildTimeline(1),
+            timelineLogs: createDeploymentOperationTimeline(operation, 1),
             statusLabel: "Streaming",
           });
         },
         onStatus: (nextJob) => {
           finalStatus = nextJob.status;
           finalError = nextJob.error;
+          finalResult = nextJob.result;
         },
       });
 
@@ -1262,23 +1478,24 @@ export default function AppContainerDetailPage() {
         finalError =
           cancelledJob?.data.error ??
           cancelledJob?.data.cancelReason ??
-          "Rebuild cancelled";
+          `${operationLabel} cancelled`;
       }
 
       if (finalStatus === "error") {
-        throw new Error(finalError || "Rebuild job failed");
+        throw new Error(finalError || `${operationLabel} job failed`);
       }
 
       if (finalStatus === "cancelled") {
-        throw new Error(finalError || "Rebuild cancelled");
+        throw new Error(finalError || `${operationLabel} cancelled`);
       }
 
       updateProcessLogs({
-        timelineLogs: createRebuildTimeline(2),
+        timelineLogs: createDeploymentOperationTimeline(operation, 2),
         terminalLogs: [
           ...latestTerminalLines,
-          "[rebuild] Rebuild command completed",
-          "[rebuild] Refreshing container detail",
+          ...(isRedeploy ? describeRedeployJobResult(finalResult) : []),
+          `[${operation}] ${operationLabel} command completed`,
+          `[${operation}] Refreshing container detail`,
         ].filter(Boolean),
         statusLabel: "Syncing",
       });
@@ -1286,28 +1503,31 @@ export default function AppContainerDetailPage() {
       await load();
 
       updateProcessLogs({
-        timelineLogs: createRebuildTimeline(3).map((step) => ({
+        timelineLogs: createDeploymentOperationTimeline(operation, 3).map((step) => ({
           ...step,
           status: "success",
         })),
         terminalLogs: [
           ...latestTerminalLines,
-          "[rebuild] Rebuild command completed",
-          "[rebuild] Container detail refreshed",
-          "[rebuild] Done",
+          ...(isRedeploy ? describeRedeployJobResult(finalResult) : []),
+          `[${operation}] ${operationLabel} command completed`,
+          `[${operation}] Container detail refreshed`,
+          `[${operation}] Done`,
         ].filter(Boolean),
         statusLabel: "100%",
       });
       updateProcessLogs({ cancelAction: undefined });
-    } catch (rebuildError) {
+    } catch (operationError) {
       const message =
-        rebuildError instanceof Error ? rebuildError.message : "Rebuild failed";
+        operationError instanceof Error
+          ? operationError.message
+          : `${operationLabel} failed`;
       setActionError(message);
       updateProcessLogs({
-        timelineLogs: createFailedRebuildTimeline(1),
+        timelineLogs: createFailedDeploymentOperationTimeline(operation, 1),
         terminalLogs: [
           ...baseTerminalLines,
-          "[rebuild] Rebuild failed",
+          `[${operation}] ${operationLabel} failed`,
           `[error] ${message}`,
         ],
         statusLabel: "Failed",
@@ -1318,20 +1538,107 @@ export default function AppContainerDetailPage() {
       setActing(false);
       setActiveAction(null);
     }
+    },
+    [
+      containerRecord,
+      load,
+      openProcessLogs,
+      params.containerId,
+      updateProcessLogs,
+    ],
+  );
+
+  const openRedeployConfirmation = useCallback(async () => {
+    if (!containerRecord?.capabilities?.redeploy.available) {
+      setActionError(
+        containerRecord?.capabilities?.redeploy.reason ??
+          "Redeploy is unavailable for this container.",
+      );
+      return;
+    }
+    setActing(true);
+    setActiveAction("redeploy");
+    setActionError("");
+    try {
+      const response = await containersApi.redeployPlan(params.containerId);
+      const plan = response.data;
+      if (plan.blocked) {
+        setActionError(`Redeploy unavailable: ${plan.reason}`);
+        return;
+      }
+
+      const availabilityNote = plan.proxyTrafficContinuous
+        ? plan.directPortInterruptionPossible
+          ? "Managed domain traffic will switch to a validated candidate before replacement. Direct host-port traffic may still be briefly interrupted."
+          : "Managed domain traffic will switch to a validated candidate before the previous runtime is removed."
+        : "This runtime cannot use a proxy candidate. A brief interruption may occur while Docker replaces the runtime and verifies recovery.";
+      const overlapNote = plan.overlappingRuntime
+        ? "The candidate briefly runs beside the current runtime; verify that the app does not contain a singleton worker or scheduler that must never overlap."
+        : "";
+      setConfirmDialog({
+        title: "Redeploy current revision",
+        description: appDetail
+          ? `Replace the runtime for "${appDetail.name}" using its current stored revision?`
+          : "Replace this runtime using its current stored revision?",
+        confirmLabel: "Redeploy revision",
+        tone: "warning",
+        note: `${availabilityNote} ${overlapNote} ${plan.reason} No source code will be fetched and no image will be built.`.replaceAll(
+          /\s+/g,
+          " ",
+        ),
+        onConfirm: () => {
+          void runDeploymentOperation("redeploy");
+        },
+      });
+    } catch (previewError) {
+      setActionError(
+        previewError instanceof Error
+          ? previewError.message
+          : "Redeploy preview failed.",
+      );
+    } finally {
+      setActing(false);
+      setActiveAction(null);
+    }
   }, [
+    appDetail,
     containerRecord,
-    load,
-    openProcessLogs,
     params.containerId,
-    updateProcessLogs,
+    runDeploymentOperation,
   ]);
 
   const handleAction = useCallback(
     (action: AppAction["id"]) => {
       if (acting) return;
+      const mutationActions: AppAction["id"][] = [
+        "edit",
+        "start",
+        "restart",
+        "redeploy",
+        "rebuild",
+        "stop",
+        "remove",
+      ];
+      if (mutationActions.includes(action) && !canMutateContainers) {
+        setActionError("Your role has read-only access to containers.");
+        return;
+      }
 
       if (action === "open") {
         openApp();
+        return;
+      }
+
+      if (action === "edit") {
+        if (!containerRecord?.capabilities?.editConfiguration.available) {
+          setActionError(
+            containerRecord?.capabilities?.editConfiguration.reason ??
+              "Configuration editing is unavailable for this container.",
+          );
+          return;
+        }
+        setActionError("");
+        setShowConfigurationEditor(true);
         return;
       }
 
@@ -1379,23 +1686,38 @@ export default function AppContainerDetailPage() {
         return;
       }
 
-      if (action === "rebuild") {
-        const isGitSource =
-          containerRecord?.sourceType === "GIT_CLONE" ||
-          containerRecord?.sourceType === "GIT_PROVIDER";
+      if (action === "redeploy") {
+        void openRedeployConfirmation();
+        return;
+      }
 
+      if (action === "rebuild") {
+        const rebuildCapability = containerRecord?.capabilities?.rebuild;
+        if (!rebuildCapability?.available) {
+          setActionError(
+            rebuildCapability?.reason ??
+              "Rebuild is unavailable for this container.",
+          );
+          return;
+        }
+        const isComposeRebuild =
+          rebuildCapability.mode === "COMPOSE_RECREATE";
         setConfirmDialog({
-          title: "Rebuild Container",
+          title: isComposeRebuild
+            ? "Rebuild Compose project"
+            : "Rebuild from source",
           description: appDetail
-            ? `Rebuild container "${appDetail.name}" now?`
-            : "Rebuild this container now?",
-          confirmLabel: "Rebuild Container",
+            ? `Fetch and rebuild the source for "${appDetail.name}" now?`
+            : "Fetch and rebuild this container from its source now?",
+          confirmLabel: isComposeRebuild
+            ? "Rebuild Compose project"
+            : "Rebuild from source",
           tone: "warning",
-          note: isGitSource
-            ? "Doktainer will fetch the latest changes from the repository, rebuild the image if necessary, and then redeploy the container."
-            : "The container will be stopped, removed, and then restarted. Doktainer will attempt to pull the latest image first if available in the registry.",
+          note: isComposeRebuild
+            ? "Docker Compose will rebuild and recreate the project services. This is not a safe single-container candidate switch and service interruption may occur."
+            : "Doktainer prepares an immutable image before runtime replacement, then uses the configured candidate/readiness strategy. Managed proxy traffic can stay on a validated runtime; direct host ports may still be briefly interrupted.",
           onConfirm: () => {
-            void runRebuild();
+            void runDeploymentOperation("rebuild");
           },
         });
         return;
@@ -1435,9 +1757,11 @@ export default function AppContainerDetailPage() {
     [
       acting,
       appDetail,
+      canMutateContainers,
       containerRecord,
       openApp,
-      runRebuild,
+      openRedeployConfirmation,
+      runDeploymentOperation,
       runRestart,
       runStart,
       runStop,
@@ -1462,6 +1786,7 @@ export default function AppContainerDetailPage() {
       }
 
       if (
+        activeTab === "overview" ||
         activeTab === "runtime" ||
         activeTab === "storage" ||
         activeTab === "advanced" ||
@@ -1576,6 +1901,13 @@ export default function AppContainerDetailPage() {
           onClose={() => setShowFileManager(false)}
         />
       ) : null}
+      {showConfigurationEditor && containerRecord ? (
+        <EditContainerConfigurationModal
+          containerId={containerRecord.id}
+          onClose={() => setShowConfigurationEditor(false)}
+          onApplied={load}
+        />
+      ) : null}
 
       <div
         className="animate-slide-in"
@@ -1676,14 +2008,10 @@ export default function AppContainerDetailPage() {
                 onRollback={requestRollback}
                 onViewDetails={openDeploymentDetails}
                 rollingBackId={rollingBackDeploymentId}
+                allowRollback={canMutateContainers}
               />
             ) : activeTab === "advanced" ? (
-              <AdvancedTabPanel
-                advanced={appDetail.advanced}
-                activeAction={activeAction}
-                onReset={() => handleAction("rebuild")}
-                onRemove={() => handleAction("remove")}
-              />
+              <AdvancedTabPanel advanced={appDetail.advanced} />
             ) : activeTab === "environment" ? (
               <EnvironmentTabPanel
                 environment={appDetail.environment}

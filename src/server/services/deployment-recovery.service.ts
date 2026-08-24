@@ -1,6 +1,7 @@
 import type { Server } from "@prisma/client";
 import prisma from "../lib/prisma";
 import { isDeploymentLockActive } from "./deployment-lock.service";
+import { IN_PROGRESS_DEPLOYMENT_STATUSES } from "./deployment-state-machine";
 
 const RUNTIME_CREATION_CLOCK_SKEW_MS = 5_000;
 const INTERRUPTED_REBUILD_ERROR =
@@ -55,10 +56,10 @@ export async function reconcileInterruptedRebuild(input: {
     where: {
       containerId: input.container.id,
       trigger: "REBUILD",
-      status: "RUNNING",
+      status: { in: IN_PROGRESS_DEPLOYMENT_STATUSES },
     },
     orderBy: { createdAt: "desc" },
-    select: { id: true, startedAt: true, createdAt: true },
+    select: { id: true, status: true, startedAt: true, createdAt: true },
   });
 
   if (!deployment) return null;
@@ -101,11 +102,13 @@ export async function reconcileInterruptedRebuild(input: {
 
   const recovered = await prisma.$transaction(async (tx) => {
     const updated = await tx.deployment.updateMany({
-      where: { id: deployment.id, status: "RUNNING" },
+      where: { id: deployment.id, status: deployment.status },
       data: {
         status,
         completedAt: now,
         error: status === "SUCCESS" ? null : INTERRUPTED_REBUILD_ERROR,
+        failureReason:
+          status === "SUCCESS" ? null : INTERRUPTED_REBUILD_ERROR,
         ...(status === "SUCCESS"
           ? { image: runtimeImage, imageDigest }
           : {}),
@@ -113,6 +116,18 @@ export async function reconcileInterruptedRebuild(input: {
     });
 
     if (updated.count !== 1) return false;
+
+    await tx.deploymentEvent.create({
+      data: {
+        deploymentId: deployment.id,
+        status,
+        level: status === "SUCCESS" ? "INFO" : "ERROR",
+        message:
+          status === "SUCCESS"
+            ? "Interrupted rebuild reconciled from the running replacement runtime."
+            : "Interrupted rebuild could not be confirmed and was marked failed.",
+      },
+    });
 
     if (lock) {
       await tx.deploymentLock.deleteMany({

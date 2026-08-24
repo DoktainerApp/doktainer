@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
+import { useCurrentUser } from "@/lib/auth-state";
+import { getRoleCapabilities } from "@/lib/rbac";
 import DashboardLayout from "@/components/DashboardLayout";
 import IssueDetailsSummary from "@/components/IssueDetailsSummary";
 import ProcessLogsModal, {
@@ -52,17 +54,32 @@ function formatEndpoint(container: Container) {
 }
 
 function mapContainer(container: Container): EnvironmentContainer {
+  const deployment = container.deploymentSummary;
+  const revision = deployment?.activeRevision;
+  const deployedAt = revision?.completedAt ?? revision?.createdAt;
+
   return {
     id: container.id,
     name: container.name,
     image: container.image,
     source: formatSource(container),
+    managed: container.capabilities?.managed ?? false,
+    managementLabel:
+      container.capabilities?.managementLabel ?? "Docker import",
     status: container.status as EnvironmentContainerStatus,
     ports: container.ports,
     domain: formatEndpoint(container),
     cpu: container.cpuUsage ?? "-",
     memory: container.ramUsage ?? "-",
-    lastDeployed: formatDateTime(container.createdAt),
+    lastDeployed: deployedAt ? formatDateTime(deployedAt) : "Never",
+    revision:
+      revision?.commitSha?.slice(0, 8) ||
+      revision?.imageDigest?.replace(/^sha256:/, "").slice(0, 12) ||
+      revision?.version ||
+      "No revision",
+    deploymentInProgress: Boolean(deployment?.currentOperation),
+    rollbackAvailable: deployment?.rollbackAvailable ?? false,
+    lastDeploymentError: deployment?.lastError ?? null,
     uptime: "-",
   };
 }
@@ -87,6 +104,10 @@ function buildEnvironmentSummary(
 
 export default function EnvironmentContainersPage() {
   const params = useParams<{ projectId: string; environmentId: string }>();
+  const currentUser = useCurrentUser();
+  const canManageContainers = getRoleCapabilities(
+    currentUser?.role,
+  ).canManageDeveloperTools;
   const [activeEnvironment, setActiveEnvironment] =
     useState<ProjectEnvironmentRecord | null>(null);
   const [summary, setSummary] = useState<EnvironmentSummary | null>(null);
@@ -172,8 +193,9 @@ export default function EnvironmentContainersPage() {
       await load();
       pushToast({
         tone: "success",
-        title: "Containers synced",
-        message: "Environment containers have been refreshed from Docker.",
+        title: "Docker inventory refreshed",
+        message:
+          "Container inventory was refreshed. Existing deployment revision history was not modified.",
       });
     } catch (syncError) {
       setError(
@@ -245,7 +267,7 @@ export default function EnvironmentContainersPage() {
         onClose={dismissToast}
         position="top-right"
       />
-      {showDeploy && activeEnvironment ? (
+      {canManageContainers && showDeploy && activeEnvironment ? (
         <DeployContainerModal
           serverList={serverList}
           initialServerId={activeEnvironment.serverId}
@@ -258,7 +280,7 @@ export default function EnvironmentContainersPage() {
           onToast={pushToast}
         />
       ) : null}
-      {showDeployDatabase && activeEnvironment ? (
+      {canManageContainers && showDeployDatabase && activeEnvironment ? (
         <AddDatabaseModal
           serverList={serverList}
           initialServerId={activeEnvironment.serverId}
@@ -271,7 +293,7 @@ export default function EnvironmentContainersPage() {
           }}
         />
       ) : null}
-      {showImportFromSync && activeEnvironment ? (
+      {canManageContainers && showImportFromSync && activeEnvironment ? (
         <ImportFromSyncModal
           environmentId={activeEnvironment.id}
           serverId={activeEnvironment.serverId}
@@ -319,6 +341,7 @@ export default function EnvironmentContainersPage() {
           search={search}
           statusFilter={statusFilter}
           syncing={syncing}
+          canManage={canManageContainers}
           onSearchChange={setSearch}
           onStatusFilterChange={setStatusFilter}
           onSync={handleSync}

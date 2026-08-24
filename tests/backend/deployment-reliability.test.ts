@@ -22,6 +22,11 @@ test("deployment migrations include the history and rollback schema", () => {
   assert.ok(migrations.some((name) => name.includes("add_deployment_history")));
   assert.ok(migrations.some((name) => name.includes("add_deployment_rollback_snapshot")));
   assert.ok(migrations.some((name) => name.includes("add_deployment_locks")));
+  assert.ok(
+    migrations.some((name) =>
+      name.includes("add_deployment_revision_lifecycle"),
+    ),
+  );
   assert.equal(
     migrations.some((name) =>
       /deployment_attempt|process_job|service_lease|deployment_health_policy/.test(
@@ -33,10 +38,12 @@ test("deployment migrations include the history and rollback schema", () => {
 
   const schema = readFileSync(join(process.cwd(), "prisma", "schema.prisma"), "utf8");
   assert.match(schema, /model Deployment\s*\{/);
+  assert.match(schema, /model DeploymentEvent\s*\{/);
   assert.match(schema, /rollbackSnapshotEnc\s+String\?/);
+  assert.match(schema, /idempotencyKey\s+String\?/);
+  assert.match(schema, /configRevision\s+String\?/);
+  assert.match(schema, /FAILED_ROLLED_BACK/);
   assert.doesNotMatch(schema, /model DeploymentAttempt\s*\{/);
   assert.doesNotMatch(schema, /model ProcessJob\s*\{/);
   assert.doesNotMatch(schema, /model ServiceLease\s*\{/);
 });
-
-

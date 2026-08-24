@@ -1,11 +1,16 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { toImmutableBuildImageTag } from "../../src/server/services/ssh-services/docker-containers";
 
 const CONTAINER_ROUTES = "src/server/routes/containers.ts";
 const APP_ROUTES = "src/server/routes/apps.ts";
 const DOCKER_CONTAINERS =
   "src/server/services/ssh-services/docker-containers.ts";
+const APP_REBUILD_SERVICE =
+  "src/server/services/app-install-rebuild.service.ts";
+const RUNTIME_ORCHESTRATOR =
+  "src/server/services/deployment-rollback.service.ts";
 
 function readSource(path: string) {
   return readFileSync(path, "utf8");
@@ -30,16 +35,29 @@ test("Git rebuild follows the deployment history lifecycle", () => {
   );
 
   const acquireIndex = rebuildRoute.indexOf("acquireDeploymentLock");
-  const runningIndex = rebuildRoute.indexOf('status: "RUNNING"');
+  const buildingIndex = rebuildRoute.indexOf('status: buildType === "COMPOSE" ? "RUNNING" : "BUILDING"');
   const mutationIndex = rebuildRoute.indexOf("deployContainerFromGitSource");
+  const orchestrationIndex = rebuildRoute.indexOf(
+    "orchestratePreparedRuntimeReplacement",
+  );
   const successIndex = rebuildRoute.indexOf('status: "SUCCESS"', mutationIndex);
 
   assert.ok(acquireIndex >= 0);
-  assert.ok(runningIndex > acquireIndex);
-  assert.ok(mutationIndex > runningIndex);
+  assert.ok(buildingIndex > acquireIndex);
+  assert.ok(mutationIndex > buildingIndex);
+  assert.ok(orchestrationIndex > mutationIndex);
   assert.ok(successIndex > mutationIndex);
+  assert.match(rebuildRoute, /startRuntime: buildType === "COMPOSE" \? undefined : false/);
+  assert.match(rebuildRoute, /immutableImageTag: buildType === "COMPOSE" \? undefined : true/);
+  assert.doesNotMatch(
+    rebuildRoute.slice(buildingIndex, mutationIndex),
+    /dockerAction\([^)]*,\s*"(?:stop|rm)"/,
+  );
   assert.doesNotMatch(rebuildRoute, /waitForDeploymentHealth/);
-  assert.match(rebuildRoute, /status: "FAILED"/);
+  assert.match(
+    rebuildRoute,
+    /status: runtimePreserved \? "FAILED_ROLLED_BACK" : "FAILED"/,
+  );
   assert.match(rebuildRoute, /releaseDeploymentLock/);
   assert.match(rebuildRoute, /commitSha: gitDeploymentResult\.commitSha/);
   assert.match(rebuildRoute, /imageDigest/);
@@ -80,6 +98,59 @@ test("Git deployment resolves and returns the cloned commit SHA", () => {
   assert.match(gitDeployFunction, /git -C .* rev-parse HEAD/);
   assert.match(gitDeployFunction, /commitSha: string/);
   assert.match(gitDeployFunction, /commitSha,/);
+  assert.match(gitDeployFunction, /toImmutableBuildImageTag/);
+  assert.match(gitDeployFunction, /opts\.startRuntime === false/);
+  assert.match(gitDeployFunction, /preparedRuntime/);
 });
 
+test("Git rebuild image tags are immutable and preserve registry ports", () => {
+  assert.equal(
+    toImmutableBuildImageTag(
+      "registry.example.test:5000/team/app:latest",
+      "abcdef1234567890",
+    ),
+    "registry.example.test:5000/team/app:git-abcdef123456",
+  );
+  assert.equal(
+    toImmutableBuildImageTag("team/app", "0123456789abcdef"),
+    "team/app:git-0123456789ab",
+  );
+  assert.throws(
+    () => toImmutableBuildImageTag("team/app:latest", "not-a-sha"),
+    /valid Git commit SHA/,
+  );
+});
 
+test("App Installer rebuild prepares an immutable image before orchestration", () => {
+  const source = readSource(APP_REBUILD_SERVICE);
+  const pullIndex = source.indexOf("dockerPullImage");
+  const immutableIndex = source.indexOf(
+    "The rebuilt image could not be resolved to an immutable Docker image ID",
+  );
+  const orchestrationIndex = source.indexOf(
+    "orchestratePreparedRuntimeReplacement",
+    immutableIndex,
+  );
+
+  assert.ok(pullIndex >= 0);
+  assert.ok(immutableIndex > pullIndex);
+  assert.ok(orchestrationIndex > immutableIndex);
+  assert.match(source, /status: "BUILDING"/);
+  assert.match(source, /status: runtimePreserved \? "FAILED_ROLLED_BACK" : "FAILED"/);
+});
+
+test("stored rollback and redeploy share the prepared runtime orchestrator", () => {
+  const source = readSource(RUNTIME_ORCHESTRATOR);
+  const storedRevision = sourceBlock(
+    source,
+    "async function deployStoredRevision",
+    "export async function rollbackContainerToDeployment",
+  );
+
+  assert.match(storedRevision, /resolveRuntimeReplacementPlan/);
+  assert.match(storedRevision, /orchestratePreparedRuntimeReplacement/);
+  assert.doesNotMatch(
+    storedRevision,
+    /input\.operation === "REDEPLOY"\s*&&\s*strategy/,
+  );
+});

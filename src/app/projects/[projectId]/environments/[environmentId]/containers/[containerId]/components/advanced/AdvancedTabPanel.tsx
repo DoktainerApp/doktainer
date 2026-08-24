@@ -1,94 +1,14 @@
-import {
-  Clock3,
-  Cpu,
-  Database,
-  RefreshCcw,
-  ShieldCheck,
-  ToggleLeft,
-  ToggleRight,
-} from "lucide-react";
-import type {
-  AdvancedAuditEvent,
-  AdvancedSettingItem,
-  AdvancedTabData,
-  AppAction,
-} from "../../types/app-detail-types";
+import type { AdvancedTabData } from "../../types/app-detail-types";
 import PanelShell from "../overview/PanelShell";
 import AdvancedSummaryCard from "./AdvancedSummaryCard";
 
 interface AdvancedTabPanelProps {
   advanced: AdvancedTabData;
-  activeAction?: AppAction["id"] | null;
-  onReset: () => void;
-  onRemove: () => void;
-}
-
-const auditToneColor: Record<AdvancedAuditEvent["tone"], string> = {
-  info: "var(--accent-blue)",
-  success: "var(--accent-green)",
-  warning: "var(--accent-yellow)",
-};
-
-function SettingsRow({ item }: { item: AdvancedSettingItem }) {
-  return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "minmax(0, 1fr) auto",
-        gap: 10,
-        alignItems: "center",
-        padding: "10px 11px",
-        border: "1px solid var(--border)",
-        borderRadius: 7,
-        background: "var(--bg-input)",
-      }}
-    >
-      <div style={{ minWidth: 0 }}>
-        <p
-          style={{
-            margin: 0,
-            color: "var(--text-primary)",
-            fontSize: 12,
-            fontWeight: 700,
-          }}
-        >
-          {item.label}
-        </p>
-        <p
-          style={{
-            marginTop: 4,
-            color: "var(--text-muted)",
-            fontSize: 11,
-            lineHeight: 1.45,
-          }}
-        >
-          {item.description}
-        </p>
-      </div>
-      <button
-        type="button"
-        className="btn btn-ghost"
-        aria-label={`${item.label} status`}
-        style={{
-          minHeight: 30,
-          padding: "4px 8px",
-          color: item.enabled ? "var(--accent-green)" : "var(--text-muted)",
-        }}
-      >
-        {item.enabled ? <ToggleRight size={18} /> : <ToggleLeft size={18} />}
-      </button>
-    </div>
-  );
 }
 
 export default function AdvancedTabPanel({
   advanced,
-  activeAction,
-  onReset,
-  onRemove,
 }: AdvancedTabPanelProps) {
-  const actionBusy = activeAction !== null && activeAction !== undefined;
-
   return (
     <section style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       <div

@@ -16,6 +16,7 @@ export type ContainerHealthResult = {
   healthy: boolean;
   status:
     | "healthy"
+    | "running_unverified"
     | "unhealthy"
     | "starting"
     | "not_running"
@@ -68,9 +69,10 @@ export function evaluateDockerHealth(
   }
 
   return {
-    healthy: true,
-    status: "healthy",
-    reason: "Container is running and the image has no Docker health check",
+    healthy: false,
+    status: "running_unverified",
+    reason:
+      "Container is running, but the image has no Docker health check to verify readiness",
   };
 }
 
@@ -101,7 +103,8 @@ export async function waitForDockerHealth(input: {
       }
       if (
         result.status === "unhealthy" ||
-        result.status === "not_running"
+        result.status === "not_running" ||
+        result.status === "running_unverified"
       ) {
         return { ...result, attempts, durationMs: Date.now() - startedAt };
       }
@@ -122,5 +125,3 @@ export async function waitForDockerHealth(input: {
     durationMs: Date.now() - startedAt,
   };
 }
-
-

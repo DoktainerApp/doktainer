@@ -77,6 +77,23 @@ export default function AppDetailHeader({
   const hasActiveMenuAction = menuActions.some(
     (action) => action.id === activeAction,
   );
+  const normalizedStatus = app.status.trim().toUpperCase();
+  const statusColor =
+    normalizedStatus === "RUNNING"
+      ? "var(--accent-green)"
+      : normalizedStatus === "ERROR"
+        ? "var(--accent-red)"
+        : normalizedStatus === "STARTING" || normalizedStatus === "RESTARTING"
+          ? "#d97706"
+          : "var(--text-muted)";
+  const statusGlow =
+    normalizedStatus === "RUNNING"
+      ? "rgba(34,197,94,0.12)"
+      : normalizedStatus === "ERROR"
+        ? "rgba(239,68,68,0.12)"
+        : normalizedStatus === "STARTING" || normalizedStatus === "RESTARTING"
+          ? "rgba(245,158,11,0.12)"
+          : "rgba(148,163,184,0.12)";
 
   return (
     <section
@@ -168,7 +185,7 @@ export default function AppDetailHeader({
                 display: "inline-flex",
                 alignItems: "center",
                 gap: 6,
-                color: "var(--accent-green)",
+                color: statusColor,
                 fontSize: 12,
                 fontWeight: 700,
                 flexShrink: 0,
@@ -179,8 +196,8 @@ export default function AppDetailHeader({
                   width: 7,
                   height: 7,
                   borderRadius: "50%",
-                  background: "var(--accent-green)",
-                  boxShadow: "0 0 0 4px rgba(34,197,94,0.12)",
+                  background: statusColor,
+                  boxShadow: `0 0 0 4px ${statusGlow}`,
                 }}
               />
               {app.status}
@@ -237,8 +254,9 @@ export default function AppDetailHeader({
                 type="button"
                 key={action.label}
                 onClick={() => onAction(action.id)}
-                disabled={actionBusy}
+                disabled={actionBusy || action.disabled}
                 aria-busy={isBusy}
+                title={action.disabledReason}
                 className={getActionClassName(action)}
                 style={{ flex: "1 1 92px", minWidth: 0, maxWidth: 132 }}
               >
@@ -251,6 +269,7 @@ export default function AppDetailHeader({
               </button>
             );
           })}
+          {menuActions.length > 0 ? (
           <div ref={menuRef} style={{ position: "relative", flex: "0 0 44px" }}>
             <button
               ref={menuButtonRef}
@@ -295,8 +314,9 @@ export default function AppDetailHeader({
                       type="button"
                       key={action.id}
                       className="btn btn-ghost"
-                      disabled={actionBusy}
+                      disabled={actionBusy || action.disabled}
                       aria-busy={isBusy}
+                      title={action.disabledReason}
                       onClick={() => {
                         setMenuOpen(false);
                         onAction(action.id);
@@ -324,6 +344,7 @@ export default function AppDetailHeader({
             )
               : null}
           </div>
+          ) : null}
         </div>
       </div>
     </section>

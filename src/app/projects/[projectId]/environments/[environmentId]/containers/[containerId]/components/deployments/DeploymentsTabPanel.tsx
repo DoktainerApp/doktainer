@@ -16,6 +16,7 @@ interface DeploymentsTabPanelProps {
   onRollback: (deploymentId: string) => void;
   onViewDetails: (deploymentId: string) => void;
   rollingBackId?: string | null;
+  allowRollback?: boolean;
 }
 
 const statusClass: Record<DeploymentHistoryItem["status"], string> = {
@@ -30,6 +31,7 @@ export default function DeploymentsTabPanel({
   onRollback,
   onViewDetails,
   rollingBackId = null,
+  allowRollback = false,
 }: DeploymentsTabPanelProps) {
   const [statusFilter, setStatusFilter] = useState<
     "ALL" | DeploymentHistoryItem["status"]
@@ -219,7 +221,7 @@ export default function DeploymentsTabPanel({
                         >
                           <Eye size={13} />
                         </button>
-                        {deployment.canRollback ? (
+                        {allowRollback && deployment.canRollback ? (
                           <button
                             type="button"
                             className="btn btn-ghost btn-small"

@@ -31,22 +31,47 @@ import { withCommandLogSink } from "../services/ssh.service";
 import { rebuildAppInstall } from "../services/app-install-rebuild.service";
 import {
   createDeployment,
+  appendDeploymentEvent,
+  getContainerDeploymentSummaries,
   getDeployment,
+  getDeploymentState,
+  listDeploymentEvents,
   listDeployments,
   updateDeployment,
 } from "../services/deployment.service";
-import { rollbackContainerToDeployment } from "../services/deployment-rollback.service";
+import {
+  orchestratePreparedRuntimeReplacement,
+  previewCurrentRevisionRedeploy,
+  redeployContainerCurrentRevision,
+  resolveCurrentRuntimeSpec,
+  resolveRuntimeReplacementPlan,
+  RollbackRuntimeError,
+  rollbackContainerToDeployment,
+  type RuntimeReplacementSpec,
+} from "../services/deployment-rollback.service";
 import {
   acquireDeploymentLock,
   releaseDeploymentLock,
   startDeploymentLockHeartbeat,
 } from "../services/deployment-lock.service";
-import { sanitizeDeploymentError } from "../services/deployment-error.service";
+import {
+  sanitizeContainerConfigurationError,
+  sanitizeDeploymentError,
+} from "../services/deployment-error.service";
 import { reconcileInterruptedRebuild } from "../services/deployment-recovery.service";
 import {
   formatDockerInspectMountBindings,
   type DockerInspectMount as DockerInspectRuntimeMount,
 } from "../services/docker-inspect-format";
+import {
+  buildContainerConfigurationPlan,
+  extractContainerConfiguration,
+  extractContainerMemorySwapMb,
+  resolveMemorySwapLimitMb,
+  type ContainerConfiguration,
+  type ContainerConfigurationDraft,
+} from "../services/container-configuration.service";
+import { buildContainerCapabilities } from "../services/container-capabilities.service";
 
 const DeploySourceTypeSchema = z.enum([
   "APP_INSTALLER",
@@ -143,6 +168,43 @@ const ContainerCreateFolderSchema = z.object({
 const ContainerRenamePathSchema = z.object({
   path: z.string().min(1).max(2048),
   newPath: z.string().min(1).max(2048),
+});
+
+const ContainerConfigurationDraftSchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(1)
+    .max(128)
+    .regex(/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/),
+  restartPolicy: z.enum(["no", "always", "unless-stopped", "on-failure"]),
+  cpuLimit: z.number().finite().min(0).max(256),
+  memoryLimitMb: z.number().int().min(0).max(1_048_576),
+  networks: z
+    .array(
+      z
+        .string()
+        .trim()
+        .min(1)
+        .max(128)
+        .regex(/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/),
+    )
+    .min(1)
+    .max(32),
+});
+
+const ContainerConfigurationPreviewSchema = z.object({
+  draft: ContainerConfigurationDraftSchema,
+});
+
+const ContainerConfigurationApplySchema = z.object({
+  draft: ContainerConfigurationDraftSchema,
+  expectedConfigRevision: z.string().regex(/^[a-f0-9]{64}$/i),
+  idempotencyKey: z.string().trim().min(8).max(200),
+});
+
+const ContainerRedeploySchema = z.object({
+  idempotencyKey: z.string().trim().min(8).max(200),
 });
 
 const CONTAINER_UPLOAD_CONTENT_BASE64_MAX_LENGTH = 8_000_000;
@@ -1695,6 +1757,82 @@ function buildDeploymentSnapshot(
   };
 }
 
+function buildLiveConfigurationSnapshot(
+  container: {
+    image: string;
+    ports: unknown;
+    envVars: unknown;
+    volumes: unknown;
+  },
+  configuration: ContainerConfiguration,
+) {
+  return {
+    image: container.image,
+    ports: formatStoredCsv(container.ports),
+    env: formatStoredEnvLines(container.envVars),
+    volumes: formatStoredCsv(container.volumes),
+    network: configuration.primaryNetwork ?? configuration.networks[0] ?? "bridge",
+    networks: configuration.networks,
+    name: configuration.name,
+    restartPolicy: configuration.restartPolicy,
+    cpuLimit: configuration.cpuLimit,
+    memoryLimitMb: configuration.memoryLimitMb,
+  };
+}
+
+async function resolveContainerConfigurationContext(input: {
+  containerId: string;
+  organizationId?: string;
+  draft?: ContainerConfigurationDraft;
+}) {
+  const container = await prisma.container.findFirst({
+    where: {
+      id: input.containerId,
+      server: { organizationId: input.organizationId! },
+    },
+    include: { server: true },
+  });
+  if (!container) return null;
+
+  const runtimeRef = container.dockerId || container.name;
+  const [inspect, networks] = await Promise.all([
+    ssh.dockerInspect(container.server, runtimeRef),
+    ssh.listDockerNetworkSummaries(container.server),
+  ]);
+  const current = extractContainerConfiguration(inspect);
+  const currentMemorySwapMb = extractContainerMemorySwapMb(inspect);
+  const draft: ContainerConfigurationDraft = input.draft ?? {
+    name: current.name,
+    restartPolicy: current.restartPolicy,
+    cpuLimit: current.cpuLimit,
+    memoryLimitMb: current.memoryLimitMb,
+    networks: current.networks,
+  };
+  const plan = buildContainerConfigurationPlan({
+    current,
+    draft,
+    availableNetworks: networks.map((network) => network.name),
+    composeManaged: container.deployMode === "COMPOSE",
+  });
+
+  if (draft.name.trim().toLowerCase() !== current.name.toLowerCase()) {
+    const runtimeContainers = await ssh.listDockerContainers(container.server);
+    const normalizedDraftName = draft.name.trim().toLowerCase();
+    const nameConflict = runtimeContainers.some(
+      (runtimeContainer) =>
+        runtimeContainer.id !== container.dockerId &&
+        runtimeContainer.name.toLowerCase() === normalizedDraftName,
+    );
+    if (nameConflict) {
+      plan.blockedReasons.push(
+        `Container name ${draft.name.trim()} is already in use on this server.`,
+      );
+    }
+  }
+
+  return { container, runtimeRef, networks, plan, currentMemorySwapMb };
+}
+
 export async function containerRoutes(app: FastifyInstance) {
   const containerReadAccess = [
     authenticate,
@@ -1755,6 +1893,34 @@ export async function containerRoutes(app: FastifyInstance) {
     });
 
   app.get(
+    "/:id/deployment-state",
+    { preHandler: containerReadAccess },
+    async (req, reply) => {
+      const { id } = req.params as { id: string };
+      const container = await prisma.container.findFirst({
+        where: { id, server: { organizationId: req.organizationId! } },
+        include: { server: true },
+      });
+      if (!container) {
+        return reply
+          .status(404)
+          .send({ success: false, error: "Container not found" });
+      }
+
+      await reconcileInterruptedRebuild({
+        container,
+        inspectRuntime: ssh.dockerInspect,
+      });
+
+      const data = await getDeploymentState({
+        containerId: id,
+        organizationId: req.organizationId!,
+      });
+      return reply.send({ success: true, data });
+    },
+  );
+
+  app.get(
     "/:id/deployments",
     { preHandler: containerReadAccess },
     async (req, reply) => {
@@ -1786,6 +1952,36 @@ export async function containerRoutes(app: FastifyInstance) {
         page,
         pageSize,
       });
+      return reply.send({ success: true, data });
+    },
+  );
+
+  app.get(
+    "/:id/deployments/:deploymentId/logs",
+    { preHandler: containerReadAccess },
+    async (req, reply) => {
+      const { id, deploymentId } = req.params as {
+        id: string;
+        deploymentId: string;
+      };
+      const query = req.query as { page?: string; pageSize?: string };
+      const page = Math.max(1, Number.parseInt(query.page ?? "1", 10) || 1);
+      const pageSize = Math.min(
+        200,
+        Math.max(1, Number.parseInt(query.pageSize ?? "100", 10) || 100),
+      );
+      const data = await listDeploymentEvents({
+        containerId: id,
+        deploymentId,
+        organizationId: req.organizationId!,
+        page,
+        pageSize,
+      });
+      if (!data) {
+        return reply
+          .status(404)
+          .send({ success: false, error: "Deployment not found" });
+      }
       return reply.send({ success: true, data });
     },
   );
@@ -1834,8 +2030,14 @@ export async function containerRoutes(app: FastifyInstance) {
           meta: {
             rollbackDeploymentId: result.deploymentId,
             targetDeploymentId: result.targetDeploymentId,
+            strategy: result.strategy,
+            proxyTrafficContinuous: result.proxyTrafficContinuous,
+            directPortInterruptionPossible:
+              result.directPortInterruptionPossible,
           },
-          message: "Container rolled back successfully",
+          message: result.proxyTrafficContinuous
+            ? "Container rolled back through a validated proxy candidate"
+            : "Container rolled back with runtime recovery; a brief interruption may have occurred",
         });
       } catch (error) {
         return reply.status(400).send({
@@ -1844,6 +2046,532 @@ export async function containerRoutes(app: FastifyInstance) {
             fallback: "Rollback failed",
           }),
         });
+      }
+    },
+  );
+
+  app.get(
+    "/:id/configuration",
+    { preHandler: containerReadAccess },
+    async (req, reply) => {
+      const { id } = req.params as { id: string };
+      try {
+        const context = await resolveContainerConfigurationContext({
+          containerId: id,
+          organizationId: req.organizationId,
+        });
+        if (!context) {
+          return reply
+            .status(404)
+            .send({ success: false, error: "Container not found" });
+        }
+        return reply.send({
+          success: true,
+          data: {
+            current: context.plan.current,
+            draft: context.plan.draft,
+            expectedConfigRevision: context.plan.expectedConfigRevision,
+            availableNetworks: context.networks.map((network) => ({
+              name: network.name,
+              driver: network.driver,
+              scope: network.scope,
+            })),
+            editableFields: [
+              "name",
+              "restartPolicy",
+              "cpuLimit",
+              "memoryLimitMb",
+              "networks",
+            ],
+            deferredFields: [
+              "image",
+              "ports",
+              "environmentVariables",
+              "volumes",
+              "command",
+              "entrypoint",
+              "healthcheck",
+              "primaryNetwork",
+            ],
+            blockedReasons: context.plan.blockedReasons,
+          },
+        });
+      } catch (error) {
+        return reply.status(400).send({
+          success: false,
+          error: sanitizeDeploymentError(error, {
+            fallback: "Failed to inspect container configuration",
+          }),
+        });
+      }
+    },
+  );
+
+  app.post(
+    "/:id/configuration/preview",
+    { preHandler: containerWriteAccess },
+    async (req, reply) => {
+      const { id } = req.params as { id: string };
+      const body = ContainerConfigurationPreviewSchema.safeParse(req.body);
+      if (!body.success) {
+        return reply
+          .status(400)
+          .send({ success: false, error: body.error.flatten() });
+      }
+
+      try {
+        const context = await resolveContainerConfigurationContext({
+          containerId: id,
+          organizationId: req.organizationId,
+          draft: body.data.draft,
+        });
+        if (!context) {
+          return reply
+            .status(404)
+            .send({ success: false, error: "Container not found" });
+        }
+        return reply.send({ success: true, data: context.plan });
+      } catch (error) {
+        return reply.status(400).send({
+          success: false,
+          error: sanitizeDeploymentError(error, {
+            fallback: "Configuration preview failed",
+          }),
+        });
+      }
+    },
+  );
+
+  app.post(
+    "/:id/configuration/apply",
+    { preHandler: containerWriteAccess },
+    async (req, reply) => {
+      const { id } = req.params as { id: string };
+      const body = ContainerConfigurationApplySchema.safeParse(req.body);
+      if (!body.success) {
+        return reply
+          .status(400)
+          .send({ success: false, error: body.error.flatten() });
+      }
+
+      const existing = await prisma.deployment.findUnique({
+        where: {
+          containerId_idempotencyKey: {
+            containerId: id,
+            idempotencyKey: body.data.idempotencyKey,
+          },
+        },
+      });
+      if (existing) {
+        const container = await getAccessibleContainer(id, req.organizationId);
+        if (!container) {
+          return reply
+            .status(404)
+            .send({ success: false, error: "Container not found" });
+        }
+        return reply.status(existing.status === "ACTIVE" ? 200 : 409).send({
+          success: existing.status === "ACTIVE",
+          data: existing.status === "ACTIVE" ? container : undefined,
+          error:
+            existing.status === "ACTIVE"
+              ? undefined
+              : "This configuration request has already been processed.",
+          meta: { deploymentId: existing.id, idempotentReplay: true },
+        });
+      }
+
+      let lock: { token: string } | null = null;
+      let heartbeat: ReturnType<typeof startDeploymentLockHeartbeat> | null = null;
+      let deploymentId: string | null = null;
+      let context: Awaited<ReturnType<typeof resolveContainerConfigurationContext>> = null;
+      let resourceUpdateApplied = false;
+      let appliedResourceUpdate: ssh.DockerContainerUpdateOptions = {};
+      let renamed = false;
+      let mutationStarted = false;
+      let databaseUpdated = false;
+      const connectedNetworks: string[] = [];
+      const disconnectedNetworks: string[] = [];
+
+      try {
+        lock = await acquireDeploymentLock({ containerId: id });
+        heartbeat = startDeploymentLockHeartbeat({
+          containerId: id,
+          token: lock.token,
+        });
+        context = await resolveContainerConfigurationContext({
+          containerId: id,
+          organizationId: req.organizationId,
+          draft: body.data.draft,
+        });
+        if (!context) {
+          return reply
+            .status(404)
+            .send({ success: false, error: "Container not found" });
+        }
+        if (
+          context.plan.expectedConfigRevision !==
+          body.data.expectedConfigRevision
+        ) {
+          return reply.status(409).send({
+            success: false,
+            error:
+              "Container configuration changed after the preview. Review the latest configuration before applying.",
+            data: context.plan,
+          });
+        }
+        if (context.plan.blockedReasons.length > 0) {
+          return reply.status(409).send({
+            success: false,
+            error: context.plan.blockedReasons.join(" "),
+            data: context.plan,
+          });
+        }
+        if (context.plan.changes.length === 0) {
+          return reply.status(400).send({
+            success: false,
+            error: "No configuration changes to apply.",
+          });
+        }
+
+        const beforeSnapshot = buildLiveConfigurationSnapshot(
+          context.container,
+          context.plan.current,
+        );
+        const deployment = await createDeployment({
+          containerId: id,
+          organizationId: req.organizationId!,
+          serverId: context.container.serverId,
+          userId: req.userId,
+          idempotencyKey: body.data.idempotencyKey,
+          status: "RUNNING",
+          trigger: "CONFIG_APPLY",
+          version: `config-${context.plan.expectedConfigRevision.slice(0, 12)}`,
+          image: context.container.image,
+          strategy: "LIVE_UPDATE",
+          configSnapshot: beforeSnapshot,
+          startedAt: new Date(),
+        });
+        deploymentId = deployment.id;
+        await appendDeploymentEvent({
+          deploymentId,
+          status: "RUNNING",
+          message: "Validated configuration preview and acquired container lock.",
+          metadata: {
+            changedFields: context.plan.changes.map((change) => change.field),
+            requestedResources: {
+              cpuLimit: context.plan.draft.cpuLimit,
+              memoryLimitMb: context.plan.draft.memoryLimitMb,
+            },
+          },
+        });
+
+        heartbeat.assertOwned();
+        const resourceFields = new Set(
+          context.plan.changes.map((change) => change.field),
+        );
+        if (
+          resourceFields.has("restartPolicy") ||
+          resourceFields.has("cpuLimit") ||
+          resourceFields.has("memoryLimitMb")
+        ) {
+          const resourceUpdate: ssh.DockerContainerUpdateOptions = {};
+          if (resourceFields.has("restartPolicy")) {
+            resourceUpdate.restartPolicy = context.plan.draft.restartPolicy;
+          }
+          if (resourceFields.has("cpuLimit")) {
+            resourceUpdate.cpuLimit = context.plan.draft.cpuLimit;
+          }
+          if (resourceFields.has("memoryLimitMb")) {
+            resourceUpdate.memoryLimitMb = context.plan.draft.memoryLimitMb;
+            resourceUpdate.memorySwapLimitMb = resolveMemorySwapLimitMb({
+              currentMemoryLimitMb: context.plan.current.memoryLimitMb,
+              currentMemorySwapMb: context.currentMemorySwapMb,
+              targetMemoryLimitMb: context.plan.draft.memoryLimitMb,
+            });
+          }
+          mutationStarted = true;
+          resourceUpdateApplied = true;
+          appliedResourceUpdate = resourceUpdate;
+          await ssh.dockerUpdateContainer(
+            context.container.server,
+            context.runtimeRef,
+            resourceUpdate,
+          );
+        }
+        for (const network of context.plan.addedNetworks) {
+          heartbeat.assertOwned();
+          mutationStarted = true;
+          await ssh.dockerConnectNetwork(context.container.server, context.runtimeRef, network);
+          connectedNetworks.push(network);
+        }
+        for (const network of context.plan.removedNetworks) {
+          heartbeat.assertOwned();
+          mutationStarted = true;
+          await ssh.dockerDisconnectNetwork(context.container.server, context.runtimeRef, network);
+          disconnectedNetworks.push(network);
+        }
+        if (resourceFields.has("name")) {
+          heartbeat.assertOwned();
+          mutationStarted = true;
+          await ssh.dockerRename(
+            context.container.server,
+            context.runtimeRef,
+            context.plan.draft.name,
+          );
+          renamed = true;
+        }
+
+        heartbeat.assertOwned();
+        const finalInspect = await ssh.dockerInspect(
+          context.container.server,
+          context.container.dockerId || context.plan.draft.name,
+        );
+        const finalConfiguration = extractContainerConfiguration(finalInspect);
+        for (const field of resourceFields) {
+          if (
+            (field === "restartPolicy" ||
+              field === "cpuLimit" ||
+              field === "memoryLimitMb") &&
+            finalConfiguration[field] !== context.plan.draft[field]
+          ) {
+            throw new Error(
+              `Docker did not retain the requested ${field} value after the update`,
+            );
+          }
+        }
+        const afterSnapshot = buildLiveConfigurationSnapshot(
+          context.container,
+          finalConfiguration,
+        );
+        const [updatedContainer] = await prisma.$transaction([
+          prisma.container.update({
+            where: { id },
+            data: {
+              name: finalConfiguration.name,
+              restartPolicy: finalConfiguration.restartPolicy,
+            },
+            include: { server: { select: { name: true, ip: true } } },
+          }),
+          prisma.appInstall.updateMany({
+            where: {
+              serverId: context.container.serverId,
+              containerName: {
+                equals: context.plan.current.name,
+                mode: "insensitive",
+              },
+            },
+            data: { containerName: finalConfiguration.name },
+          }),
+        ]);
+        databaseUpdated = true;
+        const activeDeployment = await updateDeployment(deploymentId, {
+          status: "ACTIVE",
+          completedAt: new Date(),
+          configSnapshot: afterSnapshot,
+          eventMessage: "Applied live container configuration successfully.",
+          eventMetadata: {
+            changedFields: context.plan.changes.map((change) => change.field),
+          },
+        });
+        await auditLog({
+          userId: req.userId,
+          serverId: context.container.serverId,
+          action: "CONTAINER_CONFIGURATION_APPLY",
+          category: "CONTAINER",
+          level: "INFO",
+          message: `Applied configuration changes to container "${finalConfiguration.name}"`,
+        }).catch(async () => {
+          await appendDeploymentEvent({
+            deploymentId: activeDeployment.id,
+            status: "ACTIVE",
+            level: "WARNING",
+            message: "Configuration applied, but the general audit log could not be written.",
+          }).catch(() => undefined);
+        });
+        if (activeDeployment.previousDeploymentId) {
+          const previous = await prisma.deployment.findUnique({
+            where: { id: activeDeployment.previousDeploymentId },
+            select: { status: true },
+          });
+          if (previous?.status === "ACTIVE") {
+            await updateDeployment(activeDeployment.previousDeploymentId, {
+              status: "SUPERSEDED",
+              eventMessage: "Superseded by a newer active configuration revision.",
+            }).catch(() => undefined);
+          }
+        }
+        invalidateContainerMetricsCache({
+          organizationId: req.organizationId,
+          serverId: context.container.serverId,
+          containerId: id,
+        });
+
+        return reply.send({
+          success: true,
+          data: updatedContainer,
+          meta: {
+            deploymentId,
+            configRevision: activeDeployment.configRevision,
+            plan: context.plan,
+          },
+          message: "Container configuration applied",
+        });
+      } catch (error) {
+        const compensationErrors: string[] = [];
+        if (context) {
+          if (renamed) {
+            await ssh
+              .dockerRename(
+                context.container.server,
+                context.container.dockerId || context.plan.draft.name,
+                context.plan.current.name,
+              )
+              .catch((compensationError: unknown) => {
+                compensationErrors.push(
+                  compensationError instanceof Error
+                    ? compensationError.message
+                    : "Failed to restore container name",
+                );
+              });
+          }
+          for (const network of [...disconnectedNetworks].reverse()) {
+            await ssh
+              .dockerConnectNetwork(context.container.server, context.runtimeRef, network)
+              .catch((compensationError: unknown) => {
+                compensationErrors.push(
+                  compensationError instanceof Error
+                    ? compensationError.message
+                    : `Failed to reconnect ${network}`,
+                );
+              });
+          }
+          for (const network of [...connectedNetworks].reverse()) {
+            await ssh
+              .dockerDisconnectNetwork(context.container.server, context.runtimeRef, network)
+              .catch((compensationError: unknown) => {
+                compensationErrors.push(
+                  compensationError instanceof Error
+                    ? compensationError.message
+                    : `Failed to disconnect ${network}`,
+                );
+              });
+          }
+          if (resourceUpdateApplied) {
+            const restoreResourceUpdate: ssh.DockerContainerUpdateOptions = {};
+            if (appliedResourceUpdate.restartPolicy !== undefined) {
+              restoreResourceUpdate.restartPolicy =
+                context.plan.current.restartPolicy;
+            }
+            if (appliedResourceUpdate.cpuLimit !== undefined) {
+              restoreResourceUpdate.cpuLimit = context.plan.current.cpuLimit;
+            }
+            if (appliedResourceUpdate.memoryLimitMb !== undefined) {
+              restoreResourceUpdate.memoryLimitMb =
+                context.plan.current.memoryLimitMb;
+              restoreResourceUpdate.memorySwapLimitMb =
+                context.currentMemorySwapMb;
+            }
+            await ssh
+              .dockerUpdateContainer(
+                context.container.server,
+                context.runtimeRef,
+                restoreResourceUpdate,
+              )
+              .catch((compensationError: unknown) => {
+                compensationErrors.push(
+                  compensationError instanceof Error
+                    ? compensationError.message
+                    : "Failed to restore resource limits",
+                );
+              });
+          }
+          if (databaseUpdated) {
+            try {
+              const recoveredInspect = await ssh.dockerInspect(
+                context.container.server,
+                context.container.dockerId ||
+                  (renamed
+                    ? context.plan.draft.name
+                    : context.plan.current.name),
+              );
+              const recoveredConfiguration =
+                extractContainerConfiguration(recoveredInspect);
+              await prisma.$transaction([
+                prisma.container.update({
+                  where: { id },
+                  data: {
+                    name: recoveredConfiguration.name,
+                    restartPolicy: recoveredConfiguration.restartPolicy,
+                  },
+                }),
+                prisma.appInstall.updateMany({
+                  where: {
+                    serverId: context.container.serverId,
+                    containerName: {
+                      in: [
+                        context.plan.current.name,
+                        context.plan.draft.name,
+                      ],
+                      mode: "insensitive",
+                    },
+                  },
+                  data: { containerName: recoveredConfiguration.name },
+                }),
+              ]);
+            } catch (compensationError) {
+              compensationErrors.push(
+                compensationError instanceof Error
+                  ? compensationError.message
+                  : "Failed to reconcile stored container configuration",
+              );
+            }
+          }
+        }
+
+        const safeError = sanitizeContainerConfigurationError(error);
+        if (deploymentId) {
+          await updateDeployment(deploymentId, {
+            status:
+              mutationStarted && compensationErrors.length === 0
+                ? "FAILED_ROLLED_BACK"
+                : "FAILED",
+            error: safeError,
+            completedAt: new Date(),
+            rollbackReason:
+              !mutationStarted
+                ? null
+                : compensationErrors.length === 0
+                ? "Live changes were reverted after apply failed."
+                : "One or more compensation steps failed.",
+            eventMessage:
+              !mutationStarted
+                ? "Configuration apply failed before Docker was changed."
+                : compensationErrors.length === 0
+                ? "Configuration apply failed; restored the previous runtime configuration."
+                : "Configuration apply failed and automatic recovery was incomplete.",
+            eventMetadata:
+              compensationErrors.length === 0
+                ? undefined
+                : { recoveryErrors: compensationErrors },
+          }).catch(() => undefined);
+        }
+        return reply.status(409).send({
+          success: false,
+          error:
+            !mutationStarted
+              ? safeError
+              : compensationErrors.length === 0
+              ? `${safeError} Previous configuration was restored.`
+              : `${safeError} Automatic recovery was incomplete; inspect the runtime before retrying.`,
+          meta: { deploymentId, recoveryErrors: compensationErrors },
+        });
+      } finally {
+        heartbeat?.stop();
+        if (lock) {
+          await releaseDeploymentLock({ containerId: id, token: lock.token }).catch(
+            () => undefined,
+          );
+        }
       }
     },
   );
@@ -2011,10 +2739,57 @@ export async function containerRoutes(app: FastifyInstance) {
         ...(query.status ? { status: query.status as any } : {}),
       },
       orderBy: { createdAt: "desc" },
-      include: { server: { select: { name: true, ip: true } } },
+      include: {
+        server: { select: { name: true, ip: true } },
+        deploymentSource: { select: { repoUrl: true } },
+      },
     });
 
-    return reply.send({ success: true, data: containers });
+    const [deploymentSummaries, appInstalls] = await Promise.all([
+      getContainerDeploymentSummaries({
+        containerIds: containers.map((container) => container.id),
+        organizationId: req.organizationId!,
+      }),
+      prisma.appInstall.findMany({
+        where: {
+          serverId: { in: [...new Set(containers.map((item) => item.serverId))] },
+          containerName: { not: null },
+        },
+        select: { serverId: true, containerName: true },
+      }),
+    ]);
+    const appInstallKeys = new Set(
+      appInstalls.map(
+        (install) =>
+          `${install.serverId}:${install.containerName?.trim().toLowerCase()}`,
+      ),
+    );
+
+    return reply.send({
+      success: true,
+      data: containers.map((container) => {
+        const { deploymentSource, ...publicContainer } = container;
+        const deploymentSummary =
+          deploymentSummaries.get(container.id) ?? null;
+        const hasAppInstall = appInstallKeys.has(
+          `${container.serverId}:${container.name.trim().toLowerCase()}`,
+        );
+        return {
+          ...publicContainer,
+          deploymentSummary,
+          capabilities: buildContainerCapabilities({
+            sourceType: container.sourceType,
+            deployMode: container.deployMode,
+            hasDeploymentSource: Boolean(deploymentSource),
+            hasGitSource: Boolean(deploymentSource?.repoUrl?.trim()),
+            hasAppInstall,
+            hasDeploymentHistory: Boolean(deploymentSummary?.latestAttempt),
+            redeployAvailable: deploymentSummary?.redeployAvailable ?? false,
+            rollbackAvailable: deploymentSummary?.rollbackAvailable ?? false,
+          }),
+        };
+      }),
+    });
   });
 
   app.post(
@@ -2838,13 +3613,47 @@ export async function containerRoutes(app: FastifyInstance) {
         id,
         server: { organizationId: req.organizationId! },
       },
-      include: { server: { select: { name: true, ip: true } } },
+      include: {
+        server: { select: { name: true, ip: true } },
+        deploymentSource: { select: { repoUrl: true } },
+      },
     });
     if (!container)
       return reply
         .status(404)
         .send({ success: false, error: "Container not found" });
-    return reply.send({ success: true, data: container });
+    const [deploymentSummaries, appInstall] = await Promise.all([
+      getContainerDeploymentSummaries({
+        containerIds: [container.id],
+        organizationId: req.organizationId!,
+      }),
+      prisma.appInstall.findFirst({
+        where: {
+          serverId: container.serverId,
+          containerName: { equals: container.name, mode: "insensitive" },
+        },
+        select: { id: true },
+      }),
+    ]);
+    const deploymentSummary = deploymentSummaries.get(container.id) ?? null;
+    const { deploymentSource, ...publicContainer } = container;
+    return reply.send({
+      success: true,
+      data: {
+        ...publicContainer,
+        deploymentSummary,
+        capabilities: buildContainerCapabilities({
+          sourceType: container.sourceType,
+          deployMode: container.deployMode,
+          hasDeploymentSource: Boolean(deploymentSource),
+          hasGitSource: Boolean(deploymentSource?.repoUrl?.trim()),
+          hasAppInstall: Boolean(appInstall),
+          hasDeploymentHistory: Boolean(deploymentSummary?.latestAttempt),
+          redeployAvailable: deploymentSummary?.redeployAvailable ?? false,
+          rollbackAvailable: deploymentSummary?.rollbackAvailable ?? false,
+        }),
+      },
+    });
   });
 
   // GET /containers/:id/metrics - lightweight runtime metrics for polling.
@@ -3740,6 +4549,120 @@ export async function containerRoutes(app: FastifyInstance) {
     },
   );
 
+  app.get(
+    "/:id/redeploy-plan",
+    { preHandler: containerReadAccess },
+    async (req, reply) => {
+      const { id } = req.params as { id: string };
+      try {
+        const plan = await previewCurrentRevisionRedeploy({
+          containerId: id,
+          organizationId: req.organizationId!,
+        });
+        return reply.send({ success: true, data: plan });
+      } catch (error) {
+        return reply.status(400).send({
+          success: false,
+          error: sanitizeDeploymentError(error, {
+            fallback: "Redeploy preview failed",
+          }),
+        });
+      }
+    },
+  );
+
+  app.post(
+    "/:id/redeploy-job",
+    { preHandler: containerWriteAccess },
+    async (req, reply) => {
+      const { id } = req.params as { id: string };
+      const container = await prisma.container.findFirst({
+        where: {
+          id,
+          server: { organizationId: req.organizationId! },
+        },
+        select: { id: true },
+      });
+
+      if (!container) {
+        return reply
+          .status(404)
+          .send({ success: false, error: "Container not found" });
+      }
+
+      const job = await createProcessJob({
+        type: "container_redeploy",
+        userId: req.userId,
+        organizationId: req.organizationId,
+      });
+
+      runInjectedContainerJob({
+        app,
+        job,
+        method: "POST",
+        url: req.url.replace(/\/redeploy-job(?:\?.*)?$/, "/redeploy"),
+        headers: req.headers,
+        payload: { idempotencyKey: job.id },
+      });
+
+      return reply.status(202).send({
+        success: true,
+        data: serializeProcessJob(job),
+      });
+    },
+  );
+
+  app.post(
+    "/:id/redeploy",
+    { preHandler: containerWriteAccess },
+    async (req, reply) => {
+      const { id } = req.params as { id: string };
+      const body = ContainerRedeploySchema.safeParse(req.body);
+      if (!body.success) {
+        return reply
+          .status(400)
+          .send({ success: false, error: body.error.flatten() });
+      }
+
+      try {
+        const result = await redeployContainerCurrentRevision({
+          containerId: id,
+          organizationId: req.organizationId!,
+          userId: req.userId,
+          idempotencyKey: body.data.idempotencyKey,
+        });
+
+        return reply.send({
+          success: true,
+          data: result.updated,
+          meta: {
+            deploymentId: result.deploymentId,
+            revisionDeploymentId: result.targetDeploymentId,
+            idempotentReplay: result.idempotentReplay,
+            strategy: result.strategy,
+            proxyTrafficContinuous: result.proxyTrafficContinuous,
+            directPortInterruptionPossible:
+              result.directPortInterruptionPossible,
+            overlappingRuntime: result.overlappingRuntime,
+          },
+          message:
+            result.proxyTrafficContinuous
+              ? result.directPortInterruptionPossible
+                ? "Current revision redeployed through a validated proxy candidate; direct host-port traffic may have been briefly interrupted"
+                : "Current revision redeployed through a validated proxy candidate"
+              : "Current revision redeployed with runtime recovery; a brief interruption may have occurred",
+        });
+      } catch (error) {
+        return reply.status(400).send({
+          success: false,
+          error: sanitizeDeploymentError(error, {
+            fallback: "Redeploy failed",
+          }),
+        });
+      }
+    },
+  );
+
   app.post(
     "/:id/rebuild-job",
     { preHandler: containerWriteAccess },
@@ -3809,6 +4732,7 @@ export async function containerRoutes(app: FastifyInstance) {
         typeof startDeploymentLockHeartbeat
       > | null = null;
       let gitAccessToken: string | undefined;
+      let gitRuntimePreservable = false;
 
       try {
         await reconcileInterruptedRebuild({
@@ -3885,7 +4809,19 @@ export async function containerRoutes(app: FastifyInstance) {
           container.deploymentSource.buildType,
           container.deployMode,
         );
+        gitDeploymentLock = await acquireDeploymentLock({
+          containerId: container.id,
+        });
+        gitDeploymentHeartbeat = startDeploymentLockHeartbeat({
+          containerId: container.id,
+          token: gitDeploymentLock.token,
+        });
         const runtimeConfig = await resolveContainerRuntimeConfig(container);
+        const previousRuntime: RuntimeReplacementSpec | null =
+          buildType === "COMPOSE"
+            ? null
+            : await resolveCurrentRuntimeSpec({ container });
+        gitRuntimePreservable = previousRuntime !== null;
         const deploymentProjectName = resolveDeploymentProjectName({
           containerName: container.name,
           source: container.deploymentSource,
@@ -3918,19 +4854,12 @@ export async function containerRoutes(app: FastifyInstance) {
           deploymentPath: container.deploymentSource.deploymentPath,
         };
 
-        gitDeploymentLock = await acquireDeploymentLock({
-          containerId: container.id,
-        });
-        gitDeploymentHeartbeat = startDeploymentLockHeartbeat({
-          containerId: container.id,
-          token: gitDeploymentLock.token,
-        });
         const runningDeployment = await createDeployment({
           containerId: container.id,
           organizationId: req.organizationId!,
           serverId: container.serverId,
           userId: req.userId,
-          status: "RUNNING",
+          status: buildType === "COMPOSE" ? "RUNNING" : "BUILDING",
           trigger: "REBUILD",
           version:
             container.deploymentSource.repoBranch?.trim() || container.image,
@@ -3941,128 +4870,159 @@ export async function containerRoutes(app: FastifyInstance) {
         });
         gitDeploymentId = runningDeployment.id;
 
-        if (buildType !== "COMPOSE") {
-          for (const candidate of [container.dockerId, container.name]) {
-            if (!candidate?.trim()) continue;
-
-            try {
-              await ssh.dockerAction(container.server, candidate, "stop");
-            } catch (error) {
-              if (!isContainerNotFoundError(error)) {
-                throw error;
-              }
-            }
-
-            try {
-              await ssh.dockerAction(container.server, candidate, "rm");
-              break;
-            } catch (error) {
-              if (!isContainerNotFoundError(error)) {
-                throw error;
-              }
-            }
-          }
-        }
-
         const gitDeploymentResult = await ssh.deployContainerFromGitSource(
           container.server,
           {
-          projectName: deploymentProjectName,
-          repoUrl: container.deploymentSource.repoUrl,
-          branch: toOptionalValue(container.deploymentSource.repoBranch),
-          accessToken,
-          buildType,
-          buildPath: toOptionalValue(container.deploymentSource.buildPath),
-          composeFilePath: toOptionalValue(
-            container.deploymentSource.composeFilePath,
-          ),
-          composeEnvFiles,
-          dockerfilePath: toOptionalValue(
-            container.deploymentSource.dockerfilePath,
-          ),
-          dockerContextPath: toOptionalValue(
-            container.deploymentSource.dockerContextPath,
-          ),
-          imageTag: toOptionalValue(container.deploymentSource.imageTag),
-          containerName: container.name,
-          ports: runtimeConfig.ports,
-          portOverride: toOptionalValue(
-            container.deploymentSource.portOverride,
-          ),
-          env: runtimeConfig.env,
-          startCommand: toOptionalValue(
-            container.deploymentSource.startCommand,
-          ),
-          publishDirectory: toOptionalValue(
-            container.deploymentSource.publishDirectory,
-          ),
-          restartPolicy: runtimeConfig.restartPolicy,
-          volumes: runtimeConfig.volumes,
-          network: runtimeConfig.network,
-          deploymentPath: toOptionalValue(
-            container.deploymentSource.deploymentPath,
-          ),
+            projectName: deploymentProjectName,
+            repoUrl: container.deploymentSource.repoUrl,
+            branch: toOptionalValue(container.deploymentSource.repoBranch),
+            accessToken,
+            buildType,
+            buildPath: toOptionalValue(container.deploymentSource.buildPath),
+            composeFilePath: toOptionalValue(
+              container.deploymentSource.composeFilePath,
+            ),
+            composeEnvFiles,
+            dockerfilePath: toOptionalValue(
+              container.deploymentSource.dockerfilePath,
+            ),
+            dockerContextPath: toOptionalValue(
+              container.deploymentSource.dockerContextPath,
+            ),
+            imageTag: toOptionalValue(container.deploymentSource.imageTag),
+            containerName: container.name,
+            ports: runtimeConfig.ports,
+            portOverride: toOptionalValue(
+              container.deploymentSource.portOverride,
+            ),
+            env: runtimeConfig.env,
+            startCommand: toOptionalValue(
+              container.deploymentSource.startCommand,
+            ),
+            publishDirectory: toOptionalValue(
+              container.deploymentSource.publishDirectory,
+            ),
+            restartPolicy: runtimeConfig.restartPolicy,
+            volumes: runtimeConfig.volumes,
+            network: runtimeConfig.network,
+            deploymentPath: toOptionalValue(
+              container.deploymentSource.deploymentPath,
+            ),
+            startRuntime: buildType === "COMPOSE" ? undefined : false,
+            immutableImageTag: buildType === "COMPOSE" ? undefined : true,
           },
         );
         gitDeploymentHeartbeat.assertOwned();
+        let appliedRuntimeSnapshot: RuntimeReplacementSpec | null = null;
 
-        await syncContainersForServers(
-          [container.server],
-          req.userId,
-          (event) => recordDockerCommandTiming(app, event),
-        );
+        const finalizeGitRuntime = async () => {
+          gitDeploymentHeartbeat?.assertOwned();
+          await syncContainersForServers(
+            [container.server],
+            req.userId,
+            (event) => recordDockerCommandTiming(app, event),
+          );
 
-        const serverContainers = await prisma.container.findMany({
-          where: { serverId: container.serverId },
-          orderBy: { createdAt: "desc" },
-        });
+          const serverContainers = await prisma.container.findMany({
+            where: { serverId: container.serverId },
+            orderBy: { createdAt: "desc" },
+          });
+          const matchedContainers = serverContainers.filter((candidate) =>
+            matchesDeploymentTarget(
+              candidate.name,
+              buildType === "COMPOSE" ? deploymentProjectName : container.name,
+              buildType === "COMPOSE" ? "COMPOSE" : container.deployMode,
+            ),
+          );
+          if (matchedContainers.length === 0) {
+            throw new Error(
+              buildType === "COMPOSE"
+                ? "Redeploy from Git finished but no compose containers could be matched after sync"
+                : "Redeploy from Git finished but the container was not found after sync",
+            );
+          }
 
-        const matchedContainers = serverContainers.filter((candidate) =>
-          matchesDeploymentTarget(
-            candidate.name,
-            buildType === "COMPOSE" ? deploymentProjectName : container.name,
-            buildType === "COMPOSE" ? "COMPOSE" : container.deployMode,
-          ),
-        );
-
-        if (matchedContainers.length === 0) {
-          throw new Error(
+          await persistExistingDeploymentSourceMetadata(
+            matchedContainers.map((candidate) => ({ id: candidate.id })),
+            container.sourceType,
             buildType === "COMPOSE"
-              ? "Redeploy from Git finished but no compose containers could be matched after sync"
-              : "Redeploy from Git finished but the container was not found after sync",
+              ? "COMPOSE"
+              : buildType === "DOCKERFILE"
+                ? "DOCKERFILE"
+                : container.deployMode,
+            container.deploymentSource,
           );
-        }
+          const responseContainers = await prisma.container.findMany({
+            where: {
+              id: { in: matchedContainers.map((candidate) => candidate.id) },
+              server: { organizationId: req.organizationId! },
+            },
+            orderBy: { createdAt: "desc" },
+            include: { server: { select: { name: true, ip: true } } },
+          });
+          const updatedContainer =
+            responseContainers.find(
+              (candidate) =>
+                candidate.name.toLowerCase() === container.name.toLowerCase(),
+            ) ?? responseContainers[0];
+          if (!updatedContainer) {
+            throw new Error(
+              "Redeploy from Git finished but no primary container could be resolved",
+            );
+          }
+          return { responseContainers, updatedContainer };
+        };
 
-        await persistExistingDeploymentSourceMetadata(
-          matchedContainers.map((candidate) => ({ id: candidate.id })),
-          container.sourceType,
+        const finalizedRuntime =
           buildType === "COMPOSE"
-            ? "COMPOSE"
-            : buildType === "DOCKERFILE"
-              ? "DOCKERFILE"
-              : container.deployMode,
-          container.deploymentSource,
-        );
-
-        const responseContainers = await prisma.container.findMany({
-          where: {
-            id: { in: matchedContainers.map((candidate) => candidate.id) },
-            server: { organizationId: req.organizationId! },
-          },
-          orderBy: { createdAt: "desc" },
-          include: { server: { select: { name: true, ip: true } } },
-        });
-
-        const updatedContainer =
-          responseContainers.find(
-            (candidate) =>
-              candidate.name.toLowerCase() === container.name.toLowerCase(),
-          ) ?? responseContainers[0];
-        if (!updatedContainer) {
-          throw new Error(
-            "Redeploy from Git finished but no primary container could be resolved",
-          );
-        }
+            ? await finalizeGitRuntime()
+            : await (async () => {
+                if (!previousRuntime || !gitDeploymentResult.preparedRuntime) {
+                  throw new Error(
+                    "Git rebuild did not produce a prepared single-container runtime",
+                  );
+                }
+                const prepared = gitDeploymentResult.preparedRuntime;
+                const targetRuntime: RuntimeReplacementSpec = {
+                  ...previousRuntime,
+                  ...prepared,
+                  networks: Array.from(
+                    new Set([
+                      prepared.network,
+                      ...previousRuntime.networks.filter(
+                        (network) => network !== previousRuntime.network,
+                      ),
+                    ]),
+                  ),
+                  command: "",
+                };
+                appliedRuntimeSnapshot = targetRuntime;
+                const plan = await resolveRuntimeReplacementPlan({
+                  containerId: container.id,
+                  serverId: container.serverId,
+                  targetRuntime,
+                });
+                await updateDeployment(runningDeployment.id, {
+                  status: "BUILDING",
+                  image: prepared.image,
+                  commitSha: gitDeploymentResult.commitSha,
+                  strategy: plan.recordedStrategy,
+                  eventMessage:
+                    "Immutable Git image prepared; handing runtime replacement to the deployment orchestrator.",
+                });
+                const replacement =
+                  await orchestratePreparedRuntimeReplacement({
+                    container,
+                    deploymentId: runningDeployment.id,
+                    operationLabel: "rebuild",
+                    targetRuntime,
+                    previousRuntime,
+                    plan,
+                    finalize: finalizeGitRuntime,
+                  });
+                return replacement.result;
+              })();
+        const { responseContainers, updatedContainer } = finalizedRuntime;
 
         gitDeploymentHeartbeat.assertOwned();
 
@@ -4090,6 +5050,7 @@ export async function containerRoutes(app: FastifyInstance) {
           branch: container.deploymentSource.repoBranch?.trim() || null,
           configSnapshot: {
             ...gitDeploymentSnapshot,
+            ...(appliedRuntimeSnapshot ?? {}),
             image: updatedContainer.image,
             imageDigest,
             commitSha: gitDeploymentResult.commitSha,
@@ -4137,10 +5098,19 @@ export async function containerRoutes(app: FastifyInstance) {
             : "Failed to rebuild container";
 
         if (gitDeploymentId) {
+          const runtimeError =
+            err instanceof RollbackRuntimeError ? err : null;
+          const runtimePreserved =
+            gitRuntimePreservable && runtimeError?.recoveryMode !== "FAILED";
           await updateDeployment(gitDeploymentId, {
-            status: "FAILED",
+            status: runtimePreserved ? "FAILED_ROLLED_BACK" : "FAILED",
             error: errorMessage,
             completedAt: new Date(),
+            rollbackReason: runtimePreserved
+              ? runtimeError?.recoveryMode === "RECREATED"
+                ? "Previous runtime was recreated after rebuild failure."
+                : "Rebuild failed before the previous runtime was removed."
+              : null,
           }).catch(() => undefined);
           await auditLog({
             userId: req.userId,

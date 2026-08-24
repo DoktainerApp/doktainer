@@ -1,6 +1,6 @@
 import Link from "next/link";
 import TablePagination from "@/components/TablePagination";
-import { Container as ContainerIcon, PencilIcon } from "lucide-react";
+import { Container as ContainerIcon } from "lucide-react";
 import type { EnvironmentContainer } from "../../types/environment-container-types";
 import EnvironmentStatusBadge from "./EnvironmentStatusBadge";
 
@@ -142,7 +142,30 @@ export default function EnvironmentContainersTable({
                     </div>
                   </div>
                 </td>
-                <td style={{ fontSize: 12 }}>{container.source}</td>
+                <td>
+                  <div
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "flex-start",
+                      gap: 5,
+                    }}
+                  >
+                    <span style={{ fontSize: 12 }}>{container.source}</span>
+                    <span
+                      className={`ui-badge ${
+                        container.managed ? "badge-online" : ""
+                      }`}
+                      title={
+                        container.managed
+                          ? "Deployment lifecycle is tracked by Doktainer."
+                          : "Discovered from Docker; no Doktainer deployment history is available yet."
+                      }
+                    >
+                      {container.managementLabel}
+                    </span>
+                  </div>
+                </td>
                 <td>
                   <EnvironmentStatusBadge status={container.status} />
                 </td>
@@ -197,7 +220,48 @@ export default function EnvironmentContainersTable({
                     </span>
                   </div>
                 </td> */}
-                <td style={{ fontSize: 12 }}>{container.lastDeployed}</td>
+                <td style={{ fontSize: 12 }}>
+                  <div
+                    style={{ display: "flex", flexDirection: "column", gap: 3 }}
+                  >
+                    <span>{container.lastDeployed}</span>
+                    <span
+                      style={{
+                        color: container.deploymentInProgress
+                          ? "var(--accent-blue)"
+                          : "var(--text-muted)",
+                        fontFamily: "var(--font--code)",
+                        fontSize: 10,
+                      }}
+                    >
+                      {container.deploymentInProgress
+                        ? "Deployment in progress"
+                        : container.revision}
+                    </span>
+                    {container.rollbackAvailable ? (
+                      <span
+                        style={{ color: "var(--accent-green)", fontSize: 10 }}
+                      >
+                        Rollback available
+                      </span>
+                    ) : null}
+                    {container.lastDeploymentError ? (
+                      <span
+                        title={container.lastDeploymentError}
+                        style={{
+                          color: "var(--accent-red)",
+                          fontSize: 10,
+                          maxWidth: 220,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        Last deployment failed
+                      </span>
+                    ) : null}
+                  </div>
+                </td>
                 <td>
                   <div
                     style={{
