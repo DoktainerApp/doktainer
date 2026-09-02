@@ -1,5 +1,5 @@
 import { Server } from "@prisma/client";
-import { resolveSslCertificate, restartManagedService } from "../ssh.service";
+import { reloadNginx, resolveSslCertificate } from "../ssh.service";
 import {
   pathExistsPrivileged,
   readPrivilegedFile,
@@ -345,7 +345,7 @@ async function validateAndReloadNginx(
 ): Promise<void> {
   try {
     await execPrivileged(server, "nginx -t");
-    await restartManagedService(server, "nginx");
+    await reloadNginx(server);
   } catch (error) {
     for (const rollbackPath of rollbackPaths) {
       await removePrivilegedFile(server, rollbackPath).catch(() => undefined);
