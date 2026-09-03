@@ -103,6 +103,88 @@ test("Git deployment resolves and returns the cloned commit SHA", () => {
   assert.match(gitDeployFunction, /preparedRuntime/);
 });
 
+test("Git rebuild preserves the project env outside the replaceable checkout", () => {
+  const source = readSource(DOCKER_CONTAINERS);
+  const start = source.indexOf(
+    "export async function deployContainerFromGitSource",
+  );
+  assert.notEqual(start, -1);
+  const gitDeployFunction = source.slice(start);
+
+  const persistIndex = gitDeployFunction.indexOf(
+    'persist_env "$ROOT_ENV" "$ROOT_MANAGED_ENV"',
+  );
+  const removeIndex = gitDeployFunction.indexOf('rm -rf "$DEPLOY_PATH"');
+  const cloneIndex = gitDeployFunction.indexOf("cloneCommand,", removeIndex);
+  const restoreIndex = gitDeployFunction.indexOf(
+    'restore_env "$ROOT_MANAGED_ENV" "$ROOT_ENV"',
+  );
+  const templateIndex = gitDeployFunction.indexOf(
+    'if [ -f "$TARGET_DIR/.env.example" ]',
+  );
+
+  assert.ok(persistIndex >= 0);
+  assert.ok(removeIndex > persistIndex);
+  assert.ok(cloneIndex > removeIndex);
+  assert.ok(restoreIndex > cloneIndex);
+  assert.ok(templateIndex > restoreIndex);
+  assert.match(gitDeployFunction, /managedEnvDirectory = `\$\{deploymentPath\}\.doktainer`/);
+  assert.match(gitDeployFunction, /chmod 700 .*MANAGED_ENV_DIR/);
+  assert.match(gitDeployFunction, /chmod 600 .*TEMP_ENV/);
+  assert.match(gitDeployFunction, /BUILD_PATH/);
+  assert.match(gitDeployFunction, /envFilePath: runtimeEnvFilePath/);
+});
+
+test("Git container env edits are mirrored to the deployment checkout", () => {
+  const source = readSource(CONTAINER_ROUTES);
+  const readRouteIndex = source.indexOf('"/:id/project-env"');
+  const writeRouteIndex = source.indexOf(
+    '"/:id/project-env"',
+    readRouteIndex + 1,
+  );
+  const nextRouteIndex = source.indexOf('"/:id/exec"', writeRouteIndex);
+  assert.ok(readRouteIndex >= 0);
+  assert.ok(writeRouteIndex > readRouteIndex);
+  assert.ok(nextRouteIndex > writeRouteIndex);
+  const envRoute = source.slice(writeRouteIndex, nextRouteIndex);
+  const containerWriteIndex = envRoute.indexOf("ssh.writeContainerFile");
+  const gitSourceCheckIndex = envRoute.indexOf(
+    "isGitRedeploySourceType(container.sourceType)",
+  );
+  const deploymentWriteIndex = envRoute.indexOf(
+    "ssh.writeDeploymentEnvFile",
+    containerWriteIndex,
+  );
+
+  assert.ok(containerWriteIndex >= 0);
+  assert.ok(gitSourceCheckIndex > containerWriteIndex);
+  assert.ok(deploymentWriteIndex > gitSourceCheckIndex);
+  assert.match(envRoute, /normalizeDeploymentChildPath/);
+  assert.match(
+    envRoute,
+    /active container \.env was updated, but Doktainer could not persist it for the next rebuild/,
+  );
+});
+
+test("Git rebuild applies the managed env file to target and recovery runtimes", () => {
+  const source = readSource(CONTAINER_ROUTES);
+  const rebuildRoute = sourceBlock(
+    source,
+    '"/:id/rebuild"',
+    "GET /containers/:id/logs",
+  );
+
+  assert.match(rebuildRoute, /recoverablePreviousRuntime/);
+  assert.match(
+    rebuildRoute,
+    /prepared\.envFilePath \?\? previousRuntime\.envFilePath/,
+  );
+  assert.match(
+    rebuildRoute,
+    /previousRuntime: recoverablePreviousRuntime/,
+  );
+});
+
 test("Git rebuild image tags are immutable and preserve registry ports", () => {
   assert.equal(
     toImmutableBuildImageTag(

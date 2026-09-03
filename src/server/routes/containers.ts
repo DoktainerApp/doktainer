@@ -3116,6 +3116,38 @@ export async function containerRoutes(app: FastifyInstance) {
             body.data.content,
           );
 
+          const deploymentPath =
+            container.deploymentSource?.deploymentPath?.trim();
+          if (
+            deploymentPath &&
+            isGitRedeploySourceType(container.sourceType)
+          ) {
+            const persistentEnvPath = normalizeDeploymentChildPath(
+              deploymentPath,
+              container.deploymentSource?.buildPath,
+            );
+
+            if (!persistentEnvPath) {
+              throw new Error(
+                "The active container .env was updated, but its Git deployment path could not be validated for rebuild persistence",
+              );
+            }
+
+            try {
+              await ssh.writeDeploymentEnvFile(
+                container.server,
+                persistentEnvPath,
+                body.data.content,
+              );
+            } catch (error) {
+              const cause =
+                error instanceof Error ? error.message : "unknown error";
+              throw new Error(
+                `The active container .env was updated, but Doktainer could not persist it for the next rebuild: ${cause}`,
+              );
+            }
+          }
+
           await auditLog({
             userId: req.userId,
             serverId: container.serverId,
@@ -4983,8 +5015,13 @@ export async function containerRoutes(app: FastifyInstance) {
                   );
                 }
                 const prepared = gitDeploymentResult.preparedRuntime;
-                const targetRuntime: RuntimeReplacementSpec = {
+                const recoverablePreviousRuntime: RuntimeReplacementSpec = {
                   ...previousRuntime,
+                  envFilePath:
+                    prepared.envFilePath ?? previousRuntime.envFilePath,
+                };
+                const targetRuntime: RuntimeReplacementSpec = {
+                  ...recoverablePreviousRuntime,
                   ...prepared,
                   networks: Array.from(
                     new Set([
@@ -5016,7 +5053,7 @@ export async function containerRoutes(app: FastifyInstance) {
                     deploymentId: runningDeployment.id,
                     operationLabel: "rebuild",
                     targetRuntime,
-                    previousRuntime,
+                    previousRuntime: recoverablePreviousRuntime,
                     plan,
                     finalize: finalizeGitRuntime,
                   });

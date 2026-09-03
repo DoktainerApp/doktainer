@@ -37,6 +37,7 @@ export type RuntimeReplacementSpec = {
   image: string;
   ports: string;
   env: string;
+  envFilePath?: string;
   volumes: string;
   network: string;
   networks: string[];
@@ -209,6 +210,7 @@ function snapshotRuntime(
     image,
     ports: normalizeRollbackPortMappings(snapshot.ports),
     env: snapshotString(snapshot, "env"),
+    envFilePath: snapshotString(snapshot, "envFilePath") || undefined,
     volumes: snapshotString(snapshot, "volumes"),
     network,
     networks: normalizeRuntimeNetworks(network, snapshot.networks),
@@ -422,6 +424,7 @@ function validateRuntimeBeforeMutation(input: {
     image: input.runtime.image,
     ports: input.ports,
     env: input.runtime.env,
+    envFilePath: input.runtime.envFilePath,
     volumes: input.runtime.volumes,
     network: input.runtime.network,
     cpuLimit: input.runtime.cpuLimit,
@@ -554,6 +557,7 @@ export async function replaceRuntimeForRollback<TResult = undefined>(
       image: input.targetRuntime.image,
       ports: targetPorts,
       env: input.targetRuntime.env,
+      envFilePath: input.targetRuntime.envFilePath,
       volumes: input.targetRuntime.volumes,
       network: input.targetRuntime.network,
       cpuLimit: input.targetRuntime.cpuLimit,
@@ -664,6 +668,7 @@ export async function replaceRuntimeForRollback<TResult = undefined>(
         image: input.previousRuntime.image,
         ports: input.previousRuntime.ports,
         env: input.previousRuntime.env,
+        envFilePath: input.previousRuntime.envFilePath,
         volumes: input.previousRuntime.volumes,
         network: input.previousRuntime.network,
         cpuLimit: input.previousRuntime.cpuLimit,
@@ -839,6 +844,7 @@ export async function replaceRuntimeWithProxyCandidate<TResult>(input: {
       image: input.targetRuntime.image,
       ports: candidatePorts,
       env: input.targetRuntime.env,
+      envFilePath: input.targetRuntime.envFilePath,
       volumes: input.targetRuntime.volumes,
       network: input.targetRuntime.network,
       cpuLimit: input.targetRuntime.cpuLimit,
@@ -917,6 +923,7 @@ export async function replaceRuntimeWithProxyCandidate<TResult>(input: {
         image: input.targetRuntime.image,
         ports: input.targetRuntime.ports,
         env: input.targetRuntime.env,
+        envFilePath: input.targetRuntime.envFilePath,
         volumes: input.targetRuntime.volumes,
         network: input.targetRuntime.network,
         cpuLimit: input.targetRuntime.cpuLimit,
@@ -1071,6 +1078,7 @@ export async function replaceRuntimeWithProxyCandidate<TResult>(input: {
         image: input.previousRuntime.image,
         ports: input.previousRuntime.ports,
         env: input.previousRuntime.env,
+        envFilePath: input.previousRuntime.envFilePath,
         volumes: input.previousRuntime.volumes,
         network: input.previousRuntime.network,
         cpuLimit: input.previousRuntime.cpuLimit,

@@ -20,6 +20,31 @@ describe("deployment strategy", () => {
     assert.match(command, /'--memory' '512m'/);
   });
 
+  it("applies a managed env file without embedding its contents in the command", () => {
+    const command = buildDockerRunCommand({
+      name: "app",
+      image: "example/app:stable",
+      restartPolicy: "unless-stopped",
+      envFilePath: "/opt/doktainer/deployments/app.doktainer/root.env",
+    });
+
+    assert.match(
+      command,
+      /'--env-file' '\/opt\/doktainer\/deployments\/app\.doktainer\/root\.env'/,
+    );
+    assert.doesNotMatch(command, /SECRET_VALUE/);
+    assert.throws(
+      () =>
+        buildDockerRunCommand({
+          name: "app",
+          image: "example/app:stable",
+          restartPolicy: "unless-stopped",
+          envFilePath: "relative/.env",
+        }),
+      /absolute path/,
+    );
+  });
+
   it("uses atomic rename when no published ports are configured", () => {
     assert.equal(resolveDeploymentStrategy(""), "ATOMIC_RENAME");
     assert.equal(resolveDeploymentStrategy("   "), "ATOMIC_RENAME");

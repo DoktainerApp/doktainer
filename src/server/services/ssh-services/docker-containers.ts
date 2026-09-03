@@ -199,6 +199,16 @@ function validateNetworkName(value?: string): string | null {
   return normalized;
 }
 
+function validateRuntimeEnvFilePath(value?: string): string | null {
+  const candidate = value?.trim();
+  if (!candidate) return null;
+  if (/\r|\n|\0/.test(candidate) || !pathPosix.isAbsolute(candidate)) {
+    throw new Error("Runtime env file path must be an absolute path");
+  }
+
+  return pathPosix.normalize(candidate);
+}
+
 function parsePortNumber(value: string, label: string): number {
   if (!/^\d+$/.test(value)) {
     throw new Error(`${label} must be numeric`);
@@ -443,6 +453,7 @@ export function buildDockerRunCommand(opts: {
   image: string;
   ports?: string;
   env?: string;
+  envFilePath?: string;
   restartPolicy: string;
   volumes?: string;
   network?: string;
@@ -501,6 +512,11 @@ export function buildDockerRunCommand(opts: {
 
   for (const envAssignment of parseEnvironmentAssignments(opts.env)) {
     args.push("-e", envAssignment);
+  }
+
+  const envFilePath = validateRuntimeEnvFilePath(opts.envFilePath);
+  if (envFilePath) {
+    args.push("--env-file", envFilePath);
   }
 
   for (const volumeMount of parseVolumeMounts(
@@ -965,6 +981,7 @@ export type PreparedGitRuntime = {
   image: string;
   ports: string;
   env: string;
+  envFilePath?: string;
   volumes: string;
   network: string;
   restartPolicy: string;
@@ -1699,6 +1716,7 @@ export async function runContainer(
     image: string;
     ports?: string; // "80:80,443:443"
     env?: string; // "KEY=val\nKEY2=val2"
+    envFilePath?: string;
     restartPolicy: string;
     volumes?: string;
     network?: string;
@@ -2452,6 +2470,7 @@ async function bootstrapSourceProject(
     deploymentPath: string;
     buildPath?: string;
     sourceProject: Awaited<ReturnType<typeof inspectSourceProject>>;
+    managedEnvFilePath?: string;
   },
 ) {
   const buildPath = normalizeBuildSubdirectory(opts.buildPath);
@@ -2472,6 +2491,7 @@ async function bootstrapSourceProject(
     `DEPLOY_PATH=${escapeShellArg(opts.deploymentPath)}`,
     `BUILD_PATH=${escapeShellArg(buildPath)}`,
     `ENV_TEMPLATE=${escapeShellArg(templateToCopy)}`,
+    `MANAGED_ENV_FILE=${escapeShellArg(opts.managedEnvFilePath ?? "")}`,
     'if [ "$BUILD_PATH" = "." ]; then TARGET_PATH="$DEPLOY_PATH"; else TARGET_PATH="$DEPLOY_PATH/$BUILD_PATH"; fi',
     'if [ ! -d "$TARGET_PATH" ]; then echo "Build path not found: $BUILD_PATH"; exit 1; fi',
     'if [ -n "$ENV_TEMPLATE" ] && [ ! -f "$TARGET_PATH/.env" ] && [ -f "$TARGET_PATH/$ENV_TEMPLATE" ]; then cp "$TARGET_PATH/$ENV_TEMPLATE" "$TARGET_PATH/.env"; fi',
@@ -2505,6 +2525,15 @@ async function bootstrapSourceProject(
     ...(sourceProject.hasBootstrapCacheDir
       ? ['chmod -R ugo+rwX "$TARGET_PATH/bootstrap/cache" || true']
       : []),
+    'if [ -n "$MANAGED_ENV_FILE" ] && [ -f "$TARGET_PATH/.env" ]; then',
+    '  MANAGED_ENV_DIR=$(dirname "$MANAGED_ENV_FILE")',
+    '  mkdir -p "$MANAGED_ENV_DIR"',
+    '  chmod 700 "$MANAGED_ENV_DIR" || true',
+    '  TEMP_ENV="${MANAGED_ENV_FILE}.tmp.$$"',
+    '  cp "$TARGET_PATH/.env" "$TEMP_ENV"',
+    '  chmod 600 "$TEMP_ENV" || true',
+    '  mv -f "$TEMP_ENV" "$MANAGED_ENV_FILE"',
+    "fi",
   ].join("\n");
 
   await execStrict(
@@ -2747,6 +2776,11 @@ export async function deployContainerFromGitSource(
     `doktainer/${sanitizeProjectName(projectName)}:latest`;
   const runOverride = resolveRunOverride(opts.startCommand);
   const shouldApplyRuntimeOverride = buildType === "DOCKERFILE";
+  const managedEnvDirectory = `${deploymentPath}.doktainer`;
+  const managedRuntimeEnvFilePath = pathPosix.join(
+    managedEnvDirectory,
+    buildPath === "." ? "root.env" : "build.env",
+  );
 
   const cloneCommand = [
     "git",
@@ -2764,9 +2798,47 @@ export async function deployContainerFromGitSource(
     "set -euo pipefail",
     "export GIT_TERMINAL_PROMPT=0",
     `DEPLOY_PATH=${escapeShellArg(deploymentPath)}`,
+    `BUILD_PATH=${escapeShellArg(buildPath)}`,
+    `MANAGED_ENV_DIR=${escapeShellArg(managedEnvDirectory)}`,
+    'ROOT_ENV="$DEPLOY_PATH/.env"',
+    'if [ "$BUILD_PATH" = "." ]; then TARGET_ENV="$ROOT_ENV"; else TARGET_ENV="$DEPLOY_PATH/$BUILD_PATH/.env"; fi',
+    'ROOT_MANAGED_ENV="$MANAGED_ENV_DIR/root.env"',
+    'if [ "$BUILD_PATH" = "." ]; then TARGET_MANAGED_ENV="$ROOT_MANAGED_ENV"; else TARGET_MANAGED_ENV="$MANAGED_ENV_DIR/build.env"; fi',
+    "persist_env() {",
+    '  SOURCE_ENV="$1"; MANAGED_ENV="$2"',
+    '  if [ ! -f "$SOURCE_ENV" ]; then return; fi',
+    '  mkdir -p "$MANAGED_ENV_DIR"',
+    '  chmod 700 "$MANAGED_ENV_DIR" || true',
+    '  TEMP_ENV="${MANAGED_ENV}.tmp.$$"',
+    '  cp "$SOURCE_ENV" "$TEMP_ENV"',
+    '  chmod 600 "$TEMP_ENV" || true',
+    '  mv -f "$TEMP_ENV" "$MANAGED_ENV"',
+    "}",
+    "restore_env() {",
+    '  MANAGED_ENV="$1"; DESTINATION_ENV="$2"',
+    '  if [ ! -f "$MANAGED_ENV" ]; then return; fi',
+    '  mkdir -p "$(dirname "$DESTINATION_ENV")"',
+    '  cp "$MANAGED_ENV" "$DESTINATION_ENV"',
+    '  chmod 600 "$DESTINATION_ENV" || true',
+    "}",
     'mkdir -p "$(dirname "$DEPLOY_PATH")"',
+    'persist_env "$ROOT_ENV" "$ROOT_MANAGED_ENV"',
+    'if [ "$TARGET_ENV" != "$ROOT_ENV" ]; then persist_env "$TARGET_ENV" "$TARGET_MANAGED_ENV"; fi',
     'rm -rf "$DEPLOY_PATH"',
     cloneCommand,
+    'restore_env "$ROOT_MANAGED_ENV" "$ROOT_ENV"',
+    'if [ "$TARGET_ENV" != "$ROOT_ENV" ]; then restore_env "$TARGET_MANAGED_ENV" "$TARGET_ENV"; fi',
+    'if [ ! -f "$TARGET_ENV" ]; then',
+    '  TARGET_DIR=$(dirname "$TARGET_ENV")',
+    '  if [ -f "$TARGET_DIR/.env.example" ]; then ENV_TEMPLATE="$TARGET_DIR/.env.example"',
+    '  elif [ -f "$TARGET_DIR/.env.dist" ]; then ENV_TEMPLATE="$TARGET_DIR/.env.dist"',
+    '  elif [ -f "$TARGET_DIR/env" ]; then ENV_TEMPLATE="$TARGET_DIR/env"',
+    '  else ENV_TEMPLATE=""',
+    "  fi",
+    '  if [ -n "$ENV_TEMPLATE" ]; then cp "$ENV_TEMPLATE" "$TARGET_ENV"; chmod 600 "$TARGET_ENV" || true; fi',
+    "fi",
+    'persist_env "$ROOT_ENV" "$ROOT_MANAGED_ENV"',
+    'if [ "$TARGET_ENV" != "$ROOT_ENV" ]; then persist_env "$TARGET_ENV" "$TARGET_MANAGED_ENV"; fi',
   ].join("\n");
 
   try {
@@ -2841,6 +2913,20 @@ export async function deployContainerFromGitSource(
     };
   }
 
+  const hasManagedRuntimeEnvFile = (
+    await execStrict(
+      server,
+      privilegedCommand(
+        server,
+        `bash -lc ${escapeShellArg(`if [ -f ${escapeShellArg(managedRuntimeEnvFilePath)} ]; then printf 1; else printf 0; fi`)}`,
+      ),
+      shortDockerCommandTimeout(DOCKER_INSPECT_TIMEOUT_MS),
+    )
+  ).trim() === "1";
+  const runtimeEnvFilePath = hasManagedRuntimeEnvFile
+    ? managedRuntimeEnvFilePath
+    : undefined;
+
   if (buildType === "NIXPACKS") {
     const sourceProject = await inspectSourceProject(server, {
       deploymentPath,
@@ -2850,6 +2936,7 @@ export async function deployContainerFromGitSource(
       deploymentPath,
       buildPath,
       sourceProject,
+      managedEnvFilePath: runtimeEnvFilePath,
     });
     if (
       sourceProject.likelyLaravel &&
@@ -2922,6 +3009,7 @@ export async function deployContainerFromGitSource(
       image: imageTag,
       ports: autoPorts ?? "",
       env: runtimeEnv ?? "",
+      envFilePath: runtimeEnvFilePath,
       restartPolicy: opts.restartPolicy?.trim() || "unless-stopped",
       volumes: opts.volumes ?? "",
       network: opts.network?.trim() || "bridge",
@@ -2958,6 +3046,7 @@ export async function deployContainerFromGitSource(
       deploymentPath,
       buildPath,
       sourceProject,
+      managedEnvFilePath: runtimeEnvFilePath,
     });
 
     if (
@@ -3041,6 +3130,7 @@ export async function deployContainerFromGitSource(
       image: imageTag,
       ports: autoPorts ?? "",
       env: runtimeEnv ?? "",
+      envFilePath: runtimeEnvFilePath,
       restartPolicy: opts.restartPolicy?.trim() || "unless-stopped",
       volumes: opts.volumes ?? "",
       network: opts.network?.trim() || "bridge",
@@ -3081,6 +3171,7 @@ export async function deployContainerFromGitSource(
       image: imageTag,
       ports: autoPorts ?? "",
       env: opts.env ?? "",
+      envFilePath: runtimeEnvFilePath,
       restartPolicy: opts.restartPolicy?.trim() || "unless-stopped",
       volumes: opts.volumes ?? "",
       network: opts.network?.trim() || "bridge",
@@ -3154,6 +3245,7 @@ export async function deployContainerFromGitSource(
     image: imageTag,
     ports: autoPorts ?? "",
     env: opts.env ?? "",
+    envFilePath: runtimeEnvFilePath,
     restartPolicy: opts.restartPolicy?.trim() || "unless-stopped",
     volumes: opts.volumes ?? "",
     network: opts.network?.trim() || "bridge",
