@@ -74,7 +74,6 @@ export default function DashboardLayout({
       {/* Sidebar — handles its own backdrop overlay for mobile */}
       <Sidebar
         collapsed={collapsed}
-        onToggle={() => setCollapsed(!collapsed)}
         isMobile={isMobile}
         mobileOpen={mobileOpen}
         onMobileClose={() => setMobileOpen(false)}
@@ -96,6 +95,10 @@ export default function DashboardLayout({
           onMobileMenuToggle={
             isMobile ? () => setMobileOpen(!mobileOpen) : undefined
           }
+          onSidebarToggle={
+            isMobile ? undefined : () => setCollapsed((value) => !value)
+          }
+          sidebarCollapsed={collapsed}
         />
         <main
           className="p-4 md:p-6"

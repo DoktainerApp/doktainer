@@ -978,7 +978,44 @@ body {
   transition: width 0.5s ease;
 }
 
-/* Sidebar nav items */
+/* Sidebar controls and navigation */
+.sidebar-trigger {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.sidebar-trigger:hover {
+  background: var(--bg-input);
+  border-color: var(--border);
+  color: var(--text-primary);
+}
+
+.sidebar-trigger:focus-visible {
+  outline: 2px solid var(--accent-blue);
+  outline-offset: 2px;
+}
+
+.topbar-section-divider {
+  width: 1px;
+  height: 20px;
+  flex: 0 0 1px;
+  background: var(--border);
+}
+
 .nav-item {
   display: flex;
   align-items: center;

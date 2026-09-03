@@ -19,6 +19,7 @@ import {
   LoaderCircle,
   Menu,
   Moon,
+  PanelLeft,
   RefreshCw,
   Search,
   SunMedium,
@@ -56,12 +57,16 @@ interface TopbarProps {
   title: string;
   subtitle?: string;
   onMobileMenuToggle?: () => void;
+  onSidebarToggle?: () => void;
+  sidebarCollapsed?: boolean;
 }
 
 export default function Topbar({
   title,
   subtitle,
   onMobileMenuToggle,
+  onSidebarToggle,
+  sidebarCollapsed = false,
 }: TopbarProps) {
   const currentUser = useCurrentUser();
   const pathname = usePathname();
@@ -424,9 +429,9 @@ export default function Topbar({
       }}
       className="md:px-6 md:gap-4"
     >
-      {/* Left: hamburger (mobile) + title */}
+      {/* Left: navigation control + title */}
       <div
-        style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}
+        style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}
       >
         {onMobileMenuToggle && (
           <button
@@ -446,6 +451,26 @@ export default function Topbar({
           >
             <Menu size={20} />
           </button>
+        )}
+        {onSidebarToggle && (
+          <>
+            <button
+              type="button"
+              onClick={onSidebarToggle}
+              className="sidebar-trigger"
+              aria-controls="dashboard-sidebar"
+              aria-expanded={!sidebarCollapsed}
+              aria-label={
+                sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"
+              }
+              title={
+                sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"
+              }
+            >
+              <PanelLeft size={18} strokeWidth={1.8} />
+            </button>
+            <span className="topbar-section-divider" aria-hidden="true" />
+          </>
         )}
         <div style={{ minWidth: 0, overflow: "hidden", whiteSpace: "nowrap" }}>
           <h1

@@ -10,13 +10,11 @@ import OrganizationSwitcher from "@/components/OrganizationSwitcher";
 import { navigation } from "@/lib/navigation";
 import { addPreferencesListener, getStoredPanelName } from "@/lib/preferences";
 import { formatRoleLabel, hasMinimumRole } from "@/lib/permissions";
-import { LogOut, ChevronsUpDown, ChevronLeft, ChevronRight, X, Crown } from "lucide-react";
+import { LogOut, ChevronsUpDown, X, Crown } from "lucide-react";
 
 interface SidebarProps {
   /** Desktop: whether sidebar is in collapsed (icon-only) state */
   collapsed: boolean;
-  /** Desktop: called when user clicks the collapse toggle */
-  onToggle: () => void;
   /** Mobile: whether screen is narrow */
   isMobile: boolean;
   /** Mobile: whether the drawer is open */
@@ -27,7 +25,6 @@ interface SidebarProps {
 
 export default function Sidebar({
   collapsed,
-  onToggle,
   isMobile,
   mobileOpen,
   onMobileClose,
@@ -124,6 +121,7 @@ export default function Sidebar({
 
   const sidebar = (
     <aside
+      id="dashboard-sidebar"
       style={{
         position: "relative",
         width: isMobile ? "240px" : isCollapsed ? "60px" : "220px",
@@ -136,7 +134,7 @@ export default function Sidebar({
         flexShrink: 0,
       }}
     >
-      {/* ── Logo + collapse/close button ──────────────────────── */}
+      {/* ── Logo + mobile close button ────────────────────────── */}
       <div
         style={{
           padding: isCollapsed ? "0 12px" : "0 12px 0 16px",
@@ -195,57 +193,18 @@ export default function Sidebar({
           </div>
         )}
 
-        {/* Collapse toggle (desktop) or close button (mobile) */}
-        <button
-          onClick={isMobile ? onMobileClose : onToggle}
-          title={
-            isMobile
-              ? "Close menu"
-              : isCollapsed
-                ? "Expand sidebar"
-                : "Collapse sidebar"
-          }
-          style={{
-            position: isMobile ? "static" : "absolute",
-            right: isMobile ? undefined : -14,
-            top: isMobile ? undefined : 18,
-            zIndex: 50,
-            flexShrink: 0,
-            width: 28,
-            height: 28,
-            borderRadius: "50%",
-            background: "var(--bg-sidebar)",
-            border: "1px solid var(--border)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            cursor: "pointer",
-            color: "var(--text-muted)",
-            transition: "background 0.15s, color 0.15s, border-color 0.15s",
-            marginLeft: isMobile ? "auto" : undefined,
-            boxShadow: isMobile ? "none" : "0 2px 8px rgba(0,0,0,0.2)",
-          }}
-          onMouseEnter={(e) => {
-            const btn = e.currentTarget;
-            btn.style.background = "rgba(59,130,246,0.12)";
-            btn.style.borderColor = "rgba(59,130,246,0.4)";
-            btn.style.color = "#3b82f6";
-          }}
-          onMouseLeave={(e) => {
-            const btn = e.currentTarget;
-            btn.style.background = "var(--bg-sidebar)";
-            btn.style.borderColor = "var(--border)";
-            btn.style.color = "var(--text-muted)";
-          }}
-        >
-          {isMobile ? (
+        {isMobile && (
+          <button
+            type="button"
+            onClick={onMobileClose}
+            title="Close menu"
+            aria-label="Close menu"
+            className="sidebar-trigger"
+            style={{ marginLeft: "auto" }}
+          >
             <X size={13} />
-          ) : isCollapsed ? (
-            <ChevronRight size={13} />
-          ) : (
-            <ChevronLeft size={13} />
-          )}
-        </button>
+          </button>
+        )}
       </div>
 
       <OrganizationSwitcher
