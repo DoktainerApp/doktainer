@@ -2,6 +2,14 @@ import crypto from "crypto";
 import { isIP } from "node:net";
 import { FastifyReply, FastifyRequest } from "fastify";
 import prisma from "../lib/prisma";
+import {
+  clearSessionCookie,
+  expireUserSession,
+  getRequestUserAgent,
+  getSessionToken,
+  hashSessionToken,
+  touchUserSession,
+} from "../services/auth-session.service";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -10,7 +18,8 @@ declare module "fastify" {
     organizationId?: string;
     apiKeyId?: string;
     apiKeyPermissions?: string[];
-    authMethod?: "jwt" | "api-key";
+    sessionId?: string;
+    authMethod?: "session" | "api-key";
   }
 }
 
@@ -22,6 +31,57 @@ function getHeaderValue(value: string | string[] | undefined): string | null {
     return value[0]?.trim() || null;
   }
   return null;
+}
+
+const SAFE_HTTP_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+const BROWSER_MUTATION_HEADER = "x-doktainer-request";
+
+function getAllowedBrowserOrigins(env = process.env): Set<string> {
+  const origins = [env.FRONTEND_URL, ...(env.CORS_ORIGINS ?? "").split(",")]
+    .map((origin) => origin?.trim().replace(/\/$/, ""))
+    .filter((origin): origin is string => Boolean(origin));
+  return new Set(origins.length > 0 ? origins : ["http://localhost:3000"]);
+}
+
+export function enforceBrowserMutationProtection(
+  req: FastifyRequest,
+  reply: FastifyReply,
+): boolean {
+  if (SAFE_HTTP_METHODS.has(req.method.toUpperCase())) return true;
+
+  if (getHeaderValue(req.headers[BROWSER_MUTATION_HEADER]) !== "1") {
+    reply.status(403).send({
+      success: false,
+      error: "Forbidden — missing browser request verification",
+    });
+    return false;
+  }
+
+  if (getHeaderValue(req.headers["sec-fetch-site"]) === "cross-site") {
+    reply.status(403).send({
+      success: false,
+      error: "Forbidden — cross-site request rejected",
+    });
+    return false;
+  }
+
+  const origin = getHeaderValue(req.headers.origin)?.replace(/\/$/, "");
+  if (origin && !getAllowedBrowserOrigins().has(origin)) {
+    reply.status(403).send({
+      success: false,
+      error: "Forbidden — request origin is not allowed",
+    });
+    return false;
+  }
+
+  return true;
+}
+
+export async function requireBrowserMutationVerification(
+  req: FastifyRequest,
+  reply: FastifyReply,
+): Promise<void> {
+  enforceBrowserMutationProtection(req, reply);
 }
 
 function extractApiKey(req: FastifyRequest): string | null {
@@ -376,104 +436,113 @@ async function authenticateApiKey(
   enforceUserSecurityPolicies(req, reply, apiKey.user.settings);
 }
 
-/**
- * Middleware: verify JWT token from Authorization header
- * Attaches userId and userRole to request
- */
+/** Authenticate an API key or an opaque database-backed browser session. */
 export async function authenticate(
   req: FastifyRequest,
   reply: FastifyReply,
 ): Promise<void> {
-  const query = req.query as { token?: string } | undefined;
-  const queryToken = query?.token;
-
-  if (queryToken && !req.headers.authorization) {
-    req.headers.authorization = `Bearer ${queryToken}`;
-  }
-
   const apiKey = extractApiKey(req);
   if (apiKey) {
     await authenticateApiKey(apiKey, req, reply);
     return;
   }
 
-  try {
-    const payload = await req.jwtVerify<{
-      sub: string;
-      role: string;
-      iat?: number;
-    }>();
+  const rawToken = getSessionToken(req);
+  if (!rawToken) {
+    reply.status(401).send({
+      success: false,
+      error: "Unauthorized — login session required",
+    });
+    return;
+  }
 
-    const user = await prisma.user.findUnique({
-      where: { id: payload.sub },
-      select: {
-        id: true,
-        role: true,
-        isActive: true,
-        activeOrganizationId: true,
-        organizationMemberships: {
-          select: {
-            organizationId: true,
-            isDefault: true,
+  const session = await prisma.userSession.findUnique({
+    where: { tokenHash: hashSessionToken(rawToken) },
+    include: {
+      user: {
+        select: {
+          id: true,
+          role: true,
+          isActive: true,
+          activeOrganizationId: true,
+          organizationMemberships: {
+            select: { organizationId: true, isDefault: true },
           },
-        },
-        settings: {
-          select: {
-            sessionTimeoutMinutes: true,
-            ipWhitelistEnabled: true,
-            ipWhitelist: true,
+          settings: {
+            select: {
+              sessionTimeoutMinutes: true,
+              ipWhitelistEnabled: true,
+              ipWhitelist: true,
+            },
           },
         },
       },
-    });
+    },
+  });
 
-    if (!user || !user.isActive) {
-      reply.status(401).send({
-        success: false,
-        error: "Unauthorized — invalid or expired token",
-      });
-      return;
-    }
-
-    const availableOrganizationIds = user.organizationMemberships.map(
-      (membership) => membership.organizationId,
-    );
-    const requestedOrganizationId = extractOrganizationId(req);
-
-    if (
-      requestedOrganizationId &&
-      !availableOrganizationIds.includes(requestedOrganizationId)
-    ) {
-      reply.status(403).send({
-        success: false,
-        error: "Forbidden — you do not have access to that organization",
-      });
-      return;
-    }
-
-    const fallbackOrganizationId =
-      (user.activeOrganizationId &&
-      availableOrganizationIds.includes(user.activeOrganizationId)
-        ? user.activeOrganizationId
-        : null) ??
-      user.organizationMemberships.find((membership) => membership.isDefault)
-        ?.organizationId ??
-      availableOrganizationIds[0];
-
-    req.userId = user.id;
-    req.userRole = user.role;
-    req.organizationId = requestedOrganizationId ?? fallbackOrganizationId;
-    req.authMethod = "jwt";
-
-    if (!enforceUserSecurityPolicies(req, reply, user.settings, payload.iat)) {
-      return;
-    }
-  } catch {
+  if (!session || session.revokedAt || !session.user.isActive) {
+    clearSessionCookie(reply);
     reply.status(401).send({
       success: false,
-      error: "Unauthorized — invalid or expired token",
+      error: "Unauthorized — invalid or revoked login session",
     });
+    return;
   }
+
+  const now = new Date();
+  const ipAddress = getClientIp(req) || null;
+  const userAgent = getRequestUserAgent(req);
+  if (session.idleExpiresAt <= now || session.absoluteExpiresAt <= now) {
+    await expireUserSession(session.id, ipAddress, userAgent);
+    clearSessionCookie(reply);
+    reply.status(401).send({
+      success: false,
+      error: "Unauthorized — login session expired",
+    });
+    return;
+  }
+
+  if (!enforceBrowserMutationProtection(req, reply)) return;
+  if (!enforceUserSecurityPolicies(req, reply, session.user.settings)) return;
+
+  const availableOrganizationIds = session.user.organizationMemberships.map(
+    (membership) => membership.organizationId,
+  );
+  const requestedOrganizationId = extractOrganizationId(req);
+  if (
+    requestedOrganizationId &&
+    !availableOrganizationIds.includes(requestedOrganizationId)
+  ) {
+    reply.status(403).send({
+      success: false,
+      error: "Forbidden — you do not have access to that organization",
+    });
+    return;
+  }
+
+  const fallbackOrganizationId =
+    (session.user.activeOrganizationId &&
+    availableOrganizationIds.includes(session.user.activeOrganizationId)
+      ? session.user.activeOrganizationId
+      : null) ??
+    session.user.organizationMemberships.find(
+      (membership) => membership.isDefault,
+    )?.organizationId ??
+    availableOrganizationIds[0];
+
+  req.userId = session.user.id;
+  req.userRole = session.user.role;
+  req.organizationId = requestedOrganizationId ?? fallbackOrganizationId;
+  req.sessionId = session.id;
+  req.authMethod = "session";
+
+  await touchUserSession({
+    sessionId: session.id,
+    lastSeenAt: session.lastSeenAt,
+    sessionTimeoutMinutes: session.user.settings?.sessionTimeoutMinutes ?? 30,
+    absoluteExpiresAt: session.absoluteExpiresAt,
+    ipAddress,
+  });
 }
 
 /**

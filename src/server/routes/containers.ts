@@ -1590,8 +1590,14 @@ function writeProcessJobStreamEvent(
 function buildInternalJobHeaders(headers: Record<string, unknown>) {
   const nextHeaders: Record<string, string> = {
     "content-type": "application/json",
+    "x-doktainer-request": "1",
     "x-process-job-sync": "true",
   };
+
+  const cookie = headers.cookie;
+  if (typeof cookie === "string") {
+    nextHeaders.cookie = cookie;
+  }
 
   const authorization = headers.authorization;
   if (typeof authorization === "string") {

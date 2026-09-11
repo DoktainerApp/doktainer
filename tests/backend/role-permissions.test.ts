@@ -25,7 +25,7 @@ test("viewer role is blocked from write permissions", () => {
 
   const allowed = enforceUserRolePermissions(
     {
-      authMethod: "jwt",
+      authMethod: "session",
       userRole: "VIEWER",
     } as never,
     reply as never,
@@ -45,7 +45,7 @@ test("viewer role keeps read permissions", () => {
 
   const allowed = enforceUserRolePermissions(
     {
-      authMethod: "jwt",
+      authMethod: "session",
       userRole: "VIEWER",
     } as never,
     reply as never,
@@ -61,7 +61,7 @@ test("developer role keeps write permissions", () => {
 
   const allowed = enforceUserRolePermissions(
     {
-      authMethod: "jwt",
+      authMethod: "session",
       userRole: "DEVELOPER",
     } as never,
     reply as never,

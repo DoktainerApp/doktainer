@@ -14,31 +14,32 @@ datasource db {
 // Auth
 // ========================
 model User {
-  id           String    @id @default(cuid())
-  email        String    @unique
-  name         String
-  passwordHash String
-  role         UserRole  @default(VIEWER)
-  isActive     Boolean   @default(true)
-  allServersAccess Boolean @default(true)
+  id                   String    @id @default(cuid())
+  email                String    @unique
+  name                 String
+  passwordHash         String
+  role                 UserRole  @default(VIEWER)
+  isActive             Boolean   @default(true)
+  allServersAccess     Boolean   @default(true)
   activeOrganizationId String?
-  lastLogin    DateTime?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  lastLogin            DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
 
-  activeOrganization Organization? @relation("UserActiveOrganization", fields: [activeOrganizationId], references: [id], onDelete: SetNull)
+  activeOrganization      Organization?              @relation("UserActiveOrganization", fields: [activeOrganizationId], references: [id], onDelete: SetNull)
   organizationMemberships OrganizationMembership[]
-  createdOrganizations Organization[] @relation("OrganizationCreator")
-  apiKeys      ApiKey[]
-  auditLogs    AuditLog[]
-  deployments  Deployment[]
-  settings     UserSettings?
-  notificationProviders UserNotificationProvider[]
-  integrations UserIntegration[]
-  gitProviders UserGitProvider[]
-  storageDestinations UserStorageDestination[]
-  serverAssignments UserServerAccess[]
-  sentInvitations UserInvitation[] @relation("InvitationCreator")
+  createdOrganizations    Organization[]             @relation("OrganizationCreator")
+  apiKeys                 ApiKey[]
+  auditLogs               AuditLog[]
+  deployments             Deployment[]
+  settings                UserSettings?
+  notificationProviders   UserNotificationProvider[]
+  integrations            UserIntegration[]
+  gitProviders            UserGitProvider[]
+  storageDestinations     UserStorageDestination[]
+  serverAssignments       UserServerAccess[]
+  sentInvitations         UserInvitation[]           @relation("InvitationCreator")
+  sessions                UserSession[]
 
   @@index([activeOrganizationId])
   @@map("users")
@@ -55,7 +56,7 @@ model Organization {
   updatedAt   DateTime @updatedAt
 
   members     OrganizationMembership[]
-  activeUsers User[]   @relation("UserActiveOrganization")
+  activeUsers User[]                   @relation("UserActiveOrganization")
   servers     Server[]
   projects    Project[]
   domains     Domain[]
@@ -86,17 +87,17 @@ model OrganizationMembership {
 // Projects
 // ========================
 model Project {
-  id             String        @id @default(cuid())
+  id             String   @id @default(cuid())
   organizationId String
   name           String
   slug           String
   description    String?
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
-  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  environments   Environment[]
-  deployments    Deployment[]
+  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  environments Environment[]
+  deployments  Deployment[]
 
   @@unique([organizationId, slug])
   @@index([organizationId])
@@ -104,18 +105,18 @@ model Project {
 }
 
 model Environment {
-  id          String            @id @default(cuid())
+  id          String          @id @default(cuid())
   projectId   String
   serverId    String
   name        String
   slug        String
   kind        EnvironmentKind
   description String?
-  createdAt   DateTime          @default(now())
-  updatedAt   DateTime          @updatedAt
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
 
-  project     Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  server      Server            @relation(fields: [serverId], references: [id], onDelete: Restrict)
+  project     Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  server      Server       @relation(fields: [serverId], references: [id], onDelete: Restrict)
   containers  Container[]
   deployments Deployment[]
 
@@ -135,51 +136,51 @@ enum EnvironmentKind {
 }
 
 model UserSettings {
-  id                    String   @id @default(cuid())
-  userId                String   @unique
-  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  panelName             String   @default("DOKTAINER")
-  panelUrl              String   @default("http://localhost:3000")
-  timezone              String   @default("Asia/Jakarta")
-  theme                 String   @default("dark")
-  sessionTimeoutMinutes Int      @default(30)
-  twoFactorEnabled      Boolean  @default(false)
-  twoFactorSecretEnc    String?
+  id                        String   @id @default(cuid())
+  userId                    String   @unique
+  user                      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  panelName                 String   @default("DOKTAINER")
+  panelUrl                  String   @default("http://localhost:3000")
+  timezone                  String   @default("Asia/Jakarta")
+  theme                     String   @default("dark")
+  sessionTimeoutMinutes     Int      @default(30)
+  twoFactorEnabled          Boolean  @default(false)
+  twoFactorSecretEnc        String?
   twoFactorPendingSecretEnc String?
-  ipWhitelistEnabled    Boolean  @default(false)
-  ipWhitelist           String[] @default([])
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
+  ipWhitelistEnabled        Boolean  @default(false)
+  ipWhitelist               String[] @default([])
+  createdAt                 DateTime @default(now())
+  updatedAt                 DateTime @updatedAt
 
   @@map("user_settings")
 }
 
 model UserNotificationProvider {
-  id                 String                   @id @default(cuid())
-  userId             String
-  organizationId     String
-  user               User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  type               NotificationProviderType
-  name               String
-  enabled            Boolean                  @default(true)
-  actions            String[]                 @default([])
-  channel            String?
-  webhookUrlEnc      String?
-  smtpHost           String?
-  smtpPort           Int                      @default(587)
-  smtpSecure         Boolean                  @default(false)
-  smtpUsername       String?
-  smtpPasswordEnc    String?
-  smtpFromEmail      String?
-  smtpFromName       String?
-  telegramChatId     String?
+  id                  String                   @id @default(cuid())
+  userId              String
+  organizationId      String
+  user                User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type                NotificationProviderType
+  name                String
+  enabled             Boolean                  @default(true)
+  actions             String[]                 @default([])
+  channel             String?
+  webhookUrlEnc       String?
+  smtpHost            String?
+  smtpPort            Int                      @default(587)
+  smtpSecure          Boolean                  @default(false)
+  smtpUsername        String?
+  smtpPasswordEnc     String?
+  smtpFromEmail       String?
+  smtpFromName        String?
+  telegramChatId      String?
   telegramBotTokenEnc String?
-  serverUrl          String?
-  topic              String?
-  userKey            String?
-  apiKeyEnc          String?
-  createdAt          DateTime                 @default(now())
-  updatedAt          DateTime                 @updatedAt
+  serverUrl           String?
+  topic               String?
+  userKey             String?
+  apiKeyEnc           String?
+  createdAt           DateTime                 @default(now())
+  updatedAt           DateTime                 @updatedAt
 
   @@index([userId, organizationId, type])
   @@index([organizationId])
@@ -187,20 +188,20 @@ model UserNotificationProvider {
 }
 
 model UserIntegration {
-  id                  String                  @id @default(cuid())
-  userId              String
-  user                User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
-  provider            IntegrationProviderType
-  connected           Boolean                 @default(false)
-  zoneId              String?
-  apiTokenEnc         String?
-  accessKeyId         String?
-  secretAccessKeyEnc  String?
-  region              String?
-  bucket              String?
-  tokenEnc            String?
-  createdAt           DateTime                @default(now())
-  updatedAt           DateTime                @updatedAt
+  id                 String                  @id @default(cuid())
+  userId             String
+  user               User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider           IntegrationProviderType
+  connected          Boolean                 @default(false)
+  zoneId             String?
+  apiTokenEnc        String?
+  accessKeyId        String?
+  secretAccessKeyEnc String?
+  region             String?
+  bucket             String?
+  tokenEnc           String?
+  createdAt          DateTime                @default(now())
+  updatedAt          DateTime                @updatedAt
 
   @@unique([userId, provider])
   @@index([userId])
@@ -235,30 +236,30 @@ model UserStorageDestination {
 }
 
 model UserGitProvider {
-  id                 String          @id @default(cuid())
-  userId             String
-  organizationId     String
-  user               User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id                         String                      @id @default(cuid())
+  userId                     String
+  organizationId             String
+  user                       User                        @relation(fields: [userId], references: [id], onDelete: Cascade)
   containerDeploymentSources ContainerDeploymentSource[]
-  provider           GitProviderType
-  name               String
-  enabled            Boolean         @default(true)
-  appName            String
-  appId              String?
-  clientId           String?
-  clientSecretEnc    String?
-  webhookSecretEnc   String?
-  appUrl             String?
-  installationUrl    String?
-  providerUrl        String?
-  internalUrl        String?
-  accountUsername    String?
-  accountEmail       String?
-  namespace          String?
-  organizationScoped Boolean         @default(false)
-  organizationName   String?
-  createdAt          DateTime        @default(now())
-  updatedAt          DateTime        @updatedAt
+  provider                   GitProviderType
+  name                       String
+  enabled                    Boolean                     @default(true)
+  appName                    String
+  appId                      String?
+  clientId                   String?
+  clientSecretEnc            String?
+  webhookSecretEnc           String?
+  appUrl                     String?
+  installationUrl            String?
+  providerUrl                String?
+  internalUrl                String?
+  accountUsername            String?
+  accountEmail               String?
+  namespace                  String?
+  organizationScoped         Boolean                     @default(false)
+  organizationName           String?
+  createdAt                  DateTime                    @default(now())
+  updatedAt                  DateTime                    @updatedAt
 
   @@index([userId, organizationId, provider])
   @@index([organizationId])
@@ -279,22 +280,22 @@ model UserServerAccess {
 }
 
 model UserInvitation {
-  id               String    @id @default(cuid())
+  id               String       @id @default(cuid())
   organizationId   String
   email            String
   name             String
   role             UserRole
-  tokenHash        String    @unique
-  allServersAccess Boolean   @default(true)
+  tokenHash        String       @unique
+  allServersAccess Boolean      @default(true)
   serverIds        String[]
   invitedById      String?
   organization     Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  invitedBy        User?     @relation("InvitationCreator", fields: [invitedById], references: [id], onDelete: SetNull)
+  invitedBy        User?        @relation("InvitationCreator", fields: [invitedById], references: [id], onDelete: SetNull)
   expiresAt        DateTime
   acceptedAt       DateTime?
   revokedAt        DateTime?
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
 
   @@index([email])
   @@index([expiresAt])
@@ -354,20 +355,20 @@ enum S3StorageProvider {
 }
 
 model ApiKey {
-  id          String    @id @default(cuid())
+  id             String       @id @default(cuid())
   organizationId String
-  name        String
-  keyHash     String    @unique
-  keyPrefix   String
-  permissions String[]
-  userId      String
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  lastUsed    DateTime?
-  expiresAt   DateTime?
-  isActive    Boolean   @default(true)
-  requestCount Int      @default(0)
-  createdAt   DateTime  @default(now())
+  name           String
+  keyHash        String       @unique
+  keyPrefix      String
+  permissions    String[]
+  userId         String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lastUsed       DateTime?
+  expiresAt      DateTime?
+  isActive       Boolean      @default(true)
+  requestCount   Int          @default(0)
+  createdAt      DateTime     @default(now())
 
   @@index([organizationId])
   @@map("api_keys")
@@ -377,36 +378,36 @@ model ApiKey {
 // Servers
 // ========================
 model Server {
-  id           String       @id @default(cuid())
+  id             String       @id @default(cuid())
   organizationId String
-  name         String
-  ip           String
-  sshPort      Int          @default(22)
-  username     String       @default("root")
-  authType     SshAuthType  @default(PASSWORD)
-  sshKeyEnc    String?      // encrypted private key
-  passwordEnc  String?      // encrypted password
-  status       ServerStatus @default(UNKNOWN)
-  os           String?
-  location     String?
-  tags         String[]
-  lastHealthAt DateTime?
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
+  name           String
+  ip             String
+  sshPort        Int          @default(22)
+  username       String       @default("root")
+  authType       SshAuthType  @default(PASSWORD)
+  sshKeyEnc      String? // encrypted private key
+  passwordEnc    String? // encrypted password
+  status         ServerStatus @default(UNKNOWN)
+  os             String?
+  location       String?
+  tags           String[]
+  lastHealthAt   DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  containers   Container[]
-  environments Environment[]
-  networks     Network[]
+  organization        Organization             @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  containers          Container[]
+  environments        Environment[]
+  networks            Network[]
   storageDestinations UserStorageDestination[]
-  domains      Domain[]
-  auditLogs    AuditLog[]
-  deployments  Deployment[]
-  metrics      ServerMetric[]
-  appInstalls  AppInstall[]
-  backups      Backup[]
+  domains             Domain[]
+  auditLogs           AuditLog[]
+  deployments         Deployment[]
+  metrics             ServerMetric[]
+  appInstalls         AppInstall[]
+  backups             Backup[]
   firewallRulePresets FirewallRulePreset[]
-  userAssignments UserServerAccess[]
+  userAssignments     UserServerAccess[]
 
   @@index([organizationId])
   @@map("servers")
@@ -425,20 +426,20 @@ enum ServerStatus {
 }
 
 model ServerMetric {
-  id        String   @id @default(cuid())
-  serverId  String
-  server    Server   @relation(fields: [serverId], references: [id], onDelete: Cascade)
-  cpuPct    Float
-  ramPct    Float
-  diskPct   Float
-  ramUsed   BigInt
-  ramTotal  BigInt
-  diskUsed  BigInt
-  diskTotal BigInt
+  id           String   @id @default(cuid())
+  serverId     String
+  server       Server   @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  cpuPct       Float
+  ramPct       Float
+  diskPct      Float
+  ramUsed      BigInt
+  ramTotal     BigInt
+  diskUsed     BigInt
+  diskTotal    BigInt
   networkRxBps BigInt?
   networkTxBps BigInt?
-  uptimeSec BigInt
-  recordedAt DateTime @default(now())
+  uptimeSec    BigInt
+  recordedAt   DateTime @default(now())
 
   @@index([serverId, recordedAt])
   @@map("server_metrics")
@@ -448,30 +449,30 @@ model ServerMetric {
 // Containers
 // ========================
 model Container {
-  id          String          @id @default(cuid())
-  dockerId    String?
-  name        String
-  image       String
-  status      ContainerStatus @default(STOPPED)
-  sourceType  ContainerSourceType @default(MANUAL)
-  deployMode  ContainerDeployMode?
-  serverId    String
-  server      Server          @relation(fields: [serverId], references: [id], onDelete: Cascade)
-  environmentId String?
-  environment Environment?    @relation(fields: [environmentId], references: [id], onDelete: SetNull)
-  domains     Domain[]
+  id               String                     @id @default(cuid())
+  dockerId         String?
+  name             String
+  image            String
+  status           ContainerStatus            @default(STOPPED)
+  sourceType       ContainerSourceType        @default(MANUAL)
+  deployMode       ContainerDeployMode?
+  serverId         String
+  server           Server                     @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  environmentId    String?
+  environment      Environment?               @relation(fields: [environmentId], references: [id], onDelete: SetNull)
+  domains          Domain[]
   deploymentSource ContainerDeploymentSource?
-  deployments Deployment[]
-  deploymentLock DeploymentLock?
-  ports       Json            @default("[]") // [{host: 80, container: 80, protocol: "tcp"}]
-  envVars     Json            @default("[]") // [{key: "NODE_ENV", value: "production"}]
-  volumes     Json            @default("[]")
-  labels      Json            @default("{}")
-  restartPolicy String        @default("unless-stopped")
-  cpuUsage    String?
-  ramUsage    String?
-  createdAt   DateTime        @default(now())
-  updatedAt   DateTime        @updatedAt
+  deployments      Deployment[]
+  deploymentLock   DeploymentLock?
+  ports            Json                       @default("[]") // [{host: 80, container: 80, protocol: "tcp"}]
+  envVars          Json                       @default("[]") // [{key: "NODE_ENV", value: "production"}]
+  volumes          Json                       @default("[]")
+  labels           Json                       @default("{}")
+  restartPolicy    String                     @default("unless-stopped")
+  cpuUsage         String?
+  ramUsage         String?
+  createdAt        DateTime                   @default(now())
+  updatedAt        DateTime                   @updatedAt
 
   @@index([environmentId])
   @@index([serverId])
@@ -479,76 +480,76 @@ model Container {
 }
 
 model ContainerDeploymentSource {
-  id               String               @id @default(cuid())
-  containerId      String               @unique
-  container        Container            @relation(fields: [containerId], references: [id], onDelete: Cascade)
-  projectName      String?
-  gitProviderId    String?
-  gitProvider      UserGitProvider?     @relation(fields: [gitProviderId], references: [id], onDelete: SetNull)
-  repoUrl          String?
-  repoBranch       String?
-  repoVisibility   RepositoryVisibility?
-  buildType        String?
-  buildPath        String?
-  startCommand     String?
-  portOverride     String?
-  publishDirectory String?
-  imageTag         String?
-  accessTokenEnc   String?
+  id                  String                @id @default(cuid())
+  containerId         String                @unique
+  container           Container             @relation(fields: [containerId], references: [id], onDelete: Cascade)
+  projectName         String?
+  gitProviderId       String?
+  gitProvider         UserGitProvider?      @relation(fields: [gitProviderId], references: [id], onDelete: SetNull)
+  repoUrl             String?
+  repoBranch          String?
+  repoVisibility      RepositoryVisibility?
+  buildType           String?
+  buildPath           String?
+  startCommand        String?
+  portOverride        String?
+  publishDirectory    String?
+  imageTag            String?
+  accessTokenEnc      String?
   composeEnvOverrides Json?
-  projectPath      String?
-  composeFilePath  String?
-  dockerfilePath   String?
-  dockerContextPath String?
-  deploymentPath   String?
-  createdAt        DateTime             @default(now())
-  updatedAt        DateTime             @updatedAt
+  projectPath         String?
+  composeFilePath     String?
+  dockerfilePath      String?
+  dockerContextPath   String?
+  deploymentPath      String?
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
 
   @@index([gitProviderId])
   @@map("container_deployment_sources")
 }
 
 model Deployment {
-  id              String           @id @default(cuid())
-  containerId     String
-  organizationId  String
-  serverId        String
-  projectId       String?
-  environmentId   String?
-  userId          String?
-  idempotencyKey  String?
-  status          DeploymentStatus
-  trigger         DeploymentTrigger
-  version         String?
-  commitSha       String?
-  branch          String?
-  image           String?
-  imageDigest     String?
-  sourceSnapshot  Json?
-  configSnapshot  Json
-  configRevision  String?
-  rollbackSnapshotEnc String?
-  strategy        String?
-  candidateRef    String?
+  id                   String            @id @default(cuid())
+  containerId          String
+  organizationId       String
+  serverId             String
+  projectId            String?
+  environmentId        String?
+  userId               String?
+  idempotencyKey       String?
+  status               DeploymentStatus
+  trigger              DeploymentTrigger
+  version              String?
+  commitSha            String?
+  branch               String?
+  image                String?
+  imageDigest          String?
+  sourceSnapshot       Json?
+  configSnapshot       Json
+  configRevision       String?
+  rollbackSnapshotEnc  String?
+  strategy             String?
+  candidateRef         String?
   previousDeploymentId String?
-  failureReason   String?
-  rollbackReason  String?
-  logReference    String?
-  error           String?
-  startedAt       DateTime?
-  completedAt     DateTime?
-  createdAt       DateTime         @default(now())
-  updatedAt       DateTime         @updatedAt
+  failureReason        String?
+  rollbackReason       String?
+  logReference         String?
+  error                String?
+  startedAt            DateTime?
+  completedAt          DateTime?
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
 
-  container       Container         @relation(fields: [containerId], references: [id], onDelete: Cascade)
-  organization    Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  server          Server             @relation(fields: [serverId], references: [id], onDelete: Cascade)
-  project         Project?           @relation(fields: [projectId], references: [id], onDelete: SetNull)
-  environment     Environment?       @relation(fields: [environmentId], references: [id], onDelete: SetNull)
-  user            User?              @relation(fields: [userId], references: [id], onDelete: SetNull)
-  previousDeployment Deployment?      @relation("DeploymentPredecessor", fields: [previousDeploymentId], references: [id], onDelete: SetNull)
-  nextDeployments  Deployment[]       @relation("DeploymentPredecessor")
-  events           DeploymentEvent[]
+  container          Container         @relation(fields: [containerId], references: [id], onDelete: Cascade)
+  organization       Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  server             Server            @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  project            Project?          @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  environment        Environment?      @relation(fields: [environmentId], references: [id], onDelete: SetNull)
+  user               User?             @relation(fields: [userId], references: [id], onDelete: SetNull)
+  previousDeployment Deployment?       @relation("DeploymentPredecessor", fields: [previousDeploymentId], references: [id], onDelete: SetNull)
+  nextDeployments    Deployment[]      @relation("DeploymentPredecessor")
+  events             DeploymentEvent[]
 
   @@unique([containerId, idempotencyKey])
   @@index([containerId, createdAt])
@@ -561,14 +562,57 @@ model Deployment {
   @@map("deployments")
 }
 
+model UserSession {
+  id                String             @id @default(cuid())
+  userId            String
+  user              User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash         String             @unique
+  createdIp         String?
+  lastIp            String?
+  userAgent         String?
+  createdAt         DateTime           @default(now())
+  lastSeenAt        DateTime           @default(now())
+  idleExpiresAt     DateTime
+  absoluteExpiresAt DateTime
+  revokedAt         DateTime?
+  revokeReason      String?
+  events            UserSessionEvent[]
+
+  @@index([userId, revokedAt])
+  @@index([idleExpiresAt])
+  @@index([absoluteExpiresAt])
+  @@map("user_sessions")
+}
+
+model UserSessionEvent {
+  id        String           @id @default(cuid())
+  sessionId String
+  session   UserSession      @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  type      SessionEventType
+  ipAddress String?
+  userAgent String?
+  details   Json?
+  createdAt DateTime         @default(now())
+
+  @@index([sessionId, createdAt])
+  @@map("user_session_events")
+}
+
+enum SessionEventType {
+  LOGIN
+  LOGOUT
+  REVOKED
+  EXPIRED
+}
+
 model DeploymentEvent {
-  id            String               @id @default(cuid())
-  deploymentId  String
-  status        DeploymentStatus
-  level         DeploymentEventLevel @default(INFO)
-  message       String
-  metadata      Json?
-  createdAt     DateTime             @default(now())
+  id           String               @id @default(cuid())
+  deploymentId String
+  status       DeploymentStatus
+  level        DeploymentEventLevel @default(INFO)
+  message      String
+  metadata     Json?
+  createdAt    DateTime             @default(now())
 
   deployment Deployment @relation(fields: [deploymentId], references: [id], onDelete: Cascade)
 
@@ -651,8 +695,8 @@ model FirewallRulePreset {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  @@index([serverId])
   @@unique([serverId, rule, action, direction, source])
+  @@index([serverId])
   @@map("firewall_rule_presets")
 }
 
@@ -687,30 +731,30 @@ enum RepositoryVisibility {
 // Domains & SSL
 // ========================
 model Domain {
-  id         String      @id @default(cuid())
-  name       String      @unique
-  organizationId String
-  domainNameType DomainNameType @default(EXACT)
-  configMode DomainConfigMode @default(ISOLATED)
-  reviewStatus DomainReviewStatus @default(CONFIRMED)
-  isPrimary  Boolean     @default(false)
-  type       DnsType     @default(A)
-  value      String      // IP or CNAME target
-  serverId   String?
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  server     Server?     @relation(fields: [serverId], references: [id])
+  id                String                @id @default(cuid())
+  name              String                @unique
+  organizationId    String
+  domainNameType    DomainNameType        @default(EXACT)
+  configMode        DomainConfigMode      @default(ISOLATED)
+  reviewStatus      DomainReviewStatus    @default(CONFIRMED)
+  isPrimary         Boolean               @default(false)
+  type              DnsType               @default(A)
+  value             String // IP or CNAME target
+  serverId          String?
+  organization      Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  server            Server?               @relation(fields: [serverId], references: [id])
   targetContainerId String?
-  targetContainer   Container? @relation(fields: [targetContainerId], references: [id], onDelete: SetNull)
-  targetPort Int?
-  proxy      ProxyType   @default(NONE)
-  discoverySource DomainDiscoverySource @default(MANUAL)
-  sslEnabled Boolean     @default(false)
-  autoRenew  Boolean     @default(true)
-  isActive   Boolean     @default(true)
-  createdAt  DateTime    @default(now())
-  updatedAt  DateTime    @updatedAt
+  targetContainer   Container?            @relation(fields: [targetContainerId], references: [id], onDelete: SetNull)
+  targetPort        Int?
+  proxy             ProxyType             @default(NONE)
+  discoverySource   DomainDiscoverySource @default(MANUAL)
+  sslEnabled        Boolean               @default(false)
+  autoRenew         Boolean               @default(true)
+  isActive          Boolean               @default(true)
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
 
-  sslCert    SslCert?
+  sslCert SslCert?
 
   @@index([organizationId])
   @@index([targetContainerId])
@@ -757,18 +801,18 @@ enum DomainReviewStatus {
 }
 
 model SslCert {
-  id         String    @id @default(cuid())
-  domainId   String    @unique
-  domain     Domain    @relation(fields: [domainId], references: [id], onDelete: Cascade)
-  issuer     String    @default("Let's Encrypt")
-  certPem    String?   // certificate PEM
-  keyPem     String?   // private key PEM (encrypted)
-  issuedAt   DateTime?
-  expiresAt  DateTime?
-  status     SslStatus @default(PENDING)
-  autoRenew  Boolean   @default(true)
-  createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
+  id        String    @id @default(cuid())
+  domainId  String    @unique
+  domain    Domain    @relation(fields: [domainId], references: [id], onDelete: Cascade)
+  issuer    String    @default("Let's Encrypt")
+  certPem   String? // certificate PEM
+  keyPem    String? // private key PEM (encrypted)
+  issuedAt  DateTime?
+  expiresAt DateTime?
+  status    SslStatus @default(PENDING)
+  autoRenew Boolean   @default(true)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
 
   @@map("ssl_certs")
 }
@@ -785,19 +829,19 @@ enum SslStatus {
 // Audit Log
 // ========================
 model AuditLog {
-  id        String   @id @default(cuid())
-  userId    String?
+  id             String        @id @default(cuid())
+  userId         String?
   organizationId String?
-  user      User?    @relation(fields: [userId], references: [id])
-  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
-  serverId  String?
-  server    Server?  @relation(fields: [serverId], references: [id])
-  action    String
-  category  LogCategory
-  level     LogLevel @default(INFO)
-  message   String
-  meta      Json?
-  createdAt DateTime @default(now())
+  user           User?         @relation(fields: [userId], references: [id])
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  serverId       String?
+  server         Server?       @relation(fields: [serverId], references: [id])
+  action         String
+  category       LogCategory
+  level          LogLevel      @default(INFO)
+  message        String
+  meta           Json?
+  createdAt      DateTime      @default(now())
 
   @@index([createdAt])
   @@index([organizationId])
@@ -828,17 +872,17 @@ enum LogLevel {
 // App Installer
 // ========================
 model AppInstall {
-  id          String           @id @default(cuid())
-  appId       String           // e.g. "wordpress", "nginx"
-  appName     String
-  serverId    String
-  server      Server           @relation(fields: [serverId], references: [id], onDelete: Cascade)
-  containerName String?        // docker container name
-  port        String?          // host port used
-  status      AppInstallStatus @default(PENDING)
-  error       String?
-  installedAt DateTime         @default(now())
-  updatedAt   DateTime         @updatedAt
+  id            String           @id @default(cuid())
+  appId         String // e.g. "wordpress", "nginx"
+  appName       String
+  serverId      String
+  server        Server           @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  containerName String? // docker container name
+  port          String? // host port used
+  status        AppInstallStatus @default(PENDING)
+  error         String?
+  installedAt   DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
 
   @@map("app_installs")
 }
@@ -860,23 +904,23 @@ enum AppInstallStatus {
 // Backups
 // ========================
 model Backup {
-  id        String       @id @default(cuid())
-  name      String
-  type      BackupType
-  databaseEngine DatabaseEngine?
-  serverId  String
-  server    Server       @relation(fields: [serverId], references: [id], onDelete: Cascade)
-  target    String       @default("Local")
-  sizeMb    Float?
-  filePath  String?
-  storageBucket String?
-  storageKey String?
-  storageEtag String?
+  id                   String          @id @default(cuid())
+  name                 String
+  type                 BackupType
+  databaseEngine       DatabaseEngine?
+  serverId             String
+  server               Server          @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  target               String          @default("Local")
+  sizeMb               Float?
+  filePath             String?
+  storageBucket        String?
+  storageKey           String?
+  storageEtag          String?
   storageDestinationId String?
-  status    BackupStatus @default(PENDING)
-  error     String?
-  createdAt DateTime     @default(now())
-  updatedAt DateTime     @updatedAt
+  status               BackupStatus    @default(PENDING)
+  error                String?
+  createdAt            DateTime        @default(now())
+  updatedAt            DateTime        @updatedAt
 
   @@map("backups")
 }

@@ -103,6 +103,10 @@ export default function GeneralSettingsPanel({
                 </option>
               ))}
             </select>
+            <p style={{ marginTop: 6, fontSize: 12, color: "var(--text-muted)" }}>
+              Activity extends the inactivity window. Every login still follows
+              the server&apos;s absolute session lifetime.
+            </p>
           </div>
         </div>
 

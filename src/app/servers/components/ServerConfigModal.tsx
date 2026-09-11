@@ -11,7 +11,6 @@ import {
   X,
 } from "lucide-react";
 import {
-  getUser,
   type Server as ServerType,
   type ServerConfigSnapshot,
   type ServerSshAccessUpdateBody,
@@ -19,6 +18,7 @@ import {
   type ServerSystemUserCreateBody,
   servers as serversApi,
 } from "@/lib/api";
+import { useCurrentUser } from "@/lib/auth-state";
 import {
   createUnavailableServerConfigSnapshot,
   getServiceRestartDescription,
@@ -49,6 +49,7 @@ export default function ServerConfigModal({
   onActionComplete,
   title = "Server Config",
 }: ServerConfigModalProps) {
+  const currentUser = useCurrentUser();
   const [activeTab, setActiveTab] = useState<ServerConfigTab>("overview");
   const [snapshot, setSnapshot] = useState<ServerConfigSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
@@ -94,7 +95,7 @@ export default function ServerConfigModal({
   );
 
   const canManageSystemAccounts = ["OPERATOR", "SUPER_ADMIN"].includes(
-    getUser()?.role ?? "VIEWER",
+    currentUser?.role ?? "VIEWER",
   );
 
   const getSystemAccountActionKey = useCallback(

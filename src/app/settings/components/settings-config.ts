@@ -16,7 +16,7 @@ export const SESSION_TIMEOUT_OPTIONS = [
   { label: "1 hour", value: 60 },
   { label: "4 hours", value: 240 },
   { label: "24 hours", value: 1440 },
-  { label: "Never", value: 0 },
+  { label: "No inactivity timeout", value: 0 },
 ];
 
 export const SETTINGS_TABS: Array<{

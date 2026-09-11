@@ -1,23 +1,36 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getToken, getUser, redirectToLogin, type UserInfo } from "@/lib/api";
+import {
+  getUser,
+  loadCurrentSession,
+  redirectToLogin,
+  type UserInfo,
+} from "@/lib/api";
 import { addAuthStateListener } from "@/lib/auth-events";
 
 export function useCurrentUser() {
-  const [currentUser, setCurrentUser] = useState<UserInfo | null>(null);
+  const [currentUser, setCurrentUser] = useState<UserInfo | null>(getUser());
 
   useEffect(() => {
-    const syncCurrentUser = () => {
+    let active = true;
+    const syncCurrentUser = (source: "local" | "broadcast") => {
+      if (source === "broadcast") {
+        void loadCurrentSession(true).then((user) => {
+          if (active) setCurrentUser(user);
+        });
+        return;
+      }
       setCurrentUser(getUser());
     };
 
-    syncCurrentUser();
-    window.addEventListener("storage", syncCurrentUser);
+    void loadCurrentSession().then((user) => {
+      if (active) setCurrentUser(user);
+    });
     const removeAuthStateListener = addAuthStateListener(syncCurrentUser);
 
     return () => {
-      window.removeEventListener("storage", syncCurrentUser);
+      active = false;
       removeAuthStateListener();
     };
   }, []);
@@ -26,21 +39,34 @@ export function useCurrentUser() {
 }
 
 export function useRequireAuth() {
-  const [hasToken, setHasToken] = useState(false);
+  const [authenticated, setAuthenticated] = useState<boolean | null>(null);
 
   useEffect(() => {
-    const syncAuth = () => {
-      const authenticated = Boolean(getToken());
-      setHasToken(authenticated);
-
-      if (!authenticated) {
-        redirectToLogin();
+    let active = true;
+    const syncAuth = (source: "local" | "broadcast") => {
+      if (source === "broadcast") {
+        void loadCurrentSession(true).then((user) => {
+          if (!active) return;
+          setAuthenticated(Boolean(user));
+          if (!user) redirectToLogin();
+        });
+        return;
       }
+      setAuthenticated(Boolean(getUser()));
     };
 
-    syncAuth();
-    return addAuthStateListener(syncAuth);
+    void loadCurrentSession().then((user) => {
+      if (!active) return;
+      setAuthenticated(Boolean(user));
+      if (!user) redirectToLogin();
+    });
+    const removeAuthStateListener = addAuthStateListener(syncAuth);
+
+    return () => {
+      active = false;
+      removeAuthStateListener();
+    };
   }, []);
 
-  return hasToken;
+  return authenticated === true;
 }

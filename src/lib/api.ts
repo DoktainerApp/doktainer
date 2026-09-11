@@ -4,12 +4,7 @@
  */
 
 import { emitAuthStateChanged } from "@/lib/auth-events";
-import {
-  getSensitiveStorageItem,
-  removeSensitiveStorageItem,
-  sensitiveStorageKeys,
-  setSensitiveStorageItem,
-} from "@/lib/browser-storage";
+import { clearLegacyAuthStorage } from "@/lib/browser-storage";
 import {
   buildTerminalWebSocketUrl,
   resolveWebSocketBaseUrl,
@@ -59,6 +54,7 @@ const PUBLIC_AUTH_PATHS = [
   "/auth/register",
   "/auth/invitations",
   "/auth/registration-status",
+  "/auth/me",
 ] as const;
 const READ_ONLY_ALLOWED_MUTATION_PATHS = new Set(["/auth/logout"]);
 
@@ -124,50 +120,78 @@ export function redirectToLogin(reason?: string): void {
 
 function handleUnauthorizedSession(
   path: string,
-  hadToken: boolean,
 ): never | void {
-  if (!hadToken || isPublicAuthPath(path)) {
+  if (isPublicAuthPath(path)) {
     return;
   }
 
-  clearToken();
+  clearSessionState();
   redirectToLogin("session-expired");
   throw new Error("Unauthorized - session expired");
 }
 
-// ─── Token helpers ────────────────────────────────────────────────────────────
+// ─── Browser session state ────────────────────────────────────────────────────
 
-export function getToken(): string | null {
-  return getSensitiveStorageItem(sensitiveStorageKeys.token);
-}
+let currentUser: UserInfo | null = null;
+let sessionRequest: Promise<UserInfo | null> | null = null;
+let sessionLoaded = false;
+let sessionGeneration = 0;
 
-export function setToken(token: string): void {
-  setSensitiveStorageItem(sensitiveStorageKeys.token, token);
-  emitAuthStateChanged();
-}
-
-export function clearToken(): void {
-  removeSensitiveStorageItem(sensitiveStorageKeys.token);
-  removeSensitiveStorageItem(sensitiveStorageKeys.user);
+export function clearSessionState(): void {
+  currentUser = null;
+  sessionRequest = null;
+  sessionLoaded = false;
+  sessionGeneration += 1;
+  clearLegacyAuthStorage();
   clearStoredOrganizationId();
-  emitAuthStateChanged();
+  emitAuthStateChanged(true);
 }
 
 export function getUser(): UserInfo | null {
-  try {
-    const raw = getSensitiveStorageItem(sensitiveStorageKeys.user);
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
+  return currentUser;
 }
 
 export function setUser(user: UserInfo): void {
-  setSensitiveStorageItem(sensitiveStorageKeys.user, JSON.stringify(user));
+  currentUser = user;
+  sessionLoaded = true;
+  sessionGeneration += 1;
   if (user.activeOrganizationId) {
     setStoredOrganizationId(user.activeOrganizationId);
   }
   emitAuthStateChanged();
+}
+
+export function loadCurrentSession(force = false): Promise<UserInfo | null> {
+  if (sessionRequest) return sessionRequest;
+  if (!force && sessionLoaded) return Promise.resolve(currentUser);
+
+  clearLegacyAuthStorage();
+  const requestGeneration = sessionGeneration;
+  const request = auth
+    .me()
+    .then((response) => {
+      if (requestGeneration !== sessionGeneration) {
+        return currentUser;
+      }
+      setUser(response.user);
+      return response.user;
+    })
+    .catch(() => {
+      if (requestGeneration !== sessionGeneration) {
+        return currentUser;
+      }
+      currentUser = null;
+      sessionLoaded = true;
+      emitAuthStateChanged();
+      return null;
+    })
+    .finally(() => {
+      if (sessionRequest === request) {
+        sessionRequest = null;
+      }
+    });
+  sessionRequest = request;
+  return request;
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -178,6 +202,43 @@ export interface UserInfo {
   email: string;
   role: string;
   activeOrganizationId?: string | null;
+}
+
+export type UserSessionEventType =
+  | "LOGIN"
+  | "LOGOUT"
+  | "REVOKED"
+  | "EXPIRED";
+
+export interface UserSessionEventRecord {
+  id: string;
+  type: UserSessionEventType;
+  ipAddress: string | null;
+  userAgent: string | null;
+  details: Record<string, unknown> | null;
+  createdAt: string;
+}
+
+export interface UserSessionRecord {
+  id: string;
+  createdIp: string | null;
+  lastIp: string | null;
+  userAgent: string | null;
+  createdAt: string;
+  lastSeenAt: string;
+  idleExpiresAt: string;
+  absoluteExpiresAt: string;
+  revokedAt: string | null;
+  revokeReason: string | null;
+  current: boolean;
+  canRevoke: boolean;
+  user: {
+    id: string;
+    name: string;
+    email: string;
+    role: string;
+  };
+  events: UserSessionEventRecord[];
 }
 
 export interface OrganizationRecord {
@@ -706,8 +767,6 @@ async function requestRaw(
 ): Promise<Response> {
   enforceViewerReadOnlyClient(path, options.method);
 
-  const token = getToken();
-  const hadToken = Boolean(token);
   const headers: Record<string, string> = {
     ...(options.headers as Record<string, string>),
   };
@@ -729,8 +788,8 @@ async function requestRaw(
     headers["Content-Type"] = "application/json";
   }
 
-  if (token) {
-    headers["Authorization"] = `Bearer ${token}`;
+  if (methodRequiresWriteAccess(options.method)) {
+    headers["x-doktainer-request"] = "1";
   }
 
   const organizationId = getStoredOrganizationId();
@@ -744,6 +803,7 @@ async function requestRaw(
     res = await fetch(`${BASE_URL}${path}`, {
       ...options,
       headers,
+      credentials: "include",
       signal: options.signal ?? controller.signal,
     });
   } catch (error) {
@@ -761,7 +821,7 @@ async function requestRaw(
   }
 
   if (res.status === 401) {
-    handleUnauthorizedSession(path, hadToken);
+    handleUnauthorizedSession(path);
   }
 
   return res;
@@ -813,11 +873,7 @@ function del<T>(path: string, body?: unknown, config?: { timeoutMs?: number }) {
 // ─── WebSocket helper ─────────────────────────────────────────────────────────
 
 export function createWs(path: string): WebSocket {
-  const token = getToken();
-  const sep = path.includes("?") ? "&" : "?";
-  return new WebSocket(
-    `${getWebSocketBaseUrl()}${path}${token ? `${sep}token=${encodeURIComponent(token)}` : ""}`,
-  );
+  return new WebSocket(`${getWebSocketBaseUrl()}${path}`);
 }
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
@@ -830,7 +886,6 @@ export const auth = {
     post<
       | {
           success: boolean;
-          token: string;
           user: UserInfo;
           requiresTwoFactor?: false;
         }
@@ -842,17 +897,31 @@ export const auth = {
     }),
 
   register: (name: string, email: string, password: string) =>
-    post<{ success: boolean; token: string; user: UserInfo }>(
+    post<{ success: boolean; user: UserInfo }>(
       "/auth/register",
       { name, email, password },
     ),
 
-  me: () => get<{ success: boolean; data: UserInfo }>("/auth/me"),
+  me: () => get<{ success: boolean; user: UserInfo }>("/auth/me"),
 
   logout: () =>
     request<{ success: boolean; message: string }>("/auth/logout", {
       method: "POST",
     }),
+
+  sessions: () =>
+    get<{ success: boolean; data: UserSessionRecord[] }>("/auth/sessions"),
+
+  revokeSession: (sessionId: string) =>
+    del<{ success: boolean; data: { revokedCurrent: boolean } }>(
+      `/auth/sessions/${encodeURIComponent(sessionId)}`,
+    ),
+
+  revokeOtherSessions: () =>
+    post<{ success: boolean; data: { revokedCount: number } }>(
+      "/auth/sessions/revoke-others",
+      {},
+    ),
 
   changePassword: (currentPassword: string, newPassword: string) =>
     patch<{ success: boolean; message: string }>("/auth/password", {
@@ -908,7 +977,7 @@ export const auth = {
     token: string,
     body: { name?: string; password: string },
   ) =>
-    post<{ success: boolean; token: string; user: UserInfo }>(
+    post<{ success: boolean; user: UserInfo }>(
       `/auth/invitations/${token}/accept`,
       body,
     ),

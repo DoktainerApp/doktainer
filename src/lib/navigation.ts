@@ -16,6 +16,7 @@ import {
   LayoutDashboard,
   Lock,
   MessageCircle,
+  MonitorSmartphone,
   Network,
   Package,
   RotateCcw,
@@ -182,9 +183,16 @@ export const navigation: NavSection[] = [
     label: "MANAGEMENT",
     items: [
       {
+        href: "/sessions",
+        icon: MonitorSmartphone,
+        label: "Sessions",
+        minRole: "OPERATOR",
+        keywords: ["login", "sessions", "devices", "security"],
+      },
+      {
         href: "/users",
         icon: Users,
-        label: "Users & RBAC",
+        label: "Users",
         minRole: "OPERATOR",
         keywords: ["roles", "permissions", "team"],
       },

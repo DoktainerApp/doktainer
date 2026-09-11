@@ -1,10 +1,16 @@
-import { FastifyInstance } from "fastify";
+import { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import { z } from "zod";
 import prisma from "../lib/prisma";
 import { auditLog } from "../services/audit.service";
-import { authenticate } from "../middleware/auth";
+import {
+  authenticate,
+  getClientIp,
+  ipMatchesWhitelist,
+  requireBrowserMutationVerification,
+  requireRole,
+} from "../middleware/auth";
 import { dispatchRuntimeNotification } from "../services/notification.service";
 import {
   createTwoFactorSetup,
@@ -12,6 +18,18 @@ import {
   verifyEncryptedTwoFactorToken,
 } from "../services/two-factor.service";
 import { createOrganizationForUser } from "../lib/organizations";
+import {
+  clearSessionCookie,
+  canRevokeManagedSession,
+  changePasswordAndRevokeOtherSessions,
+  createUserSession,
+  expireUserSession,
+  getRequestUserAgent,
+  revokeOtherUserSessions,
+  revokeUserSession,
+  setSessionCookie,
+} from "../services/auth-session.service";
+import { SessionEventType } from "@prisma/client";
 
 const LoginSchema = z.object({
   email: z.string().email(),
@@ -69,7 +87,6 @@ async function ensureUserSettings(userId: string) {
 }
 
 function buildAuthResponse(
-  app: FastifyInstance,
   user: {
     id: string;
     role: string;
@@ -78,15 +95,7 @@ function buildAuthResponse(
     activeOrganizationId?: string | null;
   },
 ) {
-  const token = app.jwt.sign({
-    sub: user.id,
-    role: user.role,
-    name: user.name,
-    email: user.email,
-  });
-
   return {
-    token,
     user: {
       id: user.id,
       name: user.name,
@@ -94,6 +103,31 @@ function buildAuthResponse(
       role: user.role,
       activeOrganizationId: user.activeOrganizationId ?? null,
     },
+  };
+}
+
+async function establishLoginSession(
+  req: FastifyRequest,
+  reply: FastifyReply,
+  user: Parameters<typeof buildAuthResponse>[0],
+) {
+  const settings = await ensureUserSettings(user.id);
+  const ipAddress = getClientIp(req) || null;
+  const userAgent = getRequestUserAgent(req);
+  const created = await createUserSession({
+    userId: user.id,
+    sessionTimeoutMinutes: settings.sessionTimeoutMinutes,
+    ipAddress,
+    userAgent,
+  });
+  setSessionCookie(
+    reply,
+    created.rawToken,
+    created.session.absoluteExpiresAt,
+  );
+  return {
+    ...buildAuthResponse(user),
+    sessionId: created.session.id,
   };
 }
 
@@ -118,7 +152,11 @@ export async function authRoutes(app: FastifyInstance) {
 
   app.post(
     "/login",
-    { bodyLimit: authBodyLimit, config: { rateLimit: authRateLimit } },
+    {
+      preHandler: [requireBrowserMutationVerification],
+      bodyLimit: authBodyLimit,
+      config: { rateLimit: authRateLimit },
+    },
     async (req, reply) => {
       const body = LoginSchema.safeParse(req.body);
       if (!body.success) {
@@ -135,6 +173,8 @@ export async function authRoutes(app: FastifyInstance) {
             select: {
               twoFactorEnabled: true,
               twoFactorSecretEnc: true,
+              ipWhitelistEnabled: true,
+              ipWhitelist: true,
             },
           },
         },
@@ -149,7 +189,11 @@ export async function authRoutes(app: FastifyInstance) {
             category: "AUTH",
             level: "WARNING",
             message: `Failed login attempt for \"${user.email}\"`,
-            meta: { reason: user.isActive ? "unknown" : "inactive_user" },
+            meta: {
+              reason: user.isActive ? "unknown" : "inactive_user",
+              ipAddress: getClientIp(req) || null,
+              userAgent: getRequestUserAgent(req),
+            },
           });
         }
         return reply
@@ -166,7 +210,11 @@ export async function authRoutes(app: FastifyInstance) {
           category: "AUTH",
           level: "WARNING",
           message: `Failed login attempt for \"${user.email}\"`,
-          meta: { reason: "invalid_password" },
+          meta: {
+            reason: "invalid_password",
+            ipAddress: getClientIp(req) || null,
+            userAgent: getRequestUserAgent(req),
+          },
         });
 
         if (user.activeOrganizationId) {
@@ -217,7 +265,11 @@ export async function authRoutes(app: FastifyInstance) {
           category: "AUTH",
           level: "WARNING",
           message: `Invalid two-factor code for \"${user.email}\"`,
-          meta: { reason: "invalid_totp" },
+          meta: {
+            reason: "invalid_totp",
+            ipAddress: getClientIp(req) || null,
+            userAgent: getRequestUserAgent(req),
+          },
         });
 
         if (user.activeOrganizationId) {
@@ -241,12 +293,35 @@ export async function authRoutes(app: FastifyInstance) {
           .send({ success: false, error: "Invalid authentication code" });
       }
 
+      if (
+        user.settings?.ipWhitelistEnabled &&
+        user.settings.ipWhitelist.length > 0 &&
+        !ipMatchesWhitelist(getClientIp(req), user.settings.ipWhitelist)
+      ) {
+        await auditLog({
+          userId: user.id,
+          organizationId: user.activeOrganizationId ?? undefined,
+          action: "LOGIN_IP_BLOCKED",
+          category: "AUTH",
+          level: "WARNING",
+          message: `Login blocked by IP policy for "${user.email}"`,
+          meta: {
+            ipAddress: getClientIp(req) || null,
+            userAgent: getRequestUserAgent(req),
+          },
+        });
+        return reply.status(403).send({
+          success: false,
+          error: "Login is not permitted from this IP address",
+        });
+      }
+
       await prisma.user.update({
         where: { id: user.id },
         data: { lastLogin: new Date() },
       });
 
-      const auth = buildAuthResponse(app, user);
+      const auth = await establishLoginSession(req, reply, user);
 
       await auditLog({
         userId: user.id,
@@ -254,16 +329,20 @@ export async function authRoutes(app: FastifyInstance) {
         category: "AUTH",
         level: "INFO",
         message: `User "${user.email}" logged in`,
-        meta: { twoFactorEnabled },
+        meta: { twoFactorEnabled, sessionId: auth.sessionId },
       });
 
-      return reply.send({ success: true, ...auth });
+      return reply.send({ success: true, user: auth.user });
     },
   );
 
   app.post(
     "/register",
-    { bodyLimit: authBodyLimit, config: { rateLimit: registerRateLimit } },
+    {
+      preHandler: [requireBrowserMutationVerification],
+      bodyLimit: authBodyLimit,
+      config: { rateLimit: registerRateLimit },
+    },
     async (req, reply) => {
       const body = RegisterSchema.safeParse(req.body);
       if (!body.success) {
@@ -314,7 +393,7 @@ export async function authRoutes(app: FastifyInstance) {
         });
       });
 
-      const auth = buildAuthResponse(app, user);
+      const auth = await establishLoginSession(req, reply, user);
 
       await auditLog({
         userId: user.id,
@@ -324,7 +403,7 @@ export async function authRoutes(app: FastifyInstance) {
         message: `New user registered: "${email}"`,
       });
 
-      return reply.status(201).send({ success: true, ...auth });
+      return reply.status(201).send({ success: true, user: auth.user });
     },
   );
 
@@ -396,7 +475,11 @@ export async function authRoutes(app: FastifyInstance) {
 
   app.post(
     "/invitations/:token/accept",
-    { bodyLimit: authBodyLimit, config: { rateLimit: registerRateLimit } },
+    {
+      preHandler: [requireBrowserMutationVerification],
+      bodyLimit: authBodyLimit,
+      config: { rateLimit: registerRateLimit },
+    },
     async (req, reply) => {
       const { token } = req.params as { token: string };
       const body = InvitationAcceptSchema.safeParse(req.body);
@@ -504,7 +587,7 @@ export async function authRoutes(app: FastifyInstance) {
         return createdUser;
       });
 
-      const auth = buildAuthResponse(app, user);
+      const auth = await establishLoginSession(req, reply, user);
 
       await auditLog({
         userId: user.id,
@@ -515,7 +598,7 @@ export async function authRoutes(app: FastifyInstance) {
         message: `Invitation accepted for "${user.email}"`,
       });
 
-      return reply.send({ success: true, ...auth });
+      return reply.send({ success: true, user: auth.user });
     },
   );
 
@@ -541,6 +624,17 @@ export async function authRoutes(app: FastifyInstance) {
   });
 
   app.post("/logout", { preHandler: [authenticate] }, async (req, reply) => {
+    if (req.sessionId && req.userId) {
+      await revokeUserSession({
+        sessionId: req.sessionId,
+        userId: req.userId,
+        reason: "USER_LOGOUT",
+        eventType: SessionEventType.LOGOUT,
+        ipAddress: getClientIp(req) || null,
+        userAgent: getRequestUserAgent(req),
+      });
+    }
+    clearSessionCookie(reply);
     await auditLog({
       userId: req.userId,
       action: "LOGOUT",
@@ -550,6 +644,224 @@ export async function authRoutes(app: FastifyInstance) {
     });
     return reply.send({ success: true, message: "Logged out successfully" });
   });
+
+  app.get("/sessions", { preHandler: [requireRole("OPERATOR")] }, async (req, reply) => {
+    if (!req.sessionId) {
+      return reply.status(403).send({
+        success: false,
+        error: "A browser login session is required",
+      });
+    }
+    if (!req.organizationId) {
+      return reply.status(400).send({
+        success: false,
+        error: "An active organization is required",
+      });
+    }
+
+    const organizationScope = {
+      user: {
+        organizationMemberships: {
+          some: { organizationId: req.organizationId },
+        },
+      },
+    };
+    const now = new Date();
+    const expiredSessions = await prisma.userSession.findMany({
+      where: {
+        ...organizationScope,
+        revokedAt: null,
+        OR: [
+          { idleExpiresAt: { lte: now } },
+          { absoluteExpiresAt: { lte: now } },
+        ],
+      },
+      take: 200,
+      select: { id: true },
+    });
+    await Promise.all(
+      expiredSessions.map((session) =>
+        expireUserSession(
+          session.id,
+          getClientIp(req) || null,
+          getRequestUserAgent(req),
+        ),
+      ),
+    );
+
+    const sessions = await prisma.userSession.findMany({
+      where: organizationScope,
+      orderBy: { createdAt: "desc" },
+      take: 200,
+      select: {
+        id: true,
+        createdIp: true,
+        lastIp: true,
+        userAgent: true,
+        createdAt: true,
+        lastSeenAt: true,
+        idleExpiresAt: true,
+        absoluteExpiresAt: true,
+        revokedAt: true,
+        revokeReason: true,
+        user: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            role: true,
+          },
+        },
+        events: {
+          orderBy: { createdAt: "desc" },
+          take: 10,
+          select: {
+            id: true,
+            type: true,
+            ipAddress: true,
+            userAgent: true,
+            details: true,
+            createdAt: true,
+          },
+        },
+      },
+    });
+
+    return reply.send({
+      success: true,
+      data: sessions.map((session) => ({
+        ...session,
+        current: session.id === req.sessionId,
+        canRevoke:
+          session.revokedAt === null &&
+          (session.user.id === req.userId || req.userRole === "SUPER_ADMIN"),
+      })),
+    });
+  });
+
+  app.delete(
+    "/sessions/:sessionId",
+    { preHandler: [requireRole("OPERATOR")] },
+    async (req, reply) => {
+      if (!req.sessionId) {
+        return reply.status(403).send({
+          success: false,
+          error: "A browser login session is required",
+        });
+      }
+      const params = z
+        .object({ sessionId: z.string().trim().min(1).max(64) })
+        .safeParse(req.params);
+      if (!params.success) {
+        return reply
+          .status(400)
+          .send({ success: false, error: params.error.flatten() });
+      }
+      if (!req.organizationId) {
+        return reply.status(400).send({
+          success: false,
+          error: "An active organization is required",
+        });
+      }
+
+      const targetSession = await prisma.userSession.findFirst({
+        where: {
+          id: params.data.sessionId,
+          user: {
+            organizationMemberships: {
+              some: { organizationId: req.organizationId },
+            },
+          },
+        },
+        select: {
+          userId: true,
+          user: { select: { email: true } },
+        },
+      });
+      if (!targetSession) {
+        return reply
+          .status(404)
+          .send({ success: false, error: "Session not found" });
+      }
+
+      if (
+        !canRevokeManagedSession({
+          actorUserId: req.userId!,
+          actorRole: req.userRole!,
+          targetUserId: targetSession.userId,
+        })
+      ) {
+        return reply.status(403).send({
+          success: false,
+          error: "Only a Super Admin can revoke another user's session",
+        });
+      }
+
+      const revoked = await revokeUserSession({
+        sessionId: params.data.sessionId,
+        userId: targetSession.userId,
+        reason:
+          params.data.sessionId === req.sessionId
+            ? "CURRENT_SESSION_REVOKED"
+            : "USER_REVOKED",
+        ipAddress: getClientIp(req) || null,
+        userAgent: getRequestUserAgent(req),
+      });
+      if (!revoked) {
+        return reply
+          .status(404)
+          .send({ success: false, error: "Active session not found" });
+      }
+
+      const revokedCurrent = params.data.sessionId === req.sessionId;
+      if (revokedCurrent) clearSessionCookie(reply);
+      await auditLog({
+        userId: req.userId,
+        organizationId: req.organizationId,
+        action: "SESSION_REVOKE",
+        category: "AUTH",
+        level: "WARNING",
+        message: revokedCurrent
+          ? "Current login session revoked"
+          : `Login session revoked for "${targetSession.user.email}"`,
+        meta: {
+          sessionId: params.data.sessionId,
+          targetUserId: targetSession.userId,
+        },
+      });
+      return reply.send({ success: true, data: { revokedCurrent } });
+    },
+  );
+
+  app.post(
+    "/sessions/revoke-others",
+    { preHandler: [authenticate] },
+    async (req, reply) => {
+      if (!req.sessionId) {
+        return reply.status(400).send({
+          success: false,
+          error: "A browser login session is required",
+        });
+      }
+      const revokedCount = await revokeOtherUserSessions({
+        userId: req.userId!,
+        currentSessionId: req.sessionId,
+        reason: "USER_REVOKED_OTHER_SESSIONS",
+        ipAddress: getClientIp(req) || null,
+        userAgent: getRequestUserAgent(req),
+      });
+      await auditLog({
+        userId: req.userId,
+        organizationId: req.organizationId,
+        action: "SESSION_REVOKE_OTHERS",
+        category: "AUTH",
+        level: "WARNING",
+        message: `${revokedCount} other login session${revokedCount === 1 ? "" : "s"} revoked`,
+        meta: { revokedCount },
+      });
+      return reply.send({ success: true, data: { revokedCount } });
+    },
+  );
 
   app.patch(
     "/password",
@@ -586,9 +898,18 @@ export async function authRoutes(app: FastifyInstance) {
       }
 
       const passwordHash = await bcrypt.hash(body.data.newPassword, 12);
-      await prisma.user.update({
-        where: { id: user.id },
-        data: { passwordHash },
+      if (!req.sessionId) {
+        return reply.status(403).send({
+          success: false,
+          error: "A browser login session is required to change a password",
+        });
+      }
+      const revokedCount = await changePasswordAndRevokeOtherSessions({
+        userId: user.id,
+        currentSessionId: req.sessionId,
+        passwordHash,
+        ipAddress: getClientIp(req) || null,
+        userAgent: getRequestUserAgent(req),
       });
 
       await auditLog({
@@ -597,6 +918,7 @@ export async function authRoutes(app: FastifyInstance) {
         category: "AUTH",
         level: "INFO",
         message: "Password changed",
+        meta: { revokedSessionCount: revokedCount },
       });
 
       return reply.send({

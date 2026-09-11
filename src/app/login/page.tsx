@@ -11,7 +11,7 @@ import {
   Lock,
   Mail,
 } from "lucide-react";
-import { auth, getToken, setToken, setUser } from "@/lib/api";
+import { auth, loadCurrentSession, setUser } from "@/lib/api";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -38,8 +38,10 @@ export default function LoginPage() {
 
     if (reasonParam === "session-expired") {
       setError("The login session has expired. Please log in again.");
-    } else if (getToken()) {
-      router.replace("/");
+    } else {
+      void loadCurrentSession().then((user) => {
+        if (user) router.replace("/");
+      });
     }
 
     let cancelled = false;
@@ -100,11 +102,10 @@ export default function LoginPage() {
         return;
       }
 
-      if (!("token" in res) || !("user" in res)) {
+      if (!("user" in res)) {
         throw new Error("Authentication failed");
       }
 
-      setToken(res.token);
       setUser(res.user);
       router.replace("/");
     } catch (err: unknown) {

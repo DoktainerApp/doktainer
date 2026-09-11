@@ -1,11 +1,13 @@
-const TOKEN_KEY = "doktainer_token";
-const USER_KEY = "doktainer_user";
 const ORGANIZATION_STORAGE_KEY = "doktainer_active_organization";
 
-type SensitiveStorageKey =
-  | typeof TOKEN_KEY
-  | typeof USER_KEY
-  | typeof ORGANIZATION_STORAGE_KEY;
+type SensitiveStorageKey = typeof ORGANIZATION_STORAGE_KEY;
+
+const LEGACY_AUTH_STORAGE_KEYS = [
+  "doktainer_token",
+  "doktainer_user",
+  "vps_token",
+  "vps_user",
+] as const;
 
 function getLocalStorage(): Storage | null {
   if (typeof window === "undefined") return null;
@@ -34,8 +36,12 @@ export function removeSensitiveStorageItem(key: SensitiveStorageKey): void {
   getLocalStorage()?.removeItem(key);
 }
 
+export function clearLegacyAuthStorage(): void {
+  const storage = getLocalStorage();
+  if (!storage) return;
+  for (const key of LEGACY_AUTH_STORAGE_KEYS) storage.removeItem(key);
+}
+
 export const sensitiveStorageKeys = {
-  token: TOKEN_KEY,
-  user: USER_KEY,
   organization: ORGANIZATION_STORAGE_KEY,
 } as const;

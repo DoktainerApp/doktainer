@@ -5,7 +5,6 @@ import {
   addPreferencesListener,
   applyTheme,
   getStoredTheme,
-  initializeSessionTimeoutWatcher,
 } from "@/lib/preferences";
 
 export default function ThemeController() {
@@ -25,14 +24,12 @@ export default function ThemeController() {
     window.addEventListener("pageshow", syncTheme);
     document.addEventListener("visibilitychange", syncTheme);
     const removePreferencesListener = addPreferencesListener(syncTheme);
-    const stopSessionWatcher = initializeSessionTimeoutWatcher();
 
     return () => {
       media.removeEventListener("change", onThemeMediaChange);
       window.removeEventListener("pageshow", syncTheme);
       document.removeEventListener("visibilitychange", syncTheme);
       removePreferencesListener();
-      stopSessionWatcher();
     };
   }, []);
 

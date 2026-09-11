@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { getToken, gitProvidersApi, redirectToLogin } from "@/lib/api";
+import { gitProvidersApi, redirectToLogin } from "@/lib/api";
 import { decodeGithubManifestState } from "@/lib/github-manifest-state";
 
 export default function GithubCallbackPage() {
@@ -67,7 +67,7 @@ export default function GithubCallbackPage() {
           },
         );
 
-        if (conversionResponse.status === 401 && getToken()) {
+        if (conversionResponse.status === 401) {
           redirectToLogin("session-expired");
           return;
         }

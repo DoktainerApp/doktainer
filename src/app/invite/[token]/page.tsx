@@ -11,7 +11,7 @@ import {
   Shield,
   User,
 } from "lucide-react";
-import { auth, setToken, setUser, UserRole } from "@/lib/api";
+import { auth, setUser, UserRole } from "@/lib/api";
 
 function roleLabel(role: UserRole) {
   switch (role) {
@@ -92,7 +92,6 @@ export default function InvitationPage() {
         password: form.password,
       });
 
-      setToken(response.token);
       setUser(response.user);
       router.replace("/");
     } catch (err: unknown) {

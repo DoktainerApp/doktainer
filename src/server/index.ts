@@ -1,7 +1,7 @@
 import "dotenv/config";
 import Fastify, { FastifyError } from "fastify";
 import cors from "@fastify/cors";
-import jwt from "@fastify/jwt";
+import cookie from "@fastify/cookie";
 import rateLimit from "@fastify/rate-limit";
 import multipart from "@fastify/multipart";
 import websocket from "@fastify/websocket";
@@ -33,19 +33,6 @@ import { startS3StorageRetentionScheduler } from "./services/s3-storage-retentio
 
 const PORT = parseInt(process.env.PORT || "4000");
 const HOST = process.env.HOST || "0.0.0.0";
-
-export function getJwtSecretOrThrow(env = process.env): string {
-  const secret = env.JWT_SECRET?.trim();
-  if (!secret) {
-    throw new Error(
-      "JWT_SECRET must be configured before starting the backend",
-    );
-  }
-  if (secret.length < 32) {
-    throw new Error("JWT_SECRET must be at least 32 characters long");
-  }
-  return secret;
-}
 
 function getRateLimitMax(env = process.env): number {
   const raw = Number.parseInt(env.RATE_LIMIT_MAX || "300", 10);
@@ -120,7 +107,6 @@ async function ensureDatabaseConnection() {
 }
 
 async function start() {
-  const jwtSecret = getJwtSecretOrThrow();
   validateEncryptionConfiguration();
   await ensureDatabaseConnection();
   setDefaultSecurityHeaders();
@@ -149,11 +135,7 @@ async function start() {
     }),
   });
 
-  await app.register(jwt, {
-    secret: jwtSecret,
-    sign: { expiresIn: process.env.JWT_EXPIRES_IN || "7d" },
-  });
-
+  await app.register(cookie);
   await app.register(websocket);
   await app.register(multipart, { limits: { fileSize: 512 * 1024 * 1024, files: 1 } });
 

@@ -1,4 +1,3 @@
-import { clearToken, getToken } from "@/lib/api";
 import {
   applyTheme,
   THEME_STORAGE_KEY,
@@ -99,54 +98,5 @@ export function addPreferencesListener(listener: () => void) {
   return () => {
     window.removeEventListener("storage", onStorage);
     window.removeEventListener(SETTINGS_EVENT, listener);
-  };
-}
-
-export function initializeSessionTimeoutWatcher() {
-  if (typeof window === "undefined") return () => undefined;
-
-  let timer: number | undefined;
-
-  const schedule = () => {
-    if (timer) {
-      window.clearTimeout(timer);
-    }
-
-    const minutes = getStoredSessionTimeoutMinutes();
-    if (!minutes || minutes <= 0) return;
-    if (!getToken()) return;
-
-    timer = window.setTimeout(
-      () => {
-        clearToken();
-        window.location.href = "/login?reason=session-expired";
-      },
-      minutes * 60 * 1000,
-    );
-  };
-
-  const events: Array<keyof WindowEventMap> = [
-    "click",
-    "keydown",
-    "mousemove",
-    "scroll",
-    "touchstart",
-  ];
-
-  for (const eventName of events) {
-    window.addEventListener(eventName, schedule, { passive: true });
-  }
-
-  const removePreferencesListener = addPreferencesListener(schedule);
-  schedule();
-
-  return () => {
-    if (timer) {
-      window.clearTimeout(timer);
-    }
-    for (const eventName of events) {
-      window.removeEventListener(eventName, schedule);
-    }
-    removePreferencesListener();
   };
 }

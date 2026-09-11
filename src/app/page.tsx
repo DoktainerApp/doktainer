@@ -16,7 +16,6 @@ import {
   AlertTriangle,
   CheckCircle,
   Clock,
-  Zap,
 } from "lucide-react";
 import {
   AreaChart,

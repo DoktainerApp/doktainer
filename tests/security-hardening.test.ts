@@ -2,12 +2,15 @@ import assert from "node:assert/strict";
 import test, { afterEach, beforeEach } from "node:test";
 
 import {
-  getSensitiveStorageItem,
-  removeSensitiveStorageItem,
+  clearLegacyAuthStorage,
   sensitiveStorageKeys,
   setSensitiveStorageItem,
 } from "../src/lib/browser-storage.ts";
-import { auth, getToken } from "../src/lib/api.ts";
+import {
+  auth,
+  getUser,
+  setUser,
+} from "../src/lib/api.ts";
 import {
   consumeGithubManifestState,
   encodeGithubManifestState,
@@ -141,38 +144,33 @@ afterEach(() => {
   globalThis.window = originalWindow;
 });
 
-test("reads sensitive token storage from localStorage", () => {
-  window.localStorage.setItem(sensitiveStorageKeys.token, "legacy-token");
+test("removes legacy auth credentials without deleting organization preference", () => {
+  window.localStorage.setItem("doktainer_token", "legacy-token");
+  window.localStorage.setItem("doktainer_user", '{"id":"legacy"}');
+  setSensitiveStorageItem(sensitiveStorageKeys.organization, "org-1");
 
+  clearLegacyAuthStorage();
+
+  assert.equal(window.localStorage.getItem("doktainer_token"), null);
+  assert.equal(window.localStorage.getItem("doktainer_user"), null);
   assert.equal(
-    getSensitiveStorageItem(sensitiveStorageKeys.token),
-    "legacy-token",
+    window.localStorage.getItem(sensitiveStorageKeys.organization),
+    "org-1",
   );
-  assert.equal(
-    window.localStorage.getItem(sensitiveStorageKeys.token),
-    "legacy-token",
-  );
-});
-
-test("writes and removes sensitive values in localStorage", () => {
-  setSensitiveStorageItem(sensitiveStorageKeys.user, '{"id":"new"}');
-
-  assert.equal(
-    window.localStorage.getItem(sensitiveStorageKeys.user),
-    '{"id":"new"}',
-  );
-
-  removeSensitiveStorageItem(sensitiveStorageKeys.user);
-
-  assert.equal(window.localStorage.getItem(sensitiveStorageKeys.user), null);
 });
 
 test("clears stored session and redirects to login on authenticated 401", async () => {
-  setSensitiveStorageItem(sensitiveStorageKeys.token, "stale-token");
-  setSensitiveStorageItem(sensitiveStorageKeys.user, '{"id":"user-1"}');
+  setUser({
+    id: "user-1",
+    name: "User",
+    email: "user@example.com",
+    role: "OPERATOR",
+  });
+  let requestInit: RequestInit | undefined;
 
-  globalThis.fetch = async () =>
-    new Response(
+  globalThis.fetch = async (_input, init) => {
+    requestInit = init;
+    return new Response(
       JSON.stringify({
         success: false,
         error: "Unauthorized - session expired",
@@ -182,11 +180,16 @@ test("clears stored session and redirects to login on authenticated 401", async 
         headers: { "Content-Type": "application/json" },
       },
     );
+  };
 
-  await assert.rejects(() => auth.me(), /Unauthorized - session expired/);
+  await assert.rejects(() => auth.logout(), /Unauthorized - session expired/);
 
-  assert.equal(getToken(), null);
-  assert.equal(getSensitiveStorageItem(sensitiveStorageKeys.user), null);
+  assert.equal(getUser(), null);
+  assert.equal(requestInit?.credentials, "include");
+  assert.equal(
+    (requestInit?.headers as Record<string, string>)["x-doktainer-request"],
+    "1",
+  );
   assert.equal(window.location.pathname, "/login");
   assert.equal(window.location.search, "?reason=session-expired");
 });

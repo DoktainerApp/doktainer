@@ -28,6 +28,16 @@ test("redeploy endpoints require container write authorization", () => {
   assert.match(routes.slice(previewStart, previewStart + 180), /containerReadAccess/);
 });
 
+test("internal deployment jobs retain browser session authentication", () => {
+  const helperStart = routes.indexOf("function buildInternalJobHeaders");
+  assert.ok(helperStart >= 0, "internal job header builder should exist");
+
+  const helper = routes.slice(helperStart, helperStart + 900);
+  assert.match(helper, /"x-doktainer-request": "1"/);
+  assert.match(helper, /const cookie = headers\.cookie/);
+  assert.match(helper, /nextHeaders\.cookie = cookie/);
+});
+
 test("redeploy restores the stored current revision without invoking source rebuild", () => {
   assert.match(redeployService, /redeployContainerCurrentRevision/);
   assert.match(redeployService, /getRollbackSnapshot\(input\)/);

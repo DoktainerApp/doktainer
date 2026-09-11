@@ -22,6 +22,7 @@ export function formatRoleLabel(role: string | undefined) {
 }
 
 export const managementRouteAccess = {
+  "/sessions": "OPERATOR",
   "/users": "OPERATOR",
   "/api-keys": "DEVELOPER",
   "/settings": "OPERATOR",

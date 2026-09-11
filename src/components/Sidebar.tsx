@@ -4,13 +4,18 @@ import Image from "next/image";
 import { useEffect, useRef, useState, type MouseEvent } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { auth, clearToken, redirectToLogin } from "@/lib/api";
+import { auth, clearSessionState, redirectToLogin } from "@/lib/api";
 import { useCurrentUser } from "@/lib/auth-state";
 import OrganizationSwitcher from "@/components/OrganizationSwitcher";
 import { navigation } from "@/lib/navigation";
 import { addPreferencesListener, getStoredPanelName } from "@/lib/preferences";
 import { formatRoleLabel, hasMinimumRole } from "@/lib/permissions";
-import { LogOut, ChevronsUpDown, X, Crown } from "lucide-react";
+import {
+  LogOut,
+  ChevronsUpDown,
+  X,
+  Crown,
+} from "lucide-react";
 
 interface SidebarProps {
   /** Desktop: whether sidebar is in collapsed (icon-only) state */
@@ -44,11 +49,13 @@ export default function Sidebar({
       ),
     }))
     .filter((section) => section.items.length > 0);
-  const accountMenuSections = visibleNavigation.filter(
-    (section) => section.label === "INTEGRATIONS" || section.label === "MANAGEMENT",
+  const organizationQuickAccessSections = visibleNavigation.filter(
+    (section) =>
+      section.label === "INTEGRATIONS" || section.label === "MANAGEMENT",
   );
   const sidebarNavigation = visibleNavigation.filter(
-    (section) => section.label !== "INTEGRATIONS" && section.label !== "MANAGEMENT",
+    (section) =>
+      section.label !== "INTEGRATIONS" && section.label !== "MANAGEMENT",
   );
 
   const handleLogout = async () => {
@@ -61,7 +68,7 @@ export default function Sidebar({
     } catch {
       // Best effort server-side logout; local session is cleared regardless.
     } finally {
-      clearToken();
+      clearSessionState();
       onMobileClose();
       redirectToLogin();
     }
@@ -86,8 +93,11 @@ export default function Sidebar({
 
   useEffect(() => {
     const handlePointerDown = (event: PointerEvent) => {
-      if (!accountMenuRef.current?.contains(event.target as Node)) setAccountOpen(false);
+      if (!accountMenuRef.current?.contains(event.target as Node)) {
+        setAccountOpen(false);
+      }
     };
+
     document.addEventListener("pointerdown", handlePointerDown);
     return () => document.removeEventListener("pointerdown", handlePointerDown);
   }, []);
@@ -333,13 +343,19 @@ export default function Sidebar({
         aria-haspopup="menu"
         aria-label="Open account menu"
         onClick={() => setAccountOpen((value) => !value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            setAccountOpen((value) => !value);
+          }
+        }}
         style={{
           padding: isCollapsed ? "12px 8px" : "12px 16px",
           borderTop: "1px solid var(--border)",
-          display: "flex",
+          position: "relative",
           alignItems: "center",
           gap: 10,
-          position: "relative",
+          display: "flex",
           cursor: "pointer",
         }}
       >
@@ -385,31 +401,150 @@ export default function Sidebar({
         )}
         {!isCollapsed && <ChevronsUpDown size={15} color="var(--text-muted)" />}
         {accountOpen && (
-          <div role="menu" aria-label="Account menu" onClick={(event) => event.stopPropagation()} style={{ position: "absolute", bottom: "calc(100% + 8px)", left: isCollapsed ? "calc(100% + 14px)" : 8, width: 300, maxHeight: "min(520px, calc(100vh - 32px))", overflowY: "auto", padding: 12, background: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: 8, boxShadow: "0 16px 40px rgba(0,0,0,0.22)", cursor: "default", zIndex: 60 }}>
-            <div style={{ padding: "2px 6px 10px" }}><div style={{ color: "var(--text-primary)", fontSize: 13, fontWeight: 600 }}>{currentUser?.name || currentUser?.email || "Authenticated User"} <span style={{ color: "var(--text-muted)", fontSize: 10 }}>· {formatRoleLabel(currentUser?.role)}{currentUser?.role === "SUPER_ADMIN" && <span aria-label="Super Admin" style={{ alignItems: "center", color: "#f5c451", display: "inline-flex", marginLeft: 3, verticalAlign: "middle" }}><Crown size={12} strokeWidth={2.25} /></span>}</span></div><div style={{ color: "var(--text-muted)", fontSize: 11, marginTop: 2 }}>{currentUser?.email}</div></div>
-            {accountMenuSections.map((section) => <div key={section.label} style={{ marginTop: 8 }}><div style={{ color: "var(--text-muted)", fontSize: 10, fontWeight: 600, letterSpacing: "0.08em", padding: "4px 6px 6px" }}>{section.label}</div>{section.items.map((item) => { const Icon = item.icon; const active = pathname === item.href; return <Link key={item.href} href={item.href} role="menuitem" onClick={() => { setAccountOpen(false); onMobileClose(); }} style={{ alignItems: "center", background: active ? "rgba(59, 130, 246, 0.12)" : "transparent", borderRadius: 7, color: active ? "#3b82f6" : "var(--text-secondary)", display: "flex", fontSize: 13, fontWeight: 500, gap: 9, padding: "8px 6px", textDecoration: "none" }}><Icon size={15} />{item.label}</Link>; })}</div>)}
-            <div style={{ height: 1, background: "var(--border)", margin: "12px 0 6px" }} />
-            <button type="button" role="menuitem" onClick={() => void handleLogout()} disabled={loggingOut} style={{ alignItems: "center", background: "transparent", border: "none", borderRadius: 7, color: loggingOut ? "#3b82f6" : "var(--text-secondary)", cursor: loggingOut ? "default" : "pointer", display: "flex", fontSize: 13, fontWeight: 500, gap: 9, padding: "8px 6px", width: "100%" }}><LogOut size={15} />{loggingOut ? "Logging out..." : "Log out"}</button>
+          <div
+            role="menu"
+            aria-label="Account menu"
+            onClick={(event) => event.stopPropagation()}
+            style={{
+              position: "absolute",
+              bottom: "calc(100% + 8px)",
+              left: isCollapsed ? "calc(100% + 14px)" : 8,
+              width: 300,
+              maxHeight: "min(520px, calc(100vh - 32px))",
+              overflowY: "auto",
+              padding: 12,
+              background: "var(--bg-secondary)",
+              border: "1px solid var(--border)",
+              borderRadius: 8,
+              boxShadow: "0 16px 40px rgba(0,0,0,0.22)",
+              cursor: "default",
+              zIndex: 60,
+            }}
+          >
+            <div style={{ padding: "2px 6px 10px" }}>
+              <div
+                style={{
+                  color: "var(--text-primary)",
+                  fontSize: 13,
+                  fontWeight: 600,
+                }}
+              >
+                {currentUser?.name ||
+                  currentUser?.email ||
+                  "Authenticated User"}{" "}
+                <span
+                  style={{
+                    color: "var(--text-muted)",
+                    fontSize: 10,
+                    marginTop: 2,
+                  }}
+                >
+                  · {formatRoleLabel(currentUser?.role)}
+                  {currentUser?.role === "SUPER_ADMIN" && (
+                    <span
+                      aria-label="Super Admin"
+                      style={{
+                        alignItems: "center",
+                        color: "#f5c451",
+                        display: "inline-flex",
+                        marginLeft: 3,
+                        verticalAlign: "middle",
+                      }}
+                    >
+                      <Crown size={12} strokeWidth={2.25} />
+                    </span>
+                  )}
+                </span>
+              </div>
+              <div
+                style={{
+                  color: "var(--text-muted)",
+                  fontSize: 11,
+                  marginTop: 2,
+                }}
+              >
+                {currentUser?.email}
+              </div>
+            </div>
+            {organizationQuickAccessSections.map((section) => (
+              <div key={section.label} style={{ marginTop: 8 }}>
+                <div
+                  style={{
+                    color: "var(--text-muted)",
+                    fontSize: 10,
+                    fontWeight: 600,
+                    letterSpacing: "0.08em",
+                    padding: "4px 6px 6px",
+                  }}
+                >
+                  {section.label}
+                </div>
+                {section.items.map((item) => {
+                  const Icon = item.icon;
+                  const active = pathname === item.href;
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      role="menuitem"
+                      onClick={() => {
+                        setAccountOpen(false);
+                        onMobileClose();
+                      }}
+                      style={{
+                        alignItems: "center",
+                        background: active
+                          ? "rgba(59, 130, 246, 0.12)"
+                          : "transparent",
+                        borderRadius: 7,
+                        color: active ? "#3b82f6" : "var(--text-secondary)",
+                        display: "flex",
+                        fontSize: 13,
+                        fontWeight: 500,
+                        gap: 9,
+                        padding: "8px 6px",
+                        textDecoration: "none",
+                      }}
+                    >
+                      <Icon size={15} />
+                      {item.label}
+                    </Link>
+                  );
+                })}
+              </div>
+            ))}
+            <div
+              style={{
+                height: 1,
+                background: "var(--border)",
+                margin: "12px 0 6px",
+              }}
+            />
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => void handleLogout()}
+              disabled={loggingOut}
+              style={{
+                alignItems: "center",
+                background: "transparent",
+                border: "none",
+                borderRadius: 7,
+                color: loggingOut ? "#3b82f6" : "var(--text-secondary)",
+                cursor: loggingOut ? "default" : "pointer",
+                display: "flex",
+                fontSize: 13,
+                fontWeight: 500,
+                gap: 9,
+                padding: "8px 6px",
+                width: "100%",
+              }}
+            >
+              <LogOut size={15} />
+              {loggingOut ? "Logging out..." : "Log out"}
+            </button>
           </div>
         )}
-        <button
-          onClick={() => void handleLogout()}
-          disabled={loggingOut}
-          style={{
-            marginLeft: isCollapsed ? "auto" : 0,
-            background: "transparent",
-            border: "none",
-            color: loggingOut ? "#3b82f6" : "var(--text-muted)",
-            cursor: loggingOut ? "default" : "pointer",
-            padding: 4,
-            borderRadius: 6,
-            opacity: loggingOut ? 0.8 : 1,
-            display: "none",
-          }}
-          title={loggingOut ? "Logging out..." : "Logout"}
-        >
-          <LogOut size={14} />
-        </button>
       </div>
     </aside>
   );
