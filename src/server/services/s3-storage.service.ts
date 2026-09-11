@@ -1,4 +1,5 @@
 import {
+  DeleteObjectCommand,
   DeleteObjectsCommand,
   ListObjectsV2Command,
   S3Client,
@@ -99,19 +100,81 @@ export async function deleteS3Objects(
   if (keys.length === 0) return;
 
   const client = createS3Client(destination);
+  await deleteS3ObjectsWithClient(client, destination.bucket, keys);
+}
+
+type S3DeleteClient = Pick<S3Client, "send">;
+
+export function isMissingContentMd5Error(error: unknown) {
+  if (!error || typeof error !== "object") return false;
+
+  const details = error as {
+    Code?: unknown;
+    code?: unknown;
+    name?: unknown;
+    message?: unknown;
+  };
+  const code = String(details.Code ?? details.code ?? details.name ?? "");
+  const message = String(details.message ?? "");
+
+  return (
+    (code === "InvalidRequest" || code === "MissingContentMD5") &&
+    /content-?md5/i.test(message)
+  );
+}
+
+async function deleteS3ObjectsIndividually(
+  client: S3DeleteClient,
+  bucket: string,
+  keys: string[],
+) {
+  const failedKeys: string[] = [];
+
+  for (const key of keys) {
+    try {
+      await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
+    } catch {
+      failedKeys.push(key);
+    }
+  }
+
+  if (failedKeys.length > 0) {
+    throw new Error(
+      `Failed to delete ${failedKeys.length} S3 object(s): ${failedKeys.join(", ")}`,
+    );
+  }
+}
+
+export async function deleteS3ObjectsWithClient(
+  client: S3DeleteClient,
+  bucket: string,
+  keys: string[],
+) {
   for (let offset = 0; offset < keys.length; offset += 1000) {
     const identifiers: ObjectIdentifier[] = keys
       .slice(offset, offset + 1000)
       .map((key) => ({ Key: key }));
 
-    const response = await client.send(
-      new DeleteObjectsCommand({
-        Bucket: destination.bucket,
-        Delete: { Objects: identifiers, Quiet: true },
-      }),
-    );
+    let response;
+    try {
+      response = await client.send(
+        new DeleteObjectsCommand({
+          Bucket: bucket,
+          Delete: { Objects: identifiers, Quiet: true },
+        }),
+      );
+    } catch (error) {
+      if (!isMissingContentMd5Error(error)) throw error;
 
-    if (response.Errors && response.Errors.length > 0) {
+      await deleteS3ObjectsIndividually(
+        client,
+        bucket,
+        identifiers.map(({ Key }) => Key).filter((key): key is string => Boolean(key)),
+      );
+      continue;
+    }
+
+    if ("Errors" in response && response.Errors && response.Errors.length > 0) {
       const failedKeys = response.Errors.map((error) => error.Key).filter(
         (key): key is string => Boolean(key),
       );
@@ -121,4 +184,3 @@ export async function deleteS3Objects(
     }
   }
 }
-
