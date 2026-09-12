@@ -7,6 +7,11 @@ import { promisify } from "node:util";
 import { pipeline } from "node:stream/promises";
 import { z } from "zod";
 import { resolvePublicAppOrigin } from "../lib/public-url";
+import {
+  ATOMIC_PSQL_RESTORE_ARGS,
+  createRestoreSqlSanitizer,
+  CUSTOM_RESTORE_SCRIPT_ARGS,
+} from "../lib/database-restore";
 import prisma from "../lib/prisma";
 import { decrypt, encrypt } from "../lib/crypto";
 import { authenticate, requireRole } from "../middleware/auth";
@@ -714,7 +719,7 @@ export async function settingsRoutes(app: FastifyInstance) {
     options: {
       inputPath?: string;
       outputPath?: string;
-      allowTransactionTimeoutCompatibilityError?: boolean;
+      connectToDatabase?: boolean;
     } = {},
   ) => {
     const databaseUrl = process.env.DATABASE_URL?.trim();
@@ -771,26 +776,7 @@ export async function settingsRoutes(app: FastifyInstance) {
               ? rejectedResult.reason.message
               : "";
 
-          const onlyTransactionTimeoutCompatibilityError =
-            options.allowTransactionTimeoutCompatibilityError &&
-            stderr.includes(
-              'unrecognized configuration parameter "transaction_timeout"',
-            ) &&
-            stderr
-              .replace(
-                /pg_restore: error: could not execute query: ERROR:\s+unrecognized configuration parameter "transaction_timeout"[\r\n]+Command was:\s*SET transaction_timeout = 0;\s*/g,
-                "",
-              )
-              .replace(
-                /pg_restore: warning: errors ignored on restore: 1\s*/g,
-                "",
-              )
-              .trim().length === 0;
-
-          if (
-            !rejectedResult &&
-            (exitCode === 0 || onlyTransactionTimeoutCompatibilityError)
-          ) {
+          if (!rejectedResult && exitCode === 0) {
             resolve();
             return;
           }
@@ -806,20 +792,29 @@ export async function settingsRoutes(app: FastifyInstance) {
     const databaseContainer =
       process.env.DATABASE_BACKUP_CONTAINER?.trim() ||
       `${process.env.COMPOSE_PROJECT_NAME?.trim() || "doktainer"}-postgres`;
+    const databaseArgs =
+      options.connectToDatabase === false
+        ? []
+        : ["--dbname", databaseCliUrl];
     const dockerArgs = [
       "exec",
       "-i",
       databaseContainer,
       command,
-      "--dbname",
-      databaseCliUrl,
+      ...databaseArgs,
       ...args,
     ];
     const localBinary = await findLocalPostgresBinary(command);
     const runLocal = async () => {
       if (!localBinary) return false;
-      const localArgs = ["--dbname", databaseCliUrl, ...args];
-      if (options.inputPath) localArgs.push(options.inputPath);
+      const localArgs = [...databaseArgs, ...args];
+      if (options.inputPath) {
+        if (command === "psql") {
+          localArgs.push("--file", options.inputPath);
+        } else {
+          localArgs.push(options.inputPath);
+        }
+      }
       await run(
         localBinary,
         localArgs,
@@ -898,6 +893,8 @@ export async function settingsRoutes(app: FastifyInstance) {
           .status(400)
           .send({ success: false, error: "Select a PostgreSQL dump file" });
       const filePath = join(tmpdir(), `doktainer-restore-${Date.now()}.dump`);
+      const restoredSqlPath = `${filePath}.sql`;
+      const sanitizedSqlPath = `${filePath}.sanitized.sql`;
       try {
         await pipeline(upload.file, createWriteStream(filePath));
         const header = Buffer.alloc(5);
@@ -909,24 +906,43 @@ export async function settingsRoutes(app: FastifyInstance) {
         }
 
         const isCustomArchive = header.toString("ascii") === "PGDMP";
+        if (isCustomArchive) {
+          await runDatabaseCommand(
+            "pg_restore",
+            [...CUSTOM_RESTORE_SCRIPT_ARGS],
+            {
+              inputPath: filePath,
+              outputPath: restoredSqlPath,
+              connectToDatabase: false,
+            },
+          );
+          await pipeline(
+            createReadStream(restoredSqlPath),
+            createRestoreSqlSanitizer(),
+            createWriteStream(sanitizedSqlPath),
+          );
+        }
+
         await runDatabaseCommand(
-          isCustomArchive ? "pg_restore" : "psql",
-          isCustomArchive
-            ? ["--clean", "--if-exists", "--no-owner"]
-            : ["--set", "ON_ERROR_STOP=1"],
-          {
-            inputPath: filePath,
-            allowTransactionTimeoutCompatibilityError: isCustomArchive,
-          },
+          "psql",
+          [...ATOMIC_PSQL_RESTORE_ARGS],
+          { inputPath: isCustomArchive ? sanitizedSqlPath : filePath },
         );
-        await auditLog({
-          userId: req.userId,
-          organizationId: req.organizationId,
-          action: "DATABASE_RESTORE",
-          category: "SYSTEM",
-          level: "WARNING",
-          message: "Doktainer database restored from uploaded dump",
-        });
+        try {
+          await auditLog({
+            userId: req.userId,
+            organizationId: req.organizationId,
+            action: "DATABASE_RESTORE",
+            category: "SYSTEM",
+            level: "WARNING",
+            message: "Doktainer database restored from uploaded dump",
+          });
+        } catch (error) {
+          app.log.warn(
+            { err: error },
+            "Database restore completed, but its audit event could not be recorded",
+          );
+        }
         return reply.send({
           success: true,
           message: "Database restore completed",
@@ -942,7 +958,11 @@ export async function settingsRoutes(app: FastifyInstance) {
                 : "Database restore failed",
           });
       } finally {
-        await fs.rm(filePath, { force: true });
+        await Promise.all([
+          fs.rm(filePath, { force: true }),
+          fs.rm(restoredSqlPath, { force: true }),
+          fs.rm(sanitizedSqlPath, { force: true }),
+        ]);
       }
     },
   );

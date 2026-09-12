@@ -45,6 +45,7 @@ NODE
 if [ -d /app/prisma/migrations ] && [ "$(find /app/prisma/migrations -mindepth 1 -maxdepth 1 | wc -l)" -gt 0 ]; then
   db_action="$(node <<'NODE'
 const { PrismaClient } = require("@prisma/client");
+const { readdirSync } = require("fs");
 
 const prisma = new PrismaClient();
   async function main() {
@@ -75,6 +76,7 @@ const prisma = new PrismaClient();
 
     let failedMigrations = [];
     let migrationCount = 0;
+    let appliedMigrationNames = new Set();
 
     if (hasMigrationTable) {
       failedMigrations = await prisma.$queryRaw`
@@ -90,7 +92,26 @@ const prisma = new PrismaClient();
       `;
 
       migrationCount = migrationCountResult[0].count;
+
+      const appliedMigrationRows = await prisma.$queryRaw`
+        SELECT migration_name
+        FROM "_prisma_migrations"
+        WHERE finished_at IS NOT NULL
+          AND rolled_back_at IS NULL
+      `;
+      appliedMigrationNames = new Set(
+        appliedMigrationRows.map((row) => row.migration_name)
+      );
     }
+
+    const migrationNames = readdirSync("/app/prisma/migrations", {
+      withFileTypes: true,
+    })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name);
+    const pendingMigrationNames = migrationNames.filter(
+      (migrationName) => !appliedMigrationNames.has(migrationName)
+    );
 
     /**
     * STATE #1
@@ -170,6 +191,65 @@ const prisma = new PrismaClient();
 
         console.log("blocked");
         return;
+      }
+
+      if (pendingMigrationNames.length > 0) {
+        const idColumnIntegrity = await prisma.$queryRaw`
+          SELECT
+            table_class.relname AS "tableName",
+            attribute.attnotnull AS "isNotNull",
+            EXISTS (
+              SELECT 1
+              FROM pg_index i
+              WHERE i.indrelid = table_class.oid
+                AND i.indisunique
+                AND i.indisvalid
+                AND i.indisready
+                AND i.indnkeyatts = 1
+                AND i.indkey[0] = attribute.attnum
+            ) AS "hasUniqueId"
+          FROM pg_class table_class
+          JOIN pg_namespace namespace
+            ON namespace.oid = table_class.relnamespace
+          JOIN pg_attribute attribute
+            ON attribute.attrelid = table_class.oid
+          WHERE namespace.nspname = 'public'
+            AND table_class.relkind IN ('r', 'p')
+            AND table_class.relname <> '_prisma_migrations'
+            AND attribute.attname = 'id'
+            AND NOT attribute.attisdropped
+          ORDER BY table_class.relname
+        `;
+
+        const invalidIdColumns = idColumnIntegrity.filter(
+          (row) => !row.hasUniqueId || !row.isNotNull
+        );
+
+        if (invalidIdColumns.length > 0) {
+          console.error(
+            `Database integrity check failed before applying pending migrations: ${pendingMigrationNames.join(", ")}.`
+          );
+
+          for (const invalidColumn of invalidIdColumns) {
+            const quotedTableName = `"${invalidColumn.tableName.replace(/"/g, '""')}"`;
+            const [counts] = await prisma.$queryRawUnsafe(`
+              SELECT
+                COUNT(*) FILTER (WHERE "id" IS NULL)::int AS "nullIds",
+                (COUNT(*) - COUNT(DISTINCT "id"))::int AS "duplicateIds"
+              FROM ${quotedTableName}
+            `);
+
+            console.error(
+              `${invalidColumn.tableName}.id must be NOT NULL and have a valid single-column PRIMARY KEY or UNIQUE index (duplicate rows: ${counts.duplicateIds}, null IDs: ${counts.nullIds}).`
+            );
+          }
+
+          console.error(
+            "Restore missing database constraints and resolve duplicate IDs before applying migrations."
+          );
+          console.log("blocked");
+          return;
+        }
       }
 
       console.error(
