@@ -31,6 +31,7 @@ test("database restores execute atomically and stop on SQL errors", () => {
     "--if-exists",
     "--no-owner",
     "--no-privileges",
+    "--file=-",
   ]);
 });
 

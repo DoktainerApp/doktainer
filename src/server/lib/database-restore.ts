@@ -5,6 +5,7 @@ export const CUSTOM_RESTORE_SCRIPT_ARGS = [
   "--if-exists",
   "--no-owner",
   "--no-privileges",
+  "--file=-",
 ] as const;
 
 export const ATOMIC_PSQL_RESTORE_ARGS = [
