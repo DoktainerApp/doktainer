@@ -36,16 +36,61 @@ function getHeaderValue(value: string | string[] | undefined): string | null {
 const SAFE_HTTP_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 const BROWSER_MUTATION_HEADER = "x-doktainer-request";
 
-function getAllowedBrowserOrigins(env = process.env): Set<string> {
-  const origins = [env.FRONTEND_URL, ...(env.CORS_ORIGINS ?? "").split(",")]
-    .map((origin) => origin?.trim().replace(/\/$/, ""))
+function normalizeHttpOrigin(value: string | null | undefined): string | null {
+  const trimmed = value?.trim();
+  if (!trimmed) return null;
+
+  try {
+    const url = new URL(trimmed);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    return url.origin;
+  } catch {
+    return null;
+  }
+}
+
+function firstForwardedValue(value: string | null): string | null {
+  return value?.split(",")[0]?.trim() || null;
+}
+
+function getEffectiveRequestOrigin(
+  req: FastifyRequest,
+  env: NodeJS.ProcessEnv,
+): string | null {
+  const trustProxy = env.TRUST_PROXY === "true";
+  const forwardedHost = trustProxy
+    ? firstForwardedValue(getHeaderValue(req.headers["x-forwarded-host"]))
+    : null;
+  const forwardedProtocol = trustProxy
+    ? firstForwardedValue(getHeaderValue(req.headers["x-forwarded-proto"]))
+    : null;
+  const host = forwardedHost || getHeaderValue(req.headers.host);
+  const protocol = forwardedProtocol || req.protocol;
+
+  if (!host || !protocol) return null;
+  return normalizeHttpOrigin(`${protocol.replace(/:$/, "")}://${host}`);
+}
+
+function getAllowedBrowserOrigins(
+  req: FastifyRequest,
+  env: NodeJS.ProcessEnv,
+): Set<string> {
+  const origins = [
+    env.NEXT_PUBLIC_PANEL_URL,
+    env.FRONTEND_URL,
+    ...(env.CORS_ORIGINS ?? "").split(","),
+  ]
+    .map(normalizeHttpOrigin)
     .filter((origin): origin is string => Boolean(origin));
+  const requestOrigin = getEffectiveRequestOrigin(req, env);
+  if (requestOrigin) origins.push(requestOrigin);
   return new Set(origins.length > 0 ? origins : ["http://localhost:3000"]);
 }
 
 export function enforceBrowserMutationProtection(
   req: FastifyRequest,
   reply: FastifyReply,
+  env: NodeJS.ProcessEnv = process.env,
 ): boolean {
   if (SAFE_HTTP_METHODS.has(req.method.toUpperCase())) return true;
 
@@ -57,7 +102,8 @@ export function enforceBrowserMutationProtection(
     return false;
   }
 
-  if (getHeaderValue(req.headers["sec-fetch-site"]) === "cross-site") {
+  const fetchSite = getHeaderValue(req.headers["sec-fetch-site"]);
+  if (fetchSite === "cross-site") {
     reply.status(403).send({
       success: false,
       error: "Forbidden — cross-site request rejected",
@@ -65,8 +111,15 @@ export function enforceBrowserMutationProtection(
     return false;
   }
 
-  const origin = getHeaderValue(req.headers.origin)?.replace(/\/$/, "");
-  if (origin && !getAllowedBrowserOrigins().has(origin)) {
+  const rawOrigin = getHeaderValue(req.headers.origin);
+  const origin = normalizeHttpOrigin(rawOrigin);
+  const browserConfirmedSameOrigin = fetchSite === "same-origin";
+  if (
+    rawOrigin &&
+    (!origin ||
+      (!browserConfirmedSameOrigin &&
+        !getAllowedBrowserOrigins(req, env).has(origin)))
+  ) {
     reply.status(403).send({
       success: false,
       error: "Forbidden — request origin is not allowed",

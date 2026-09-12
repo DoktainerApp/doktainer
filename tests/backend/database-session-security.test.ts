@@ -106,6 +106,82 @@ test("safe methods and verified same-origin mutations are accepted", () => {
   );
 });
 
+test("browser-confirmed same-origin mutations use the active origin without env configuration", () => {
+  const allowed = enforceBrowserMutationProtection(
+    {
+      method: "POST",
+      protocol: "http",
+      headers: {
+        host: "127.0.0.1:4000",
+        origin: "https://panel.example.com",
+        "sec-fetch-site": "same-origin",
+        "x-doktainer-request": "1",
+      },
+    } as never,
+    createReplyRecorder() as never,
+    {} as NodeJS.ProcessEnv,
+  );
+
+  assert.equal(allowed, true);
+});
+
+test("verified mutations accept the effective custom-domain request origin", () => {
+  const allowed = enforceBrowserMutationProtection(
+    {
+      method: "POST",
+      protocol: "https",
+      headers: {
+        host: "panel.example.com",
+        origin: "https://panel.example.com",
+        "sec-fetch-site": "same-site",
+        "x-doktainer-request": "1",
+      },
+    } as never,
+    createReplyRecorder() as never,
+    {
+      FRONTEND_URL: "http://localhost:3000",
+      TRUST_PROXY: "false",
+    } as NodeJS.ProcessEnv,
+  );
+
+  assert.equal(allowed, true);
+});
+
+test("forwarded custom-domain origin is trusted only behind an enabled proxy", () => {
+  const request = {
+    method: "POST",
+    protocol: "http",
+    headers: {
+      host: "127.0.0.1:4000",
+      origin: "https://panel.example.com",
+      "sec-fetch-site": "same-site",
+      "x-doktainer-request": "1",
+      "x-forwarded-host": "panel.example.com",
+      "x-forwarded-proto": "https",
+    },
+  } as never;
+
+  assert.equal(
+    enforceBrowserMutationProtection(
+      request,
+      createReplyRecorder() as never,
+      { TRUST_PROXY: "true" } as NodeJS.ProcessEnv,
+    ),
+    true,
+  );
+
+  const untrustedReply = createReplyRecorder();
+  assert.equal(
+    enforceBrowserMutationProtection(
+      request,
+      untrustedReply as never,
+      { TRUST_PROXY: "false" } as NodeJS.ProcessEnv,
+    ),
+    false,
+  );
+  assert.equal(untrustedReply.statusCode, 403);
+});
+
 test("only owners and super admins can revoke a managed login session", () => {
   assert.equal(
     canRevokeManagedSession({
