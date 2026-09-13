@@ -7,10 +7,13 @@ import SearchField from "@/components/SearchField";
 import TablePagination from "@/components/TablePagination";
 import {
   apiKeys as apiKeysApi,
+  getApiBaseUrl,
+  settingsApi,
   type ApiKeyExpiryOption,
   type ApiKeyRecord,
   type CreateApiKeyBody,
 } from "@/lib/api";
+import { resolveApiExampleUrl } from "@/lib/api-example-url";
 import { useTablePagination } from "@/lib/use-table-pagination";
 import {
   Activity,
@@ -172,6 +175,7 @@ export default function ApiKeysPage() {
   const [generatedKey, setGeneratedKey] = useState<GeneratedKeyState | null>(
     null,
   );
+  const [panelUrl, setPanelUrl] = useState<string | null>(null);
   const [sessionRawKeys, setSessionRawKeys] = useState<Record<string, string>>(
     {},
   );
@@ -212,7 +216,15 @@ export default function ApiKeysPage() {
 
   useEffect(() => {
     void loadKeys();
+    void loadPanelUrl();
   }, []);
+
+  const apiExampleUrl = resolveApiExampleUrl({
+    panelUrl,
+    browserOrigin:
+      typeof window === "undefined" ? null : window.location.origin,
+    apiBaseUrl: getApiBaseUrl(),
+  });
 
   async function loadKeys() {
     setLoading(true);
@@ -345,6 +357,15 @@ export default function ApiKeysPage() {
         void revokeKey(id);
       },
     });
+  }
+
+  async function loadPanelUrl() {
+    try {
+      const response = await settingsApi.get();
+      setPanelUrl(response.data.general.panelUrl);
+    } catch {
+      // The active browser origin remains a valid same-origin API fallback.
+    }
   }
 
   async function removeKey(id: string) {
@@ -1136,7 +1157,7 @@ export default function ApiKeysPage() {
                       fontFamily: "JetBrains Mono, monospace",
                     }}
                   >
-                    {`curl -H "x-api-key: ${generatedKey.rawKey}" http://localhost:4000/api/v1/servers`}
+                    {`curl -H "x-api-key: ${generatedKey.rawKey}" ${apiExampleUrl}`}
                   </code>
                 </div>
 
