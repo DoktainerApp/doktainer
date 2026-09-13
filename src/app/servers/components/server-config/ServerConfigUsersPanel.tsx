@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   Eye,
   EyeOff,
@@ -13,6 +14,7 @@ import {
   ShieldAlert,
   Trash2,
   UserPlus,
+  X,
 } from "lucide-react";
 import type {
   ServerConfigSnapshot,
@@ -63,28 +65,10 @@ interface ServerConfigUsersPanelProps {
     confirmation: string;
     removeHome: boolean;
   }) => void;
-  onRequestDeleteGroupConfirm: (options: {
-    groupName: string;
-    gid: number;
-    members: string[];
-    primaryUsers: string[];
-    confirmation: string;
-  }) => void;
 }
 
 const accountNamePattern = /^[a-z_][a-z0-9_-]{0,31}$/;
 const sensitiveGroups = new Set(["docker", "root", "sudo", "wheel"]);
-const protectedGroupNames = new Set([
-  "root",
-  "sudo",
-  "wheel",
-  "docker",
-  "adm",
-  "www-data",
-  "systemd-journal",
-  "ssh",
-  "sshd",
-]);
 const publicKeyPattern = /^(?:ssh-(?:ed25519|rsa)|ecdsa-sha2-nistp(?:256|384|521)|sk-ssh-ed25519@openssh\.com|sk-ecdsa-sha2-nistp256@openssh\.com)\s+[A-Za-z0-9+/]+={0,3}(?:\s+.*)?$/;
 
 export default function ServerConfigUsersPanel({
@@ -101,9 +85,9 @@ export default function ServerConfigUsersPanel({
   onRequestSshKeyAddConfirm,
   onRequestSshKeyRevokeConfirm,
   onRequestDeleteUserConfirm,
-  onRequestDeleteGroupConfirm,
 }: ServerConfigUsersPanelProps) {
   const [previewMode, setPreviewMode] = useState<"user" | "group">("user");
+  const [managementModalOpen, setManagementModalOpen] = useState(false);
   const [previewUsername, setPreviewUsername] = useState("deploy");
   const [previewGroupName, setPreviewGroupName] = useState("docker");
   const [userPurpose, setUserPurpose] = useState<"ssh" | "local">("ssh");
@@ -129,12 +113,6 @@ export default function ServerConfigUsersPanel({
   );
   const [deleteUserConfirmation, setDeleteUserConfirmation] = useState("");
   const [deleteUserHome, setDeleteUserHome] = useState(false);
-  const [managedGroup, setManagedGroup] = useState(
-    snapshot.systemGroups.includes("docker")
-      ? "docker"
-      : snapshot.systemGroups[0] ?? "",
-  );
-  const [deleteGroupConfirmation, setDeleteGroupConfirmation] = useState("");
   const [passwordEditorOpen, setPasswordEditorOpen] = useState(false);
   const [editPassword, setEditPassword] = useState("");
   const [editPasswordConfirm, setEditPasswordConfirm] = useState("");
@@ -145,6 +123,19 @@ export default function ServerConfigUsersPanel({
   const [sshKeyLabel, setSshKeyLabel] = useState("Personal laptop");
   const [sshPublicKey, setSshPublicKey] = useState("");
   const [sshKeyError, setSshKeyError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!managementModalOpen) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setManagementModalOpen(false);
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [managementModalOpen]);
   const users = useMemo(
     () => [
       ...(snapshot.rootUser ? [snapshot.rootUser] : []),
@@ -219,24 +210,6 @@ export default function ServerConfigUsersPanel({
       : loginMethod === "password"
         ? `Create ${normalizedUsername || "<username>"} and prepare password-based SSH login.`
         : `Create ${normalizedUsername || "<username>"} and install an SSH public key.`;
-  const managedGroupDetails = snapshot.systemGroupDetails.find(
-    (group) => group.name === managedGroup,
-  );
-  const managedGroupUsers = managedGroupDetails?.members ?? [];
-  const managedGroupPrimaryUsers = managedGroupDetails?.primaryUsers ?? [];
-  const managedGroupBlockReason = !managedGroup
-    ? "Select a group to inspect."
-    : !managedGroupDetails || snapshot.gidMin == null
-      ? "Group metadata or the host GID_MIN policy is unavailable. Refresh Server Config."
-    : protectedGroupNames.has(managedGroup)
-      ? `${managedGroup} is protected because it is a system or privileged group.`
-      : managedGroupDetails.gid < snapshot.gidMin
-        ? `GID ${managedGroupDetails.gid} is below the host GID_MIN (${snapshot.gidMin}).`
-      : managedGroupPrimaryUsers.length > 0
-        ? `This is the primary group for ${managedGroupPrimaryUsers.join(", ")}.`
-        : managedGroupUsers.length > 0
-          ? `Remove its members first: ${managedGroupUsers.join(", ")}.`
-          : null;
 
   const toggleGroup = (group: string) => {
     setSelectedGroups((current) =>
@@ -292,6 +265,7 @@ export default function ServerConfigUsersPanel({
       remoteLogin,
       credential,
     });
+    setManagementModalOpen(false);
     setGuidedSetupError(null);
     setSetupPassword("");
     setSetupPasswordConfirm("");
@@ -408,57 +382,78 @@ export default function ServerConfigUsersPanel({
       style={{ display: "grid", gap: 16 }}
       hidden={snapshotLoadError != null}
     >
-      <div className="card" style={{ padding: 18 }}>
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            gap: 12,
-            flexWrap: "wrap",
-          }}
-        >
-          <div>
-            <strong style={{ color: "var(--text-primary)", fontSize: 14 }}>
-              User Inventory
-            </strong>
-            <p
-              style={{ marginTop: 6, color: "var(--text-muted)", fontSize: 13 }}
-            >
-              Showing root and non-root accounts together with their detected
-              groups.
-            </p>
-          </div>
-          <div
-            style={{
-              display: "flex",
-              gap: 8,
-              flexWrap: "wrap",
-              alignItems: "center",
-            }}
-          >
-            <UserBadge
-              label={`${snapshot.hasRootUser ? 1 : 0} root`}
-              tone="danger"
-            />
-            <UserBadge
-              label={`${snapshot.nonRootUsers.length} non-root`}
-              tone="info"
-            />
-          </div>
-        </div>
-      </div>
       <div
         className="card"
         style={{
           padding: 18,
-          display: "grid",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
           gap: 16,
+          flexWrap: "wrap",
           borderColor: "rgba(59,130,246,0.24)",
           background:
-            "linear-gradient(180deg, rgba(59,130,246,0.045), var(--bg-card) 68%)",
+            "linear-gradient(180deg, rgba(59,130,246,0.045), transparent 68%), var(--bg-card)",
         }}
       >
+        <div>
+          <strong style={{ color: "var(--text-primary)", fontSize: 14 }}>
+            User & Group Management
+          </strong>
+          <p
+            style={{
+              marginTop: 6,
+              color: "var(--text-muted)",
+              fontSize: 13,
+              maxWidth: 620,
+            }}
+          >
+            Create host accounts, create groups, and assign supplementary
+            group access without opening a terminal.
+          </p>
+        </div>
+        <button
+          type="button"
+          className="btn btn-primary"
+          onClick={() => setManagementModalOpen(true)}
+          style={{ minHeight: 44, justifyContent: "center" }}
+        >
+          <UserPlus size={14} /> Manage Users & Groups
+        </button>
+      </div>
+
+      {managementModalOpen && typeof document !== "undefined"
+        ? createPortal(
+            <div className="modal-overlay" style={{ zIndex: 1003 }}>
+              <div className="modal-shell" style={{ maxWidth: 920 }}>
+                <button
+                  type="button"
+                  className="modal-close"
+                  onClick={() => setManagementModalOpen(false)}
+                  aria-label="Close user and group management modal"
+                  autoFocus
+                >
+                  <X size={22} />
+                </button>
+                <div
+                  className="modal animate-slide-in"
+                  role="dialog"
+                  aria-modal="true"
+                  aria-labelledby="user-group-management-title"
+                  style={{
+                    position: "relative",
+                    width: "100%",
+                    maxWidth: 920,
+                    maxHeight: "90vh",
+                    padding: 24,
+                    display: "grid",
+                    gap: 16,
+                    overflowY: "auto",
+                    borderColor: "rgba(59,130,246,0.24)",
+                    background:
+                      "linear-gradient(180deg, rgba(59,130,246,0.045), transparent 68%), var(--bg-card)",
+                  }}
+                >
         <div
           style={{
             display: "flex",
@@ -469,7 +464,10 @@ export default function ServerConfigUsersPanel({
           }}
         >
           <div>
-            <strong style={{ color: "var(--text-primary)", fontSize: 14 }}>
+            <strong
+              id="user-group-management-title"
+              style={{ color: "var(--text-primary)", fontSize: 14 }}
+            >
               User & Group Management
             </strong>
             <p
@@ -480,8 +478,8 @@ export default function ServerConfigUsersPanel({
                 maxWidth: 620,
               }}
             >
-              Create passwordless host accounts, create groups, and assign
-              supplementary group access without opening a terminal.
+              Create host accounts, create groups, and assign supplementary
+              group access without opening a terminal.
             </p>
           </div>
           <UserBadge label="Audited action" tone="success" />
@@ -490,7 +488,8 @@ export default function ServerConfigUsersPanel({
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+            gridTemplateColumns:
+              "repeat(auto-fit, minmax(min(260px, 100%), 1fr))",
             gap: 16,
             alignItems: "start",
           }}
@@ -501,7 +500,7 @@ export default function ServerConfigUsersPanel({
                 display: "grid",
                 gridTemplateColumns: "1fr 1fr",
                 gap: 8,
-                height: 40,
+                minHeight: 44,
                 alignSelf: "start",
               }}
             >
@@ -518,8 +517,7 @@ export default function ServerConfigUsersPanel({
                     className="btn"
                     onClick={() => setPreviewMode(item.key as "user" | "group")}
                     style={{
-                      height: 40,
-                      minHeight: 40,
+                      minHeight: 44,
                       padding: "0 12px",
                       justifyContent: "center",
                       borderColor: active ? "var(--accent)" : "var(--border)",
@@ -1035,6 +1033,7 @@ export default function ServerConfigUsersPanel({
                 if (previewMode === "user") {
                   stageGuidedUserSetup();
                 } else {
+                  setManagementModalOpen(false);
                   onRequestCreateGroupConfirm(normalizedGroupName);
                 }
               }}
@@ -1068,170 +1067,12 @@ export default function ServerConfigUsersPanel({
             ) : null}
           </div>
         </div>
-      </div>
-      <div
-        className="card"
-        style={{
-          padding: 18,
-          display: "grid",
-          gap: 14,
-          borderColor: "rgba(239,68,68,0.18)",
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "flex-start",
-            gap: 12,
-            flexWrap: "wrap",
-          }}
-        >
-          <div>
-            <strong style={{ color: "var(--text-primary)", fontSize: 14 }}>
-              Existing Groups
-            </strong>
-            <p
-              style={{
-                marginTop: 5,
-                color: "var(--text-muted)",
-                fontSize: 12,
-                lineHeight: 1.5,
-              }}
-            >
-              Inspect group usage before opening the protected delete flow.
-            </p>
-          </div>
-          <UserBadge label="Audited action" tone="success" />
-        </div>
-
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
-            gap: 14,
-            alignItems: "start",
-          }}
-        >
-          <div style={{ display: "grid", gap: 10 }}>
-            <SearchableSelect
-              value={managedGroup}
-              options={snapshot.systemGroupDetails.map((group) => ({
-                value: group.name,
-                label: group.name,
-                description: protectedGroupNames.has(group.name) ||
-                  (snapshot.gidMin != null && group.gid < snapshot.gidMin)
-                  ? "Protected group"
-                  : group.members.length > 0 || group.primaryUsers.length > 0
-                    ? "In use"
-                    : `GID ${group.gid} · eligible for review`,
-              }))}
-              onChange={(value) => {
-                setManagedGroup(value);
-                setDeleteGroupConfirmation("");
-              }}
-              placeholder="Select an existing group..."
-              searchPlaceholder="Search group..."
-              emptyText="No matching group found"
-            />
-            {managedGroup ? (
-              <div
-                style={{
-                  display: "flex",
-                  gap: 7,
-                  flexWrap: "wrap",
-                  alignItems: "center",
-                }}
-              >
-                <UserBadge
-                  label={managedGroupBlockReason ? "Deletion locked" : "Candidate"}
-                  tone={managedGroupBlockReason ? "warning" : "success"}
-                />
-                <UserBadge
-                  label={`${managedGroupUsers.length} detected member${managedGroupUsers.length === 1 ? "" : "s"}`}
-                  tone="neutral"
-                />
+                </div>
               </div>
-            ) : null}
-          </div>
-
-          <div
-            style={{
-              display: "grid",
-              gap: 10,
-              padding: 12,
-              borderRadius: 9,
-              border: managedGroupBlockReason
-                ? "1px solid rgba(245,158,11,0.24)"
-                : "1px solid rgba(239,68,68,0.24)",
-              background: managedGroupBlockReason
-                ? "rgba(245,158,11,0.055)"
-                : "rgba(239,68,68,0.035)",
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              {managedGroupBlockReason ? (
-                <LockKeyhole size={15} color="#f59e0b" />
-              ) : (
-                <Trash2 size={15} color="#ef4444" />
-              )}
-              <strong style={{ color: "var(--text-primary)", fontSize: 13 }}>
-                Delete group
-              </strong>
-            </div>
-            <p
-              style={{
-                color: managedGroupBlockReason ? "#b45309" : "var(--text-muted)",
-                fontSize: 11,
-                lineHeight: 1.5,
-              }}
-            >
-              {managedGroupBlockReason ??
-                "No members were detected. The live feature will re-check GID_MIN, primary-group usage, and membership on the host immediately before deletion."}
-            </p>
-            {!managedGroupBlockReason && managedGroup ? (
-              <>
-                <input
-                  className="input"
-                  value={deleteGroupConfirmation}
-                  onChange={(event) =>
-                    setDeleteGroupConfirmation(event.target.value)
-                  }
-                  placeholder={`Type ${managedGroup} to confirm`}
-                  autoComplete="off"
-                />
-                <button
-                  type="button"
-                  className="btn btn-sm"
-                  disabled={
-                    deleteGroupConfirmation !== managedGroup ||
-                    !canManageSystemAccounts ||
-                    !managedGroupDetails ||
-                    isActionRunning(`system-group:delete:${managedGroup}`)
-                  }
-                  onClick={() => {
-                    if (!managedGroupDetails) return;
-                    onRequestDeleteGroupConfirm({
-                      groupName: managedGroupDetails.name,
-                      gid: managedGroupDetails.gid,
-                      members: managedGroupDetails.members,
-                      primaryUsers: managedGroupDetails.primaryUsers,
-                      confirmation: deleteGroupConfirmation,
-                    });
-                  }}
-                  style={{
-                    justifyContent: "center",
-                    color: "#ef4444",
-                    borderColor: "rgba(239,68,68,0.32)",
-                  }}
-                >
-                  <Trash2 size={13} /> Review Group Deletion
-                </button>
-              </>
-            ) : null}
-          </div>
-        </div>
-      </div>
+            </div>,
+            document.body,
+          )
+        : null}
       {users.length > 0 ? (
         <div
           style={{

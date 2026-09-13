@@ -924,27 +924,6 @@ export default function ServerConfigModal({
     });
   };
 
-  const requestSystemGroupDeleteConfirm = (options: {
-    groupName: string;
-    gid: number;
-    members: string[];
-    primaryUsers: string[];
-    confirmation: string;
-  }) => {
-    setPendingConfirm({
-      kind: "system-group-delete",
-      groupName: options.groupName,
-      expectedGid: options.gid,
-      expectedMembers: options.members,
-      expectedPrimaryUsers: options.primaryUsers,
-      confirmation: options.confirmation,
-      title: `Delete system group ${options.groupName}`,
-      description: `Permanently delete the empty group ${options.groupName} (GID ${options.gid}). System, privileged, changed, or in-use groups will be rejected by the host.`,
-      confirmLabel: "Delete Group",
-      tone: "danger",
-    });
-  };
-
   const requestSshAccessUpdateConfirm = (
     options: ServerSshAccessUpdateBody,
   ) => {
@@ -1008,7 +987,6 @@ export default function ServerConfigModal({
               requestSystemUserSshKeyRevokeConfirm
             }
             onRequestDeleteUserConfirm={requestSystemUserDeleteConfirm}
-            onRequestDeleteGroupConfirm={requestSystemGroupDeleteConfirm}
           />
         );
       case "ssh-access":
