@@ -1,6 +1,6 @@
 /**
  * API Client — DOKTAINER
- * Centralized HTTP client with auth token injection
+ * Centralized HTTP client with cookie-based browser authentication
  */
 
 import { emitAuthStateChanged } from "@/lib/auth-events";
@@ -204,21 +204,6 @@ export interface UserInfo {
   activeOrganizationId?: string | null;
 }
 
-export type UserSessionEventType =
-  | "LOGIN"
-  | "LOGOUT"
-  | "REVOKED"
-  | "EXPIRED";
-
-export interface UserSessionEventRecord {
-  id: string;
-  type: UserSessionEventType;
-  ipAddress: string | null;
-  userAgent: string | null;
-  details: Record<string, unknown> | null;
-  createdAt: string;
-}
-
 export interface UserSessionRecord {
   id: string;
   createdIp: string | null;
@@ -230,6 +215,7 @@ export interface UserSessionRecord {
   absoluteExpiresAt: string;
   revokedAt: string | null;
   revokeReason: string | null;
+  status: "active" | "expired" | "revoked";
   current: boolean;
   canRevoke: boolean;
   user: {
@@ -238,7 +224,6 @@ export interface UserSessionRecord {
     email: string;
     role: string;
   };
-  events: UserSessionEventRecord[];
 }
 
 export interface OrganizationRecord {

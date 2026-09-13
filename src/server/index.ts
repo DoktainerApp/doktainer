@@ -30,6 +30,7 @@ import { gitProviderRoutes } from "./routes/git-providers";
 import { storageDestinationRoutes } from "./routes/storage-destinations";
 import { commitHistoryRoutes } from "./routes/commit-history";
 import { startS3StorageRetentionScheduler } from "./services/s3-storage-retention.service";
+import { startAuthSessionRetentionScheduler } from "./services/auth-session-retention.service";
 
 const PORT = parseInt(process.env.PORT || "4000");
 const HOST = process.env.HOST || "0.0.0.0";
@@ -193,6 +194,7 @@ async function start() {
   // ── Start ─────────────────────────────────────────────
   try {
     await app.listen({ port: PORT, host: HOST });
+    startAuthSessionRetentionScheduler();
     startS3StorageRetentionScheduler();
     console.log(
       `\n🚀 Doktainer Server Backend running on http://${HOST}:${PORT}`,

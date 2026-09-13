@@ -14,11 +14,33 @@ export function canRevokeManagedSession(input: {
   actorUserId: string;
   actorRole: string;
   targetUserId: string;
+  currentSessionId: string;
+  targetSessionId: string;
 }): boolean {
+  if (input.currentSessionId === input.targetSessionId) return false;
   return (
     input.actorUserId === input.targetUserId ||
     input.actorRole === "SUPER_ADMIN"
   );
+}
+
+export type ManagedSessionStatus = "active" | "expired" | "revoked";
+
+export function getManagedSessionStatus(
+  session: {
+    revokedAt: Date | null;
+    revokeReason: string | null;
+    idleExpiresAt: Date;
+    absoluteExpiresAt: Date;
+  },
+  now = new Date(),
+): ManagedSessionStatus {
+  if (session.revokedAt) {
+    return session.revokeReason === "EXPIRED" ? "expired" : "revoked";
+  }
+  return session.idleExpiresAt <= now || session.absoluteExpiresAt <= now
+    ? "expired"
+    : "active";
 }
 
 export function getSessionCookieName(env = process.env): string {
@@ -120,7 +142,12 @@ export async function createUserSession(input: {
   });
 
   const overflowSessions = await prisma.userSession.findMany({
-    where: { userId: input.userId, revokedAt: null },
+    where: {
+      userId: input.userId,
+      revokedAt: null,
+      idleExpiresAt: { gt: now },
+      absoluteExpiresAt: { gt: now },
+    },
     orderBy: { createdAt: "desc" },
     skip: MAX_ACTIVE_SESSIONS_PER_USER,
     select: { id: true },

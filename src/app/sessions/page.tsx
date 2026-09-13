@@ -6,12 +6,7 @@ import IssueDetailsSummary from "@/components/IssueDetailsSummary";
 import SearchField from "@/components/SearchField";
 import TablePagination from "@/components/TablePagination";
 import { useCurrentUser } from "@/lib/auth-state";
-import {
-  auth,
-  clearSessionState,
-  redirectToLogin,
-  type UserSessionRecord,
-} from "@/lib/api";
+import { auth, type UserSessionRecord } from "@/lib/api";
 import { useTablePagination } from "@/lib/use-table-pagination";
 import {
   ArrowDown,
@@ -53,8 +48,7 @@ function describeDevice(userAgent: string | null) {
 }
 
 function getSessionStatus(session: UserSessionRecord): Exclude<StatusFilter, "all"> {
-  if (!session.revokedAt) return "active";
-  return session.revokeReason === "EXPIRED" ? "expired" : "revoked";
+  return session.status;
 }
 
 function getEffectiveExpiry(session: UserSessionRecord) {
@@ -230,14 +224,8 @@ export default function SessionsPage() {
     setRevoking(true);
     setError("");
     try {
-      const response = await auth.revokeSession(pendingSession.id);
-      const revokedCurrent = response.data.revokedCurrent;
+      await auth.revokeSession(pendingSession.id);
       setPendingSession(null);
-      if (revokedCurrent) {
-        clearSessionState();
-        redirectToLogin();
-        return;
-      }
       await refresh();
     } catch (revokeError) {
       setError(revokeError instanceof Error ? revokeError.message : "Failed to revoke session");
@@ -250,17 +238,13 @@ export default function SessionsPage() {
     <GuardedPage
       route="/sessions"
       title="Sessions"
-      subtitle="Manage login sessions across your organization"
+      subtitle="Review and revoke login sessions"
       currentUser={currentUser}
     >
       <ConfirmActionDialog
         open={pendingSession !== null}
-        title={pendingSession?.current ? "Sign out this session?" : "Revoke login session?"}
-        description={
-          pendingSession?.current
-            ? "This browser will return to the login page immediately."
-            : `Revoke access for ${pendingSession?.user.name ?? "this user"} on ${describeDevice(pendingSession?.userAgent ?? null).browser}?`
-        }
+        title="Revoke login session?"
+        description={`Revoke access for ${pendingSession?.user.name ?? "this user"} on ${describeDevice(pendingSession?.userAgent ?? null).browser}?`}
         confirmLabel={revoking ? "Revoking…" : "Revoke session"}
         note="The affected browser must log in again. API keys are not changed."
         onClose={() => !revoking && setPendingSession(null)}
@@ -300,20 +284,22 @@ export default function SessionsPage() {
             <option value="expired">Expired</option>
             <option value="revoked">Revoked</option>
           </select>
-          <select
-            className="input users-toolbar-filter"
-            aria-label="Filter sessions by user"
-            value={userFilter}
-            onChange={(event) => setUserFilter(event.target.value)}
-            style={{ fontSize: 12 }}
-          >
-            <option value="all">All users</option>
-            {users.map((user) => (
-              <option key={user.id} value={user.id}>
-                {user.name} ({user.email})
-              </option>
-            ))}
-          </select>
+          {currentUser?.role === "SUPER_ADMIN" ? (
+            <select
+              className="input users-toolbar-filter"
+              aria-label="Filter sessions by user"
+              value={userFilter}
+              onChange={(event) => setUserFilter(event.target.value)}
+              style={{ fontSize: 12 }}
+            >
+              <option value="all">All users</option>
+              {users.map((user) => (
+                <option key={user.id} value={user.id}>
+                  {user.name} ({user.email})
+                </option>
+              ))}
+            </select>
+          ) : null}
           <div className="ui-toolbar-actions">
             <button
               type="button"
@@ -400,23 +386,25 @@ export default function SessionsPage() {
                           <td>{formatDate(session.createdAt)}</td>
                           <td>{formatDate(getEffectiveExpiry(session))}</td>
                           <td style={{ textAlign: "right" }}>
-                            <button
-                              type="button"
-                              className="btn btn-ghost"
-                              style={{ padding: "6px 8px", color: session.canRevoke ? "#ef4444" : "var(--text-muted)" }}
-                              onClick={() => setPendingSession(session)}
-                              disabled={!session.canRevoke || revoking}
-                              title={
-                                session.canRevoke
-                                  ? "Revoke session"
-                                  : status !== "active"
-                                    ? "Session is no longer active"
-                                    : "Only a Super Admin can revoke another user's session"
-                              }
-                              aria-label={`Revoke session for ${session.user.name}`}
-                            >
-                              <LogOut size={14} aria-hidden="true" />
-                            </button>
+                            {session.current ? null : (
+                              <button
+                                type="button"
+                                className="btn btn-ghost"
+                                style={{ padding: "6px 8px", color: session.canRevoke ? "#ef4444" : "var(--text-muted)" }}
+                                onClick={() => setPendingSession(session)}
+                                disabled={!session.canRevoke || revoking}
+                                title={
+                                  session.canRevoke
+                                    ? "Revoke session"
+                                    : status !== "active"
+                                      ? "Session is no longer active"
+                                      : "Only a Super Admin can revoke another user's session"
+                                }
+                                aria-label={`Revoke session for ${session.user.name}`}
+                              >
+                                <LogOut size={14} aria-hidden="true" />
+                              </button>
+                            )}
                           </td>
                         </tr>
                       );

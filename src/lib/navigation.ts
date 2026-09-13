@@ -186,7 +186,7 @@ export const navigation: NavSection[] = [
         href: "/sessions",
         icon: MonitorSmartphone,
         label: "Sessions",
-        minRole: "OPERATOR",
+        minRole: "VIEWER",
         keywords: ["login", "sessions", "devices", "security"],
       },
       {

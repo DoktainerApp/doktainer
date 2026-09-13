@@ -23,7 +23,7 @@ import {
   canRevokeManagedSession,
   changePasswordAndRevokeOtherSessions,
   createUserSession,
-  expireUserSession,
+  getManagedSessionStatus,
   getRequestUserAgent,
   revokeOtherUserSessions,
   revokeUserSession,
@@ -645,52 +645,16 @@ export async function authRoutes(app: FastifyInstance) {
     return reply.send({ success: true, message: "Logged out successfully" });
   });
 
-  app.get("/sessions", { preHandler: [requireRole("OPERATOR")] }, async (req, reply) => {
+  app.get("/sessions", { preHandler: [requireRole("VIEWER")] }, async (req, reply) => {
     if (!req.sessionId) {
       return reply.status(403).send({
         success: false,
         error: "A browser login session is required",
       });
     }
-    if (!req.organizationId) {
-      return reply.status(400).send({
-        success: false,
-        error: "An active organization is required",
-      });
-    }
-
-    const organizationScope = {
-      user: {
-        organizationMemberships: {
-          some: { organizationId: req.organizationId },
-        },
-      },
-    };
     const now = new Date();
-    const expiredSessions = await prisma.userSession.findMany({
-      where: {
-        ...organizationScope,
-        revokedAt: null,
-        OR: [
-          { idleExpiresAt: { lte: now } },
-          { absoluteExpiresAt: { lte: now } },
-        ],
-      },
-      take: 200,
-      select: { id: true },
-    });
-    await Promise.all(
-      expiredSessions.map((session) =>
-        expireUserSession(
-          session.id,
-          getClientIp(req) || null,
-          getRequestUserAgent(req),
-        ),
-      ),
-    );
-
     const sessions = await prisma.userSession.findMany({
-      where: organizationScope,
+      where: req.userRole === "SUPER_ADMIN" ? {} : { userId: req.userId! },
       orderBy: { createdAt: "desc" },
       take: 200,
       select: {
@@ -712,36 +676,34 @@ export async function authRoutes(app: FastifyInstance) {
             role: true,
           },
         },
-        events: {
-          orderBy: { createdAt: "desc" },
-          take: 10,
-          select: {
-            id: true,
-            type: true,
-            ipAddress: true,
-            userAgent: true,
-            details: true,
-            createdAt: true,
-          },
-        },
       },
     });
 
     return reply.send({
       success: true,
-      data: sessions.map((session) => ({
-        ...session,
-        current: session.id === req.sessionId,
-        canRevoke:
-          session.revokedAt === null &&
-          (session.user.id === req.userId || req.userRole === "SUPER_ADMIN"),
-      })),
+      data: sessions.map((session) => {
+        const status = getManagedSessionStatus(session, now);
+        return {
+          ...session,
+          status,
+          current: session.id === req.sessionId,
+          canRevoke:
+            status === "active" &&
+            canRevokeManagedSession({
+              actorUserId: req.userId!,
+              actorRole: req.userRole!,
+              targetUserId: session.user.id,
+              currentSessionId: req.sessionId!,
+              targetSessionId: session.id,
+            }),
+        };
+      }),
     });
   });
 
   app.delete(
     "/sessions/:sessionId",
-    { preHandler: [requireRole("OPERATOR")] },
+    { preHandler: [requireRole("VIEWER")] },
     async (req, reply) => {
       if (!req.sessionId) {
         return reply.status(403).send({
@@ -757,24 +719,24 @@ export async function authRoutes(app: FastifyInstance) {
           .status(400)
           .send({ success: false, error: params.error.flatten() });
       }
-      if (!req.organizationId) {
+      if (params.data.sessionId === req.sessionId) {
         return reply.status(400).send({
           success: false,
-          error: "An active organization is required",
+          error: "The current session cannot be revoked; use logout instead",
         });
       }
 
       const targetSession = await prisma.userSession.findFirst({
         where: {
           id: params.data.sessionId,
-          user: {
-            organizationMemberships: {
-              some: { organizationId: req.organizationId },
-            },
-          },
+          ...(req.userRole === "SUPER_ADMIN" ? {} : { userId: req.userId! }),
         },
         select: {
           userId: true,
+          revokedAt: true,
+          revokeReason: true,
+          idleExpiresAt: true,
+          absoluteExpiresAt: true,
           user: { select: { email: true } },
         },
       });
@@ -783,27 +745,16 @@ export async function authRoutes(app: FastifyInstance) {
           .status(404)
           .send({ success: false, error: "Session not found" });
       }
-
-      if (
-        !canRevokeManagedSession({
-          actorUserId: req.userId!,
-          actorRole: req.userRole!,
-          targetUserId: targetSession.userId,
-        })
-      ) {
-        return reply.status(403).send({
-          success: false,
-          error: "Only a Super Admin can revoke another user's session",
-        });
+      if (getManagedSessionStatus(targetSession) !== "active") {
+        return reply
+          .status(404)
+          .send({ success: false, error: "Active session not found" });
       }
 
       const revoked = await revokeUserSession({
         sessionId: params.data.sessionId,
         userId: targetSession.userId,
-        reason:
-          params.data.sessionId === req.sessionId
-            ? "CURRENT_SESSION_REVOKED"
-            : "USER_REVOKED",
+        reason: "USER_REVOKED",
         ipAddress: getClientIp(req) || null,
         userAgent: getRequestUserAgent(req),
       });
@@ -813,23 +764,19 @@ export async function authRoutes(app: FastifyInstance) {
           .send({ success: false, error: "Active session not found" });
       }
 
-      const revokedCurrent = params.data.sessionId === req.sessionId;
-      if (revokedCurrent) clearSessionCookie(reply);
       await auditLog({
         userId: req.userId,
         organizationId: req.organizationId,
         action: "SESSION_REVOKE",
         category: "AUTH",
         level: "WARNING",
-        message: revokedCurrent
-          ? "Current login session revoked"
-          : `Login session revoked for "${targetSession.user.email}"`,
+        message: `Login session revoked for "${targetSession.user.email}"`,
         meta: {
           sessionId: params.data.sessionId,
           targetUserId: targetSession.userId,
         },
       });
-      return reply.send({ success: true, data: { revokedCurrent } });
+      return reply.send({ success: true, data: { revokedCurrent: false } });
     },
   );
 

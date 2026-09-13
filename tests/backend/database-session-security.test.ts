@@ -7,6 +7,7 @@ import {
 } from "../../src/server/middleware/auth";
 import {
   canRevokeManagedSession,
+  getManagedSessionStatus,
   getSessionCookieName,
   hashSessionToken,
   normalizeSessionUserAgent,
@@ -188,6 +189,8 @@ test("only owners and super admins can revoke a managed login session", () => {
       actorUserId: "operator-1",
       actorRole: "OPERATOR",
       targetUserId: "user-2",
+      currentSessionId: "session-1",
+      targetSessionId: "session-2",
     }),
     false,
   );
@@ -196,6 +199,8 @@ test("only owners and super admins can revoke a managed login session", () => {
       actorUserId: "operator-1",
       actorRole: "OPERATOR",
       targetUserId: "operator-1",
+      currentSessionId: "session-1",
+      targetSessionId: "session-2",
     }),
     true,
   );
@@ -204,8 +209,50 @@ test("only owners and super admins can revoke a managed login session", () => {
       actorUserId: "admin-1",
       actorRole: "SUPER_ADMIN",
       targetUserId: "user-2",
+      currentSessionId: "session-1",
+      targetSessionId: "session-2",
     }),
     true,
+  );
+  assert.equal(
+    canRevokeManagedSession({
+      actorUserId: "admin-1",
+      actorRole: "SUPER_ADMIN",
+      targetUserId: "admin-1",
+      currentSessionId: "session-1",
+      targetSessionId: "session-1",
+    }),
+    false,
+  );
+});
+
+test("session status is derived without persisting expiry from list requests", () => {
+  const now = new Date("2026-09-12T12:00:00.000Z");
+  const activeSession = {
+    revokedAt: null,
+    revokeReason: null,
+    idleExpiresAt: new Date("2026-09-12T13:00:00.000Z"),
+    absoluteExpiresAt: new Date("2026-09-13T12:00:00.000Z"),
+  };
+
+  assert.equal(getManagedSessionStatus(activeSession, now), "active");
+  assert.equal(
+    getManagedSessionStatus(
+      { ...activeSession, idleExpiresAt: new Date("2026-09-12T11:59:59.000Z") },
+      now,
+    ),
+    "expired",
+  );
+  assert.equal(
+    getManagedSessionStatus(
+      {
+        ...activeSession,
+        revokedAt: new Date("2026-09-12T10:00:00.000Z"),
+        revokeReason: "USER_REVOKED",
+      },
+      now,
+    ),
+    "revoked",
   );
 });
 
@@ -217,12 +264,16 @@ test("session management is a dedicated protected page before Users and RBAC", (
   const routes = readFileSync("src/server/routes/auth.ts", "utf8");
 
   assert.ok(navigation.indexOf('href: "/sessions"') < navigation.indexOf('href: "/users"'));
-  assert.match(permissions, /"\/sessions": "OPERATOR"/);
+  assert.match(permissions, /"\/sessions": "VIEWER"/);
   assert.doesNotMatch(dashboard, /LoginSessionsPanel/);
   assert.match(page, /route="\/sessions"/);
   assert.match(page, /All statuses/);
   assert.match(page, /All users/);
-  assert.match(routes, /app\.get\("\/sessions", \{ preHandler: \[requireRole\("OPERATOR"\)\]/);
-  assert.match(routes, /"\/sessions\/:sessionId",\s+\{ preHandler: \[requireRole\("OPERATOR"\)\] \}/);
+  assert.match(routes, /app\.get\("\/sessions", \{ preHandler: \[requireRole\("VIEWER"\)\]/);
+  assert.match(routes, /"\/sessions\/:sessionId",\s+\{ preHandler: \[requireRole\("VIEWER"\)\] \}/);
   assert.match(routes, /A browser login session is required/);
+  assert.doesNotMatch(routes, /expiredSessions/);
+  assert.doesNotMatch(routes, /events:\s*\{/);
+  assert.match(routes, /The current session cannot be revoked/);
+  assert.match(page, /session\.current \? null/);
 });

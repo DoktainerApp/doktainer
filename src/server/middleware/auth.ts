@@ -394,7 +394,6 @@ function enforceUserSecurityPolicies(
   req: FastifyRequest,
   reply: FastifyReply,
   settings: UserSecuritySettings,
-  tokenIssuedAt?: number,
 ): boolean {
   if (!settings) {
     return true;
@@ -406,21 +405,6 @@ function enforceUserSecurityPolicies(
       reply.status(403).send({
         success: false,
         error: "Forbidden — your IP address is not in the allowed list",
-      });
-      return false;
-    }
-  }
-
-  if (
-    typeof tokenIssuedAt === "number" &&
-    Number.isFinite(tokenIssuedAt) &&
-    settings.sessionTimeoutMinutes > 0
-  ) {
-    const maxSessionAgeMs = settings.sessionTimeoutMinutes * 60 * 1000;
-    if (Date.now() - tokenIssuedAt * 1000 > maxSessionAgeMs) {
-      reply.status(401).send({
-        success: false,
-        error: "Unauthorized — session expired",
       });
       return false;
     }
