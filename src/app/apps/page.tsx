@@ -1010,25 +1010,6 @@ function InstallModal({
       return;
     }
 
-    let runtimeStatus: DockerRuntimeStatus;
-
-    try {
-      runtimeStatus = await validateDockerStatus(serverId);
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Failed to inspect Docker");
-      setLoading(false);
-      return;
-    }
-
-    if (!runtimeStatus.available) {
-      setError(
-        runtimeStatus.reason ||
-          "Docker is not ready on the selected server yet",
-      );
-      setLoading(false);
-      return;
-    }
-
     setError("");
     setLoading(true);
 
@@ -1311,7 +1292,7 @@ function InstallModal({
                     ? "Verifying whether this server can run Docker app installs."
                     : dockerNotice ||
                       dockerStatus?.reason ||
-                      "App Installer will validate Docker on the target server when you submit the install."}
+                      "Docker readiness is checked when you select a server."}
                 </span>
               </div>
               {!dockerStatusLoading &&
