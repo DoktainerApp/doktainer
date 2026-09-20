@@ -221,15 +221,7 @@ Join our [**Discord Community**](https://discord.gg/3HF85Cd6fp).
 
 ## 📄 License
 
-Doktainer uses the MIT license. See the `LICENSE` file in the repository root for license details.
-
-#### 🚫 Non-Commercial Use Only
-
-The software is free to use, modify, and distribute for **non-commercial purposes only**. Any use for revenue-generating activities or within for-profit organizations is strictly prohibited under these terms.
-
-#### 💼 Commercial Licensing
-
-If you wish to use Doktainer for commercial purposes, business operations, or as part of a paid service, you must obtain a separate commercial license. Please contact the author for further information.
+Doktainer is released under the MIT License. See the [`LICENSE`](./LICENSE) file in the repository root for the complete license terms.
 
 ---
 

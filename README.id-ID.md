@@ -221,15 +221,7 @@ Bergabunglah dengan [**Komunitas Discord**](https://discord.gg/3HF85Cd6fp) kami.
 
 ## 📄 Lisensi
 
-Doktainer menggunakan lisensi MIT. Lihat file `LICENSE` di root repositori untuk detail lisensi.
-
-#### 🚫 Hanya Penggunaan Non-Komersial
-
-Perangkat lunak ini gratis untuk digunakan, dimodifikasi, dan didistribusikan **untuk tujuan non-komersial saja**. Segala penggunaan untuk kegiatan yang menghasilkan pendapatan atau di dalam organisasi yang mencari laba sangat dilarang berdasarkan ketentuan ini.
-
-#### 💼 Lisensi Komersial
-
-Jika Anda ingin menggunakan Doktainer untuk tujuan komersial, operasional bisnis, atau sebagai bagian dari layanan berbayar, Anda harus memperoleh lisensi komersial terpisah. Silakan hubungi penulis untuk informasi lebih lanjut.
+Doktainer dirilis di bawah Lisensi MIT. Lihat file [`LICENSE`](./LICENSE) di root repositori untuk ketentuan lisensi lengkap.
 
 ---
 
