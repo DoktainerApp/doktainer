@@ -298,9 +298,8 @@ export default function SettingsPage() {
         className="animate-slide-in"
         style={{
           display: "flex",
-          gap: 20,
-          alignItems: "flex-start",
-          flexWrap: "wrap",
+          flexDirection: "column",
+          gap: 16,
         }}
       >
         <SettingsTabs activeTab={activeTab} onChange={setActiveTab} />
