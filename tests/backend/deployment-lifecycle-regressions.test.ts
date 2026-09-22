@@ -183,6 +183,47 @@ test("Git rebuild applies the managed env file to target and recovery runtimes",
     rebuildRoute,
     /previousRuntime: recoverablePreviousRuntime/,
   );
+  assert.match(rebuildRoute, /existingContainerRef: container\.dockerId \|\| container\.name/);
+  assert.match(rebuildRoute, /env: prepared\.env \|\| previousRuntime\.env/);
+  assert.match(
+    rebuildRoute,
+    /volumes: prepared\.volumes \|\| previousRuntime\.volumes/,
+  );
+});
+
+test("SQLite state is persisted without coupling orchestration to a framework", () => {
+  const source = readSource(DOCKER_CONTAINERS);
+  const start = source.indexOf(
+    "export async function deployContainerFromGitSource",
+  );
+  assert.notEqual(start, -1);
+  const gitDeployFunction = source.slice(start);
+
+  assert.match(source, /prepareManagedSqliteState/);
+  assert.doesNotMatch(source, /MANAGED_LARAVEL_SQLITE/);
+  assert.doesNotMatch(source, /managedLaravelSqlite/);
+  assert.match(source, /docker cp .*CONTAINER_REF.*CONTAINER_DB/);
+  assert.match(source, /command -v sqlite3/);
+  assert.match(source, /php artisan migrate --force/);
+  assert.match(gitDeployFunction, /managedSqliteState\.volumeMount/);
+  assert.match(
+    source,
+    /volumeMount: `\$\{stateDatabasePath\}:\$\{sourceDatabasePath\}:rw`/,
+  );
+  assert.match(gitDeployFunction, /readinessMode: autoPorts \? "PUBLISHED_HTTP"/);
+});
+
+test("fresh Git deployment snapshots the prepared runtime", () => {
+  const source = readSource(CONTAINER_ROUTES);
+  const deployStart = source.indexOf("let preparedRuntime: ssh.PreparedGitRuntime");
+  const rebuildStart = source.indexOf('"/:id/rebuild"');
+  assert.ok(deployStart >= 0);
+  assert.ok(rebuildStart > deployStart);
+  const freshDeployRoute = source.slice(deployStart, rebuildStart);
+
+  assert.match(freshDeployRoute, /preparedRuntime = result\.preparedRuntime/);
+  assert.match(freshDeployRoute, /preparedRuntime,/);
+  assert.match(source, /configSnapshot: buildDeploymentSnapshot\([\s\S]*input\.preparedRuntime/);
 });
 
 test("Git rebuild image tags are immutable and preserve registry ports", () => {

@@ -4,7 +4,10 @@ import {
   resolveDeploymentStrategy,
   resolveSafeRedeployStrategy,
 } from "../../src/server/services/deployment-strategy";
-import { buildDockerRunCommand } from "../../src/server/services/ssh-services/docker-containers";
+import {
+  buildDockerRunCommand,
+  resolveSqliteDatabasePath,
+} from "../../src/server/services/ssh-services/docker-containers";
 
 describe("deployment strategy", () => {
   it("preserves CPU and memory limits in Docker run commands", () => {
@@ -42,6 +45,58 @@ describe("deployment strategy", () => {
           envFilePath: "relative/.env",
         }),
       /absolute path/,
+    );
+  });
+
+  it("detects only safe SQLite paths inside the application root", () => {
+    assert.equal(
+      resolveSqliteDatabasePath(
+        "DB_CONNECTION=sqlite\nDB_DATABASE=/app/database/database.sqlite\n",
+      ),
+      "/app/database/database.sqlite",
+    );
+    assert.equal(
+      resolveSqliteDatabasePath(
+        "DB_CONNECTION=sqlite\n",
+        "/app/database/database.sqlite",
+      ),
+      "/app/database/database.sqlite",
+    );
+    assert.equal(
+      resolveSqliteDatabasePath("DB_CONNECTION=sqlite\n"),
+      null,
+    );
+    assert.equal(
+      resolveSqliteDatabasePath(
+        "DB_CONNECTION=pgsql\nDB_DATABASE=/app/database/database.sqlite\n",
+      ),
+      null,
+    );
+    assert.equal(
+      resolveSqliteDatabasePath(
+        "DB_CONNECTION=sqlite\nDB_DATABASE=/etc/database.sqlite\n",
+      ),
+      null,
+    );
+    assert.equal(
+      resolveSqliteDatabasePath(
+        "DB_CONNECTION=sqlite\nDB_DATABASE=${APP_ROOT}/database.sqlite\n",
+      ),
+      null,
+    );
+    assert.equal(
+      resolveSqliteDatabasePath("DATABASE_URL=sqlite:///app/data/site.db\n"),
+      "/app/data/site.db",
+    );
+    assert.equal(
+      resolveSqliteDatabasePath(
+        "SQLITE_DATABASE_PATH=/app/data/service.sqlite\n",
+      ),
+      "/app/data/service.sqlite",
+    );
+    assert.equal(
+      resolveSqliteDatabasePath("DATABASE_URL=file:./relative.db\n"),
+      null,
     );
   });
 

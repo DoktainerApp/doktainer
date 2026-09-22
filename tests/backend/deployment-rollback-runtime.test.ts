@@ -170,6 +170,28 @@ test("direct readiness falls back to a proven published HTTP endpoint", async ()
   );
 });
 
+test("a prepared web runtime can declare a cold HTTP readiness probe", async () => {
+  const readiness = await resolveDirectRuntimeReadiness(
+    {
+      server,
+      runtime: runtime({
+        ports: "8080:80",
+        readinessMode: "PUBLISHED_HTTP",
+      }),
+    },
+    {
+      dockerInspect: async () => ({ Config: {} }),
+      findReachablePublishedHttpUpstream: async () => null,
+    },
+  );
+
+  assert.equal(readiness.mode, "PUBLISHED_HTTP");
+  assert.equal(
+    readiness.mode === "PUBLISHED_HTTP" ? readiness.upstream : null,
+    "http://127.0.0.1:8080/",
+  );
+});
+
 test("published-port rollback removes the active runtime before claiming its name and host port", async () => {
   const events: string[] = [];
 

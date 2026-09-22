@@ -19,6 +19,7 @@ import {
 } from "./domain-provisioning/service";
 import {
   findReachablePublishedHttpUpstream,
+  publishedHttpReadinessCandidates,
   waitForHttpReadiness,
 } from "./deployment-readiness.service";
 import {
@@ -47,6 +48,7 @@ export type RuntimeReplacementSpec = {
   entrypoint?: string;
   commandArgs?: string[];
   command: string;
+  readinessMode?: "PUBLISHED_HTTP";
   mountValidation?: Parameters<typeof ssh.runContainer>[1]["mountValidation"];
 };
 
@@ -220,6 +222,10 @@ function snapshotRuntime(
     entrypoint: snapshotString(snapshot, "entrypoint") || undefined,
     commandArgs: storedList(snapshot.commandArgs),
     command: snapshotString(snapshot, "command"),
+    readinessMode:
+      snapshotString(snapshot, "readinessMode") === "PUBLISHED_HTTP"
+        ? "PUBLISHED_HTTP"
+        : undefined,
   };
 }
 
@@ -470,6 +476,18 @@ export async function resolveDirectRuntimeReadiness(input: {
       upstream: publishedHttp.upstream,
       reason:
         "The active published HTTP endpoint is reachable and can validate the recreated runtime.",
+    };
+  }
+
+  const coldHttpUpstream = input.runtime.readinessMode === "PUBLISHED_HTTP"
+    ? publishedHttpReadinessCandidates(input.runtime.ports)[0]
+    : undefined;
+  if (coldHttpUpstream) {
+    return {
+      mode: "PUBLISHED_HTTP",
+      upstream: coldHttpUpstream,
+      reason:
+        "The prepared runtime declares an HTTP startup probe and will be validated after recreation.",
     };
   }
 

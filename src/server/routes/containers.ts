@@ -1743,6 +1743,7 @@ function runInjectedContainerJob(input: {
 function buildDeploymentSnapshot(
   body: z.infer<typeof DeploySchema>,
   runtimeImage?: string,
+  preparedRuntime?: ssh.PreparedGitRuntime,
 ) {
   return {
     sourceType: body.sourceType,
@@ -1760,6 +1761,13 @@ function buildDeploymentSnapshot(
     dockerfilePath: body.dockerfilePath,
     dockerContextPath: body.dockerContextPath,
     imageTag: body.imageTag,
+    ...(preparedRuntime
+      ? {
+          ...preparedRuntime,
+          networks: [preparedRuntime.network],
+          command: "",
+        }
+      : {}),
   };
 }
 
@@ -1856,6 +1864,7 @@ export async function containerRoutes(app: FastifyInstance) {
     trigger: "MANUAL" | "GIT_WEBHOOK" | "APP_INSTALLER";
     userId?: string;
     organizationId: string;
+    preparedRuntime?: ssh.PreparedGitRuntime;
   }) => {
     const body = input.body;
     return createDeployment({
@@ -1868,7 +1877,11 @@ export async function containerRoutes(app: FastifyInstance) {
       version: body.imageTag || body.repoBranch || input.container.image,
       branch: body.repoBranch || null,
       image: input.container.image,
-      configSnapshot: buildDeploymentSnapshot(body, input.container.image),
+      configSnapshot: buildDeploymentSnapshot(
+        body,
+        input.container.image,
+        input.preparedRuntime,
+      ),
       startedAt: new Date(),
       completedAt: new Date(),
     });
@@ -4254,6 +4267,7 @@ export async function containerRoutes(app: FastifyInstance) {
 
       try {
         let deploymentPath: string | undefined;
+        let preparedRuntime: ssh.PreparedGitRuntime | undefined;
 
         if (sourceType === "MANUAL" && deployMode === "COMPOSE") {
           const result = await ssh.deployComposeStackFromContent(server, {
@@ -4306,6 +4320,7 @@ export async function containerRoutes(app: FastifyInstance) {
             network: selectedNetworkName,
           });
           deploymentPath = result.deploymentPath;
+          preparedRuntime = result.preparedRuntime;
         }
 
         await syncContainersForServers([server], req.userId, (event) =>
@@ -4368,6 +4383,7 @@ export async function containerRoutes(app: FastifyInstance) {
                   : "MANUAL",
               userId: req.userId,
               organizationId: req.organizationId!,
+              preparedRuntime,
             }),
           ),
         ).catch((error) => {
@@ -4946,6 +4962,7 @@ export async function containerRoutes(app: FastifyInstance) {
             deploymentPath: toOptionalValue(
               container.deploymentSource.deploymentPath,
             ),
+            existingContainerRef: container.dockerId || container.name,
             startRuntime: buildType === "COMPOSE" ? undefined : false,
             immutableImageTag: buildType === "COMPOSE" ? undefined : true,
           },
@@ -5023,8 +5040,10 @@ export async function containerRoutes(app: FastifyInstance) {
                 const prepared = gitDeploymentResult.preparedRuntime;
                 const recoverablePreviousRuntime: RuntimeReplacementSpec = {
                   ...previousRuntime,
+                  env: prepared.env || previousRuntime.env,
                   envFilePath:
                     prepared.envFilePath ?? previousRuntime.envFilePath,
+                  volumes: prepared.volumes || previousRuntime.volumes,
                 };
                 const targetRuntime: RuntimeReplacementSpec = {
                   ...recoverablePreviousRuntime,

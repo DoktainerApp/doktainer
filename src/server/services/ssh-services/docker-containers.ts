@@ -987,6 +987,7 @@ export type PreparedGitRuntime = {
   restartPolicy: string;
   entrypoint?: string;
   commandArgs?: string[];
+  readinessMode?: "PUBLISHED_HTTP";
 };
 
 async function execContainerShell(
@@ -2164,24 +2165,30 @@ function resolveRunOverride(startCommand?: string | null) {
 function resolveNixpacksStartCommand(args: {
   sourceProject: Awaited<ReturnType<typeof inspectSourceProject>>;
   startCommand?: string | null;
+  preStartCommand?: string;
 }) {
   const explicitStartCommand = args.startCommand?.trim();
-  if (explicitStartCommand) {
-    return explicitStartCommand;
-  }
-
-  if (!args.sourceProject.likelyCodeIgniter) {
-    return undefined;
-  }
-
-  return [
-    "mkdir -p /app/writable/cache /app/writable/debugbar /app/writable/logs /app/writable/session /app/writable/uploads || true",
-    "chmod -R ugo+rwX /app/writable 2>/dev/null || true",
-    "chmod -R ugo+rwX /app/storage 2>/dev/null || true",
-    "chmod -R ugo+rwX /app/bootstrap/cache 2>/dev/null || true",
-    "node /assets/scripts/prestart.mjs /assets/nginx.template.conf /nginx.conf",
-    "(php-fpm -y /assets/php-fpm.conf & nginx -c /nginx.conf)",
-  ].join(" && ");
+  const inferredStartCommand = args.sourceProject.likelyCodeIgniter
+    ? [
+        "mkdir -p /app/writable/cache /app/writable/debugbar /app/writable/logs /app/writable/session /app/writable/uploads || true",
+        "chmod -R ugo+rwX /app/writable 2>/dev/null || true",
+        "chmod -R ugo+rwX /app/storage 2>/dev/null || true",
+        "chmod -R ugo+rwX /app/bootstrap/cache 2>/dev/null || true",
+        "node /assets/scripts/prestart.mjs /assets/nginx.template.conf /nginx.conf",
+        "(php-fpm -y /assets/php-fpm.conf & nginx -c /nginx.conf)",
+      ].join(" && ")
+    : args.preStartCommand &&
+        args.sourceProject.likelyPhp &&
+        args.sourceProject.hasPublicIndex
+      ? [
+          "node /assets/scripts/prestart.mjs /assets/nginx.template.conf /nginx.conf",
+          "(php-fpm -y /assets/php-fpm.conf & nginx -c /nginx.conf)",
+        ].join(" && ")
+      : undefined;
+  const startCommand = explicitStartCommand || inferredStartCommand;
+  return [args.preStartCommand?.trim(), startCommand]
+    .filter((command): command is string => Boolean(command))
+    .join(" && ") || undefined;
 }
 
 function hasEnvKey(env: string | undefined, key: string): boolean {
@@ -2216,6 +2223,84 @@ function ensureLaravelRuntimeEnv(env: string | undefined): string {
     "APP_KEY",
     `base64:${randomBytes(32).toString("base64")}`,
   );
+}
+
+function unquoteDotEnvValue(value: string): string {
+  const normalized = value.trim();
+  if (
+    normalized.length >= 2 &&
+    ((normalized.startsWith('"') && normalized.endsWith('"')) ||
+      (normalized.startsWith("'") && normalized.endsWith("'")))
+  ) {
+    return normalized.slice(1, -1);
+  }
+  return normalized;
+}
+
+function readDotEnvAssignment(content: string, key: string): string | null {
+  let resolved: string | null = null;
+  for (const rawLine of content.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
+    const separatorIndex = line.indexOf("=");
+    if (separatorIndex < 1 || line.slice(0, separatorIndex).trim() !== key) {
+      continue;
+    }
+    resolved = unquoteDotEnvValue(line.slice(separatorIndex + 1));
+  }
+  return resolved;
+}
+
+export function resolveSqliteDatabasePath(
+  envContent: string,
+  defaultDatabasePath?: string,
+): string | null {
+  const sqliteUrl = ["DATABASE_URL", "DB_URL"]
+    .map((key) => readDotEnvAssignment(envContent, key)?.trim())
+    .find((value) => value && /^(?:sqlite|file):/i.test(value));
+  const urlPath = sqliteUrl
+    ? sqliteUrl
+        .replace(/^(?:sqlite|file):(?:\/\/)?/i, "")
+        .split(/[?#]/, 1)[0]
+        ?.trim()
+    : undefined;
+  const connection = ["DB_CONNECTION", "DATABASE_CONNECTION", "DB_DRIVER"]
+    .map((key) => readDotEnvAssignment(envContent, key)?.trim().toLowerCase())
+    .find(Boolean);
+  const databasePath = readDotEnvAssignment(envContent, "DB_DATABASE")?.trim();
+  const sqliteSpecificPath = [
+    "DATABASE_PATH",
+    "SQLITE_DATABASE_PATH",
+    "SQLITE_PATH",
+  ]
+    .map((key) => readDotEnvAssignment(envContent, key)?.trim())
+    .find(Boolean);
+  const configuredPath =
+    sqliteSpecificPath || (connection === "sqlite" ? databasePath : undefined);
+  const declaresSqlite =
+    connection === "sqlite" || Boolean(sqliteUrl) || Boolean(sqliteSpecificPath);
+  if (!declaresSqlite) return null;
+
+  const candidate = urlPath || configuredPath || defaultDatabasePath?.trim();
+  if (!candidate) return null;
+  if (
+    candidate.includes("${") ||
+    !pathPosix.isAbsolute(candidate) ||
+    (candidate !== "/app" && !candidate.startsWith("/app/"))
+  ) {
+    return null;
+  }
+
+  return pathPosix.normalize(candidate);
+}
+
+function appendVolumeMount(volumes: string | undefined, mount: string): string {
+  const entries = (volumes || "")
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  if (!entries.includes(mount)) entries.push(mount);
+  return entries.join(",");
 }
 
 function resolveComposerPlatformPhpVersion(requirement?: string | null) {
@@ -2542,6 +2627,107 @@ async function bootstrapSourceProject(
   );
 }
 
+async function prepareManagedSqliteState(
+  server: Server,
+  opts: {
+    deploymentPath: string;
+    buildPath?: string;
+    managedEnvDirectory: string;
+    existingContainerRef?: string;
+    runtimeEnv?: string;
+    defaultDatabasePath?: string;
+  },
+): Promise<{
+  containerPath: string;
+  volumeMount: string;
+} | null> {
+  const buildPath = normalizeBuildSubdirectory(opts.buildPath);
+  const targetPath =
+    buildPath === "."
+      ? opts.deploymentPath
+      : pathPosix.join(opts.deploymentPath, buildPath);
+  const envFile = await readDeploymentEnvFile(server, [
+    pathPosix.join(targetPath, ".env"),
+  ]);
+  if (!envFile.found && !opts.runtimeEnv?.trim()) return null;
+
+  const sourceDatabasePath = resolveSqliteDatabasePath(
+    `${envFile.content}\n${opts.runtimeEnv ?? ""}`,
+    opts.defaultDatabasePath,
+  );
+  if (!sourceDatabasePath) return null;
+
+  const relativeDatabasePath = pathPosix.relative("/app", sourceDatabasePath);
+  if (
+    !relativeDatabasePath ||
+    relativeDatabasePath === ".." ||
+    relativeDatabasePath.startsWith("../")
+  ) {
+    return null;
+  }
+
+  const existingContainerRef = opts.existingContainerRef?.trim()
+    ? validateContainerName(opts.existingContainerRef)
+    : "";
+  const checkoutDatabasePath = pathPosix.join(
+    targetPath,
+    relativeDatabasePath,
+  );
+  const stateDirectory = pathPosix.join(
+    opts.managedEnvDirectory,
+    "state",
+    "sqlite",
+  );
+  const stateDatabasePath = pathPosix.join(
+    stateDirectory,
+    "database.sqlite",
+  );
+  const script = [
+    "set -euo pipefail",
+    `MANAGED_ENV_DIR=${escapeShellArg(opts.managedEnvDirectory)}`,
+    `STATE_DIR=${escapeShellArg(stateDirectory)}`,
+    `STATE_DB=${escapeShellArg(stateDatabasePath)}`,
+    `CHECKOUT_DB=${escapeShellArg(checkoutDatabasePath)}`,
+    `CONTAINER_REF=${escapeShellArg(existingContainerRef)}`,
+    `CONTAINER_DB=${escapeShellArg(sourceDatabasePath)}`,
+    'mkdir -p "$STATE_DIR"',
+    'chmod 700 "$MANAGED_ENV_DIR" || true',
+    'chmod 700 "$STATE_DIR" || true',
+    'if [ ! -s "$STATE_DB" ]; then',
+    '  TEMP_DB="${STATE_DB}.tmp.$$"',
+    '  rm -f "$TEMP_DB"',
+    '  if [ -n "$CONTAINER_REF" ] && docker inspect "$CONTAINER_REF" >/dev/null 2>&1; then',
+    '    CONTAINER_BACKUP="/tmp/doktainer-sqlite-backup-$$.sqlite"',
+    '    if docker exec -e DOKTAINER_SOURCE_DB="$CONTAINER_DB" -e DOKTAINER_BACKUP_DB="$CONTAINER_BACKUP" "$CONTAINER_REF" sh -lc \'command -v sqlite3 >/dev/null 2>&1 && sqlite3 "$DOKTAINER_SOURCE_DB" ".backup $DOKTAINER_BACKUP_DB"\' >/dev/null 2>&1; then',
+    '      docker cp "$CONTAINER_REF:$CONTAINER_BACKUP" "$TEMP_DB" >/dev/null 2>&1 || true',
+    '      docker exec "$CONTAINER_REF" rm -f "$CONTAINER_BACKUP" >/dev/null 2>&1 || true',
+    '    elif docker exec -e DOKTAINER_SOURCE_DB="$CONTAINER_DB" -e DOKTAINER_BACKUP_DB="$CONTAINER_BACKUP" "$CONTAINER_REF" php -r \'$source = new SQLite3(getenv("DOKTAINER_SOURCE_DB"), SQLITE3_OPEN_READONLY); $destination = new SQLite3(getenv("DOKTAINER_BACKUP_DB")); if (!$source->backup($destination)) { exit(1); }\' >/dev/null 2>&1; then',
+    '      docker cp "$CONTAINER_REF:$CONTAINER_BACKUP" "$TEMP_DB" >/dev/null 2>&1 || true',
+    '      docker exec "$CONTAINER_REF" rm -f "$CONTAINER_BACKUP" >/dev/null 2>&1 || true',
+    "    else",
+    '      docker cp "$CONTAINER_REF:$CONTAINER_DB" "$TEMP_DB" >/dev/null 2>&1 || true',
+    "    fi",
+    "  fi",
+    '  if [ ! -f "$TEMP_DB" ] && [ -f "$CHECKOUT_DB" ]; then cp "$CHECKOUT_DB" "$TEMP_DB"; fi',
+    '  if [ ! -f "$TEMP_DB" ]; then : > "$TEMP_DB"; fi',
+    '  chmod 666 "$TEMP_DB" || true',
+    '  mv -f "$TEMP_DB" "$STATE_DB"',
+    "fi",
+    'chmod 666 "$STATE_DB" || true',
+  ].join("\n");
+
+  await execStrict(
+    server,
+    privilegedCommand(server, `bash -lc ${escapeShellArg(script)}`),
+    shortDockerCommandTimeout(DOCKER_EXEC_TIMEOUT_MS),
+  );
+
+  return {
+    containerPath: sourceDatabasePath,
+    volumeMount: `${stateDatabasePath}:${sourceDatabasePath}:rw`,
+  };
+}
+
 async function writeSourceFile(
   server: Server,
   opts: {
@@ -2746,6 +2932,7 @@ export async function deployContainerFromGitSource(
     composeEnvFiles?: ComposeEnvFileOverride[];
     startRuntime?: boolean;
     immutableImageTag?: boolean;
+    existingContainerRef?: string;
   },
 ): Promise<{
   deploymentPath: string;
@@ -2938,6 +3125,16 @@ export async function deployContainerFromGitSource(
       sourceProject,
       managedEnvFilePath: runtimeEnvFilePath,
     });
+    const managedSqliteState = await prepareManagedSqliteState(server, {
+      deploymentPath,
+      buildPath,
+      managedEnvDirectory,
+      existingContainerRef: opts.existingContainerRef,
+      runtimeEnv: opts.env,
+      defaultDatabasePath: sourceProject.likelyLaravel
+        ? "/app/database/database.sqlite"
+        : undefined,
+    });
     if (
       sourceProject.likelyLaravel &&
       sourceProject.hasComposerJson &&
@@ -2980,6 +3177,10 @@ export async function deployContainerFromGitSource(
     const nixpacksStartCommand = resolveNixpacksStartCommand({
       sourceProject,
       startCommand: opts.startCommand,
+      preStartCommand:
+        managedSqliteState && sourceProject.likelyLaravel
+          ? "php artisan migrate --force"
+          : undefined,
     });
 
     try {
@@ -3004,6 +3205,13 @@ export async function deployContainerFromGitSource(
     const runtimeEnv = sourceProject.likelyLaravel
       ? ensureLaravelRuntimeEnv(opts.env)
       : opts.env;
+    let runtimeVolumes = opts.volumes ?? "";
+    if (managedSqliteState) {
+      runtimeVolumes = appendVolumeMount(
+        runtimeVolumes,
+        managedSqliteState.volumeMount,
+      );
+    }
 
     const preparedRuntime: PreparedGitRuntime = {
       image: imageTag,
@@ -3011,7 +3219,7 @@ export async function deployContainerFromGitSource(
       env: runtimeEnv ?? "",
       envFilePath: runtimeEnvFilePath,
       restartPolicy: opts.restartPolicy?.trim() || "unless-stopped",
-      volumes: opts.volumes ?? "",
+      volumes: runtimeVolumes,
       network: opts.network?.trim() || "bridge",
       entrypoint: shouldApplyRuntimeOverride
         ? runOverride?.entrypoint
@@ -3019,6 +3227,7 @@ export async function deployContainerFromGitSource(
       commandArgs: shouldApplyRuntimeOverride
         ? runOverride?.commandArgs
         : undefined,
+      readinessMode: autoPorts ? "PUBLISHED_HTTP" : undefined,
     };
     const dockerId =
       opts.startRuntime === false
@@ -3134,6 +3343,7 @@ export async function deployContainerFromGitSource(
       restartPolicy: opts.restartPolicy?.trim() || "unless-stopped",
       volumes: opts.volumes ?? "",
       network: opts.network?.trim() || "bridge",
+      readinessMode: autoPorts ? "PUBLISHED_HTTP" : undefined,
     };
     const dockerId =
       opts.startRuntime === false
@@ -3181,6 +3391,7 @@ export async function deployContainerFromGitSource(
       commandArgs: shouldApplyRuntimeOverride
         ? runOverride?.commandArgs
         : undefined,
+      readinessMode: autoPorts ? "PUBLISHED_HTTP" : undefined,
     };
     const dockerId =
       opts.startRuntime === false
