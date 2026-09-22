@@ -8,6 +8,8 @@
   "scripts": {
     "predev": "node scripts/ensure-prisma-client.cjs",
     "dev": "concurrently -k -n web,api -c cyan,green \"npm:dev:frontend\" \"npm:dev:server\"",
+    "dev:raw": "concurrently -k --raw \"npm:dev:frontend\" \"npm:dev:server\"",
+    "dev:silent": "concurrently -k \"npm:dev:frontend >nul\" \"npm:dev:server >nul\"",
     "dev:frontend": "next dev",
     "dev:server": "tsx watch src/server/index.ts",
     "prebuild": "node scripts/ensure-prisma-client.cjs",
