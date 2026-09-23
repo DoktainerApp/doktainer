@@ -1925,7 +1925,7 @@ export async function serverRoutes(app: FastifyInstance) {
       if (!server) {
         return reply.status(403).send({
           success: false,
-          error: "Forbidden â€” you do not have access to this server",
+          error: "Forbidden - you do not have access to this server",
         });
       }
 

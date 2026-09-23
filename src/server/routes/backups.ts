@@ -640,7 +640,7 @@ export async function backupsRoutes(app: FastifyInstance) {
     });
   });
 
-  // GET /backups â€” list backups (optionally filter by serverId)
+  // GET /backups - list backups (optionally filter by serverId)
   app.get("/", { preHandler: backupsAccess }, async (req, reply) => {
     const { serverId } = req.query as { serverId?: string };
 
@@ -811,7 +811,7 @@ export async function backupsRoutes(app: FastifyInstance) {
     },
   );
 
-  // POST /backups â€” trigger a new backup
+  // POST /backups - trigger a new backup
   app.post("/", { preHandler: backupsAccess }, async (req, reply) => {
     const body = z
       .object({
@@ -981,7 +981,7 @@ export async function backupsRoutes(app: FastifyInstance) {
           }
           case "FULL":
           default: {
-            // Backup common paths: /etc, /var/www, /home, /opt â€” skip /proc /sys /dev
+            // Backup common paths: /etc, /var/www, /home, /opt - skip /proc /sys /dev
             backupCmd = `tar czf ${filePath} --exclude=/proc --exclude=/sys --exclude=/dev --exclude=/run --exclude=/tmp --one-file-system /etc /var/www /home /opt 2>/dev/null || true`;
             break;
           }
@@ -1137,7 +1137,7 @@ export async function backupsRoutes(app: FastifyInstance) {
     });
   });
 
-  // POST /backups/:id/restore â€” trigger restore from backup file
+  // POST /backups/:id/restore - trigger restore from backup file
   app.post(
     "/:id/restore",
     { preHandler: backupsAccess },
@@ -1218,7 +1218,7 @@ export async function backupsRoutes(app: FastifyInstance) {
               break;
             case "DATABASE":
             default:
-              // Pipe unzipped dump back to psql â€” DBA should supervise this
+              // Pipe unzipped dump back to psql - DBA should supervise this
               restoreCmd = `zcat ${escapeShellArg(restoreFilePath)} | psql -U postgres 2>/dev/null || zcat ${escapeShellArg(restoreFilePath)} | mysql -u root 2>/dev/null`;
               break;
           }
@@ -1256,7 +1256,7 @@ export async function backupsRoutes(app: FastifyInstance) {
     },
   );
 
-  // DELETE /backups/:id â€” delete backup record and file on server
+  // DELETE /backups/:id - delete backup record and file on server
   app.delete("/:id", { preHandler: backupsAccess }, async (req, reply) => {
     const { id } = req.params as { id: string };
 
@@ -1274,7 +1274,7 @@ export async function backupsRoutes(app: FastifyInstance) {
       try {
         await ssh.exec(backup.server, `rm -f ${backup.filePath}`);
       } catch {
-        // Ignore SSH errors â€” still delete the DB record
+        // Ignore SSH errors - still delete the DB record
       }
     }
 
@@ -1293,7 +1293,7 @@ export async function backupsRoutes(app: FastifyInstance) {
     return reply.send({ success: true, message: "Backup deleted" });
   });
 
-  // GET /backups/stats â€” aggregate stats for dashboard
+  // GET /backups/stats - aggregate stats for dashboard
   app.get("/stats", { preHandler: backupsAccess }, async (req, reply) => {
     const [total, completed, running, failed] = await Promise.all([
       prisma.backup.count({

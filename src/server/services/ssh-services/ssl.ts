@@ -781,7 +781,7 @@ export async function renewSslCertificate(
   }
 
   if (!hasPort80Conflict) {
-    // Some other certbot error â€” surface it directly
+    // Some other certbot error - surface it directly
     throw new Error(renewOutput || `certbot renew failed for ${domainName}`);
   }
 

@@ -75,8 +75,8 @@ export async function listDockerContainers(
         status: status || "",
         ports: ports || "",
         uptime: uptime || "",
-        cpu: "â€”",
-        memory: "â€”",
+        cpu: "-",
+        memory: "-",
       };
     });
 }
@@ -723,7 +723,7 @@ export function formatDeploymentErrorMessage(error: unknown): string {
 
 function parseDockerSizeToBytes(value: string): number | null {
   const normalized = value.trim();
-  if (!normalized || normalized === "â€”" || normalized.toLowerCase() === "n/a")
+  if (!normalized || normalized === "-" || normalized.toLowerCase() === "n/a")
     return null;
 
   const match = normalized.match(/^([0-9]+(?:\.[0-9]+)?)\s*([kmgtpe]?i?b)$/i);
