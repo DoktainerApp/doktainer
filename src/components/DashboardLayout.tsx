@@ -5,6 +5,7 @@ import Sidebar from "@/components/Sidebar";
 import Topbar from "@/components/Topbar";
 import ReadOnlyAccessNotice from "@/components/ReadOnlyAccessNotice";
 import ReadOnlyActionScope from "@/components/ReadOnlyActionScope";
+import VersionUpdateNotice from "@/components/VersionUpdateNotice";
 import { useCurrentUser, useRequireAuth } from "@/lib/auth-state";
 import { addPreferencesListener, getStoredPanelName } from "@/lib/preferences";
 import { getRoleCapabilities } from "@/lib/rbac";
@@ -109,6 +110,7 @@ export default function DashboardLayout({
             padding: 15,
           }}
         >
+          <VersionUpdateNotice />
           <ReadOnlyActionScope enabled={roleCapabilities.isReadOnly}>
             {roleCapabilities.isReadOnly ? <ReadOnlyAccessNotice /> : null}
             {children}
