@@ -357,10 +357,29 @@ export async function organizationsRoutes(app: FastifyInstance) {
             where: { serverId: { in: serverIds } },
             data: { serverId: null },
           });
+          await tx.incidentEvent.updateMany({
+            where: { serverId: { in: serverIds }, organizationId: id },
+            data: { serverId: null },
+          });
           await tx.userServerAccess.deleteMany({
             where: { serverId: { in: serverIds } },
           });
           await tx.serverMetric.deleteMany({
+            where: { serverId: { in: serverIds } },
+          });
+          await tx.runtimeCollectorLease.deleteMany({
+            where: { serverId: { in: serverIds } },
+          });
+          await tx.serverGuardEvidenceSnapshot.deleteMany({
+            where: { serverId: { in: serverIds } },
+          });
+          await tx.serverGuardCleanupPlan.deleteMany({
+            where: { serverId: { in: serverIds } },
+          });
+          await tx.serverGuardRecommendation.deleteMany({
+            where: { serverId: { in: serverIds } },
+          });
+          await tx.serverGuardPolicy.deleteMany({
             where: { serverId: { in: serverIds } },
           });
           await tx.container.deleteMany({

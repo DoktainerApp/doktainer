@@ -1,4 +1,8 @@
 import nodemailer from "nodemailer";
+import {
+  IncidentNotificationDeliveryStatus,
+  Prisma,
+} from "@prisma/client";
 import prisma from "../lib/prisma";
 import { decrypt } from "../lib/crypto";
 import { assertSafeOutboundUrl } from "./integration-verification.service";
@@ -49,12 +53,18 @@ export interface RuntimeNotificationEvent {
   metadata?: Record<string, unknown>;
 }
 
+export interface IncidentNotificationEvent extends RuntimeNotificationEvent {
+  incidentEventId: string;
+}
+
 const DEFAULT_PANEL_NAME = process.env.PANEL_NAME || "DOKTAINER";
 const RUNTIME_ACTION_LABELS: Record<string, string> = {
   server_down: "Server Down",
   high_cpu_over_80: "High CPU (>80%)",
   high_ram_over_90: "High RAM (>90%)",
   server_threshold: "Server Threshold",
+  server_guard_alert: "Server Guard Alert",
+  server_guard_recovered: "Server Guard Recovered",
   container_crash: "Container Crash",
   ssl_expiring: "SSL Expiring",
   security_breach: "Security Breach",
@@ -74,6 +84,8 @@ const runtimeNotificationCooldowns: Record<string, number> = {
   high_cpu_over_80: 30 * 60 * 1000,
   high_ram_over_90: 30 * 60 * 1000,
   server_threshold: 30 * 60 * 1000,
+  server_guard_alert: 30 * 60 * 1000,
+  server_guard_recovered: 30 * 60 * 1000,
   container_crash: 15 * 60 * 1000,
   ssl_expiring: 24 * 60 * 60 * 1000,
   security_breach: 10 * 60 * 1000,
@@ -142,15 +154,15 @@ function toNotificationStatus(
 }
 
 function getNotificationIcon(status: string) {
-  if (["FAILED", "ERROR", "ALERT", "OFFLINE"].includes(status)) {
+  if (["FAILED", "ERROR", "CRITICAL", "ALERT", "OFFLINE"].includes(status)) {
     return "🚨";
   }
 
-  if (["RUNNING", "STARTED", "PROCESSING", "PENDING"].includes(status)) {
+  if (["RUNNING", "STARTED", "PROCESSING", "PENDING", "WARNING"].includes(status)) {
     return "⏳";
   }
 
-  if (["SUCCESS", "COMPLETED", "ONLINE"].includes(status)) {
+  if (["SUCCESS", "COMPLETED", "ONLINE", "RECOVERED"].includes(status)) {
     return "✅";
   }
 
@@ -158,15 +170,15 @@ function getNotificationIcon(status: string) {
 }
 
 function getDiscordColor(status: string) {
-  if (["FAILED", "ERROR", "ALERT", "OFFLINE"].includes(status)) {
+  if (["FAILED", "ERROR", "CRITICAL", "ALERT", "OFFLINE"].includes(status)) {
     return 0xdc2626;
   }
 
-  if (["RUNNING", "STARTED", "PROCESSING", "PENDING"].includes(status)) {
+  if (["RUNNING", "STARTED", "PROCESSING", "PENDING", "WARNING"].includes(status)) {
     return 0xf59e0b;
   }
 
-  if (["SUCCESS", "COMPLETED", "ONLINE"].includes(status)) {
+  if (["SUCCESS", "COMPLETED", "ONLINE", "RECOVERED"].includes(status)) {
     return 0x16a34a;
   }
 
@@ -858,6 +870,192 @@ export async function dispatchRuntimeNotification(
   });
 
   return { sent, failed, skipped: false };
+}
+
+export const INCIDENT_NOTIFICATION_MAX_ATTEMPTS = 2;
+
+export function classifyIncidentNotificationError(error: unknown): {
+  code: string;
+  retryable: boolean;
+} {
+  const message = error instanceof Error ? error.message.toLowerCase() : "";
+
+  if (
+    message.includes("incomplete") ||
+    message.includes("not supported") ||
+    message.includes("invalid url")
+  ) {
+    return { code: "CONFIGURATION", retryable: false };
+  }
+  if (
+    message.includes("401") ||
+    message.includes("403") ||
+    message.includes("unauthorized") ||
+    message.includes("forbidden")
+  ) {
+    return { code: "AUTHENTICATION", retryable: false };
+  }
+  if (message.includes("429") || message.includes("rate limit")) {
+    return { code: "RATE_LIMIT", retryable: true };
+  }
+  if (
+    message.includes("timeout") ||
+    message.includes("network") ||
+    message.includes("fetch failed") ||
+    message.includes("econn") ||
+    /\b5\d\d\b/.test(message)
+  ) {
+    return { code: "TRANSIENT_PROVIDER_FAILURE", retryable: true };
+  }
+
+  return { code: "PROVIDER_REJECTED", retryable: false };
+}
+
+export async function hasDeliveredIncidentNotification(input: {
+  organizationId: string;
+  serverId: string;
+  action: string;
+  since: Date;
+}) {
+  const delivery = await prisma.incidentNotificationDelivery.findFirst({
+    where: {
+      organizationId: input.organizationId,
+      serverId: input.serverId,
+      action: normalizeRuntimeAction(input.action),
+      status: IncidentNotificationDeliveryStatus.DELIVERED,
+      deliveredAt: { gte: input.since },
+    },
+    select: { id: true },
+  });
+  return delivery !== null;
+}
+
+export async function dispatchIncidentNotification(
+  event: IncidentNotificationEvent,
+) {
+  const action = normalizeRuntimeAction(event.action);
+  if (!action || !event.organizationId || !event.incidentEventId) {
+    return { sent: 0, failed: 0, skipped: true };
+  }
+
+  const allProviders = (await prisma.userNotificationProvider.findMany({
+    where: {
+      organizationId: event.organizationId,
+      enabled: true,
+    },
+    orderBy: { createdAt: "asc" },
+  })) as RuntimeNotificationProvider[];
+  const providers = allProviders.filter((provider) =>
+    provider.actions.some(
+      (providerAction) => normalizeRuntimeAction(providerAction) === action,
+    ),
+  );
+  if (providers.length === 0) {
+    return { sent: 0, failed: 0, skipped: true };
+  }
+
+  const userIds = [...new Set(providers.map((provider) => provider.userId))];
+  const users = await prisma.user.findMany({
+    where: { id: { in: userIds } },
+    select: { id: true, email: true },
+  });
+  const userEmails = new Map(users.map((user) => [user.id, user.email]));
+  const panelName = event.panelName || DEFAULT_PANEL_NAME;
+  const formatted = buildFormattedNotification({
+    action,
+    title: event.title,
+    message: event.message,
+    panelName,
+    metadata: event.metadata,
+  });
+  let sent = 0;
+  let failed = 0;
+  let deduplicated = 0;
+
+  for (const provider of providers) {
+    let delivery: { id: string };
+    try {
+      delivery = await prisma.incidentNotificationDelivery.create({
+        data: {
+          organizationId: event.organizationId,
+          serverId: event.serverId,
+          incidentEventId: event.incidentEventId,
+          providerId: provider.id,
+          action,
+          maxAttempts: INCIDENT_NOTIFICATION_MAX_ATTEMPTS,
+        },
+        select: { id: true },
+      });
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === "P2002"
+      ) {
+        deduplicated += 1;
+        continue;
+      }
+      throw error;
+    }
+
+    for (let attempt = 1; attempt <= INCIDENT_NOTIFICATION_MAX_ATTEMPTS; attempt += 1) {
+      try {
+        await deliverRuntimeNotification({
+          provider,
+          recipientEmail: userEmails.get(provider.userId),
+          subject: formatted.subject,
+          text: formatted.text,
+          html: formatted.html,
+          telegramHtml: formatted.telegramHtml,
+          panelName,
+          action,
+          title: event.title,
+          message: event.message,
+          discordEmbeds: formatted.discordEmbeds,
+          metadata: event.metadata,
+        });
+        await prisma.incidentNotificationDelivery.update({
+          where: { id: delivery.id },
+          data: {
+            status: IncidentNotificationDeliveryStatus.DELIVERED,
+            attemptCount: attempt,
+            lastErrorCode: null,
+            deliveredAt: new Date(),
+          },
+        });
+        sent += 1;
+        break;
+      } catch (error) {
+        const classification = classifyIncidentNotificationError(error);
+        const canRetry =
+          classification.retryable && attempt < INCIDENT_NOTIFICATION_MAX_ATTEMPTS;
+        await prisma.incidentNotificationDelivery.update({
+          where: { id: delivery.id },
+          data: {
+            status: IncidentNotificationDeliveryStatus.FAILED,
+            attemptCount: attempt,
+            lastErrorCode: classification.code,
+          },
+        });
+        if (canRetry) continue;
+
+        failed += 1;
+        console.error("[Notification] Incident delivery failed", {
+          providerId: provider.id,
+          incidentEventId: event.incidentEventId,
+          errorCode: classification.code,
+          attemptCount: attempt,
+        });
+        break;
+      }
+    }
+  }
+
+  return {
+    sent,
+    failed,
+    deduplicated,
+    skipped: sent === 0 && failed === 0,
+  };
 }
 
 export async function sendTestEmailNotification(input: {

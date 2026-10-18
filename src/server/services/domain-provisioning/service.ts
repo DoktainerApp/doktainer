@@ -1,3 +1,4 @@
+import { recordIncidentEvent } from "../incident-timeline.service";
 import { provisionCaddyConfig, removeManagedCaddyProxyConfig } from "./caddy";
 import {
   describeContainerTargetPorts,
@@ -15,7 +16,7 @@ import {
 
 export { describeContainerTargetPorts, resolveContainerUpstream };
 
-export async function provisionDomainProxyConfig(
+async function provisionDomainProxyConfigUnchecked(
   options: ProvisionDomainProxyOptions,
 ) {
   const upstreamTarget = await resolveContainerUpstream(
@@ -62,7 +63,18 @@ export async function provisionDomainProxyConfig(
   );
 }
 
-export async function removeManagedDomainProxyConfig(
+export async function provisionDomainProxyConfig(
+  options: ProvisionDomainProxyOptions,
+) {
+  try {
+    return await provisionDomainProxyConfigUnchecked(options);
+  } catch (error) {
+    await recordProxyFailure(options, "provision", error);
+    throw error;
+  }
+}
+
+async function removeManagedDomainProxyConfigUnchecked(
   options: RemoveManagedDomainProxyOptions,
 ): Promise<void> {
   if (options.proxy === "NONE") {
@@ -92,4 +104,39 @@ export async function removeManagedDomainProxyConfig(
     server: options.server,
     domainName: options.domainName,
   });
+}
+
+async function recordProxyFailure(
+  options: Pick<ProvisionDomainProxyOptions, "server" | "domainName" | "proxy">,
+  operation: "provision" | "remove",
+  error: unknown,
+) {
+  await recordIncidentEvent({
+    organizationId: options.server.organizationId,
+    serverId: options.server.id,
+    source: "PROXY",
+    type: "PROXY_ERROR",
+    severity: "ERROR",
+    title: "Reverse proxy operation failed",
+    message: error instanceof Error ? error.message : String(error),
+    resourceType: "domain",
+    resourceId: options.domainName,
+    metadata: { proxy: options.proxy, operation },
+    dedupe: {
+      fingerprint: operation + ":" + options.proxy + ":" + options.domainName,
+    },
+  }).catch((incidentError) => {
+    console.error("[Incident timeline] Failed to record proxy error:", incidentError);
+  });
+}
+
+export async function removeManagedDomainProxyConfig(
+  options: RemoveManagedDomainProxyOptions,
+): Promise<void> {
+  try {
+    await removeManagedDomainProxyConfigUnchecked(options);
+  } catch (error) {
+    await recordProxyFailure(options, "remove", error);
+    throw error;
+  }
 }

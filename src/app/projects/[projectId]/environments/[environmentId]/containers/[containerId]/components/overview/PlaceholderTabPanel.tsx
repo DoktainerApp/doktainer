@@ -7,6 +7,7 @@ interface PlaceholderTabPanelProps {
 const labelByTab: Record<AppDetailTab, string> = {
   overview: "Overview",
   deployments: "Deployment history",
+  incidents: "Incident timeline",
   runtime: "Runtime containers",
   logs: "Application logs",
   terminal: "Web terminal",

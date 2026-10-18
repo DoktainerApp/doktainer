@@ -11,6 +11,7 @@ import { sanitizeViewerResponsePayload } from "./lib/viewer-response-sanitizer";
 
 import { authRoutes } from "./routes/auth";
 import { serverRoutes } from "./routes/servers";
+import { serverGuardRoutes } from "./routes/server-guard";
 import { containerRoutes } from "./routes/containers";
 import { domainRoutes } from "./routes/domains";
 import { sslRoutes } from "./routes/ssl";
@@ -31,6 +32,9 @@ import { storageDestinationRoutes } from "./routes/storage-destinations";
 import { commitHistoryRoutes } from "./routes/commit-history";
 import { startS3StorageRetentionScheduler } from "./services/s3-storage-retention.service";
 import { startAuthSessionRetentionScheduler } from "./services/auth-session-retention.service";
+import { startAuditLogRetentionScheduler } from "./services/audit.service";
+import { startIncidentRetentionScheduler } from "./services/incident-timeline.service";
+import { startRuntimeCollectorScheduler } from "./services/runtime-collector.service";
 
 const PORT = parseInt(process.env.PORT || "4000");
 const HOST = process.env.HOST || "0.0.0.0";
@@ -153,6 +157,7 @@ async function start() {
 
   await app.register(authRoutes, { prefix: `${API_PREFIX}/auth` });
   await app.register(serverRoutes, { prefix: `${API_PREFIX}/servers` });
+  await app.register(serverGuardRoutes, { prefix: `${API_PREFIX}/servers` });
   await app.register(containerRoutes, { prefix: `${API_PREFIX}/containers` });
   await app.register(domainRoutes, { prefix: `${API_PREFIX}/domains` });
   await app.register(sslRoutes, { prefix: `${API_PREFIX}/ssl` });
@@ -194,7 +199,20 @@ async function start() {
   // ── Start ─────────────────────────────────────────────
   try {
     await app.listen({ port: PORT, host: HOST });
+    const stopRuntimeCollector = startRuntimeCollectorScheduler(app.log);
+    let shuttingDown = false;
+    const shutdown = async (signal: string) => {
+      if (shuttingDown) return;
+      shuttingDown = true;
+      app.log.info({ signal }, "Stopping Doktainer backend");
+      await stopRuntimeCollector();
+      await app.close();
+    };
+    process.once("SIGTERM", () => void shutdown("SIGTERM"));
+    process.once("SIGINT", () => void shutdown("SIGINT"));
     startAuthSessionRetentionScheduler();
+    startAuditLogRetentionScheduler();
+    startIncidentRetentionScheduler();
     startS3StorageRetentionScheduler();
     console.log(
       `\n🚀 Doktainer Server Backend running on http://${HOST}:${PORT}`,

@@ -18,6 +18,7 @@ import {
   type ServerConfigSnapshot,
 } from "@/lib/api";
 import { UserBadge } from "@/app/servers/components/server-config/ServerConfigPrimitives";
+import SafeImageCleanupPanel from "./SafeImageCleanupPanel";
 
 const cleanupOptions = [
   {
@@ -86,6 +87,7 @@ export default function DockerManagerModal({
   const [pendingAction, setPendingAction] = useState<
     "install" | "repair" | "reinstall" | "uninstall" | "prune" | null
   >(null);
+  const [safeCleanupOpen, setSafeCleanupOpen] = useState(false);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -222,7 +224,7 @@ export default function DockerManagerModal({
           description: `Remove ${selectedCleanupCount} selected ${selectedCleanupCount === 1 ? "category" : "categories"} of unused Docker artifacts on ${server.name}?`,
           confirmLabel: "Run Cleanup",
           tone: "warning" as const,
-          note: "Only the selected unused artifacts will be removed.",
+          note: "Docker Prune is category-based and does not use Safe image cleanup protection. Unused volumes or images retained for rollback may be removed if selected.",
         },
       }[pendingAction]
     : null;
@@ -440,6 +442,21 @@ export default function DockerManagerModal({
           </div>
 
           {docker?.installed ? (
+            <details
+              className="card"
+              onToggle={(event) => setSafeCleanupOpen(event.currentTarget.open)}
+              style={{ padding: "0 18px" }}
+            >
+              <summary style={{ minHeight: 62, display: "flex", alignItems: "center", cursor: "pointer", color: "var(--text-primary)", fontSize: 14, fontWeight: 600 }}>
+                Safe image cleanup
+              </summary>
+              <div style={{ paddingBottom: 18 }}>
+                {safeCleanupOpen ? <SafeImageCleanupPanel key={server.id} serverId={server.id} /> : null}
+              </div>
+            </details>
+          ) : null}
+
+          {docker?.installed ? (
             <div
               className="card"
               style={{ padding: 18, display: "grid", gap: 12 }}
@@ -449,7 +466,8 @@ export default function DockerManagerModal({
                   Prune Docker Garbage
                 </strong>
                 <p className="server-config-component-description">
-                  Select unused artifacts to remove, then confirm the cleanup.
+                  Select unused artifact categories, then confirm. This action does
+                  not use the Safe image cleanup preview above.
                 </p>
               </div>
               <div

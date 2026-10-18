@@ -1,11 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useCurrentUser } from "@/lib/auth-state";
 import { getRoleCapabilities } from "@/lib/rbac";
 import ConfirmActionDialog from "@/components/ConfirmActionDialog";
 import DashboardLayout from "@/components/DashboardLayout";
+import IncidentTimelinePanel from "@/components/IncidentTimelinePanel";
 import IssueDetailsSummary from "@/components/IssueDetailsSummary";
 import ProcessLogsModal, {
   type ProcessLogStep,
@@ -25,6 +26,7 @@ import {
   type ProjectEnvironmentRecord,
   type ProjectRecord,
 } from "@/lib/api";
+import { CONTAINER_METRICS_REFRESH_INTERVAL_MS } from "@/lib/monitoring-policy";
 import ContainerFileManagerModal from "@/components/containers/modals/ContainerFileManagerModal";
 import EditContainerConfigurationModal from "./components/configuration/EditContainerConfigurationModal";
 import AdvancedTabPanel from "./components/advanced/AdvancedTabPanel";
@@ -590,10 +592,16 @@ export default function AppContainerDetailPage() {
     containerId: string;
   }>();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const currentUser = useCurrentUser();
   const roleCapabilities = getRoleCapabilities(currentUser?.role);
   const canMutateContainers = roleCapabilities.canManageDeveloperTools;
-  const [activeTab, setActiveTab] = useState<AppDetailTab>("overview");
+  const [activeTab, setActiveTab] = useState<AppDetailTab>(() => {
+    const requestedTab = searchParams.get("tab");
+    return appTabs.some((tab) => tab.id === requestedTab)
+      ? (requestedTab as AppDetailTab)
+      : "overview";
+  });
   const [terminalWasOpened, setTerminalWasOpened] = useState(false);
   const [appDetail, setAppDetail] = useState<AppDetail | null>(null);
   const [containerRecord, setContainerRecord] = useState<Container | null>(
@@ -886,6 +894,18 @@ export default function AppContainerDetailPage() {
     },
     [params.containerId],
   );
+
+  useEffect(() => {
+    const deploymentId = new URLSearchParams(window.location.search).get(
+      "deploymentId",
+    );
+    if (!deploymentId) return;
+
+    const frame = window.requestAnimationFrame(() => {
+      void openDeploymentDetails(deploymentId);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [openDeploymentDetails]);
 
   useEffect(() => {
     if (containerRecord) void hydrateDeployments();
@@ -1820,7 +1840,7 @@ export default function AppContainerDetailPage() {
 
     const intervalId = window.setInterval(() => {
       void refreshRuntimeMetrics();
-    }, 15000);
+    }, CONTAINER_METRICS_REFRESH_INTERVAL_MS);
 
     const handleVisibilityChange = () => {
       if (!document.hidden) {
@@ -1879,6 +1899,7 @@ export default function AppContainerDetailPage() {
         deployment={selectedDeployment}
         loading={deploymentDetailLoading}
         error={deploymentDetailError}
+        serverId={containerRecord?.serverId ?? selectedDeployment?.serverId ?? null}
         onClose={() => {
           setSelectedDeployment(null);
           setDeploymentDetailError(null);
@@ -2010,6 +2031,15 @@ export default function AppContainerDetailPage() {
                 rollingBackId={rollingBackDeploymentId}
                 allowRollback={canMutateContainers}
               />
+            ) : activeTab === "incidents" && containerRecord ? (
+              <section className="card" style={{ padding: 16, minWidth: 0 }}>
+                <IncidentTimelinePanel
+                  serverId={containerRecord.serverId}
+                  scopeLabel={`container ${appDetail.name}`}
+                  containerId={containerRecord.id}
+                  onOpenCorrelation={openDeploymentDetails}
+                />
+              </section>
             ) : activeTab === "advanced" ? (
               <AdvancedTabPanel advanced={appDetail.advanced} />
             ) : activeTab === "environment" ? (

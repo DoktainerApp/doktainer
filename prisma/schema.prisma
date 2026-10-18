@@ -26,20 +26,22 @@ model User {
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
 
-  activeOrganization      Organization?              @relation("UserActiveOrganization", fields: [activeOrganizationId], references: [id], onDelete: SetNull)
-  organizationMemberships OrganizationMembership[]
-  createdOrganizations    Organization[]             @relation("OrganizationCreator")
-  apiKeys                 ApiKey[]
-  auditLogs               AuditLog[]
-  deployments             Deployment[]
-  settings                UserSettings?
-  notificationProviders   UserNotificationProvider[]
-  integrations            UserIntegration[]
-  gitProviders            UserGitProvider[]
-  storageDestinations     UserStorageDestination[]
-  serverAssignments       UserServerAccess[]
-  sentInvitations         UserInvitation[]           @relation("InvitationCreator")
-  sessions                UserSession[]
+  activeOrganization           Organization?               @relation("UserActiveOrganization", fields: [activeOrganizationId], references: [id], onDelete: SetNull)
+  organizationMemberships      OrganizationMembership[]
+  createdOrganizations         Organization[]              @relation("OrganizationCreator")
+  apiKeys                      ApiKey[]
+  auditLogs                    AuditLog[]
+  deployments                  Deployment[]
+  settings                     UserSettings?
+  notificationProviders        UserNotificationProvider[]
+  integrations                 UserIntegration[]
+  gitProviders                 UserGitProvider[]
+  storageDestinations          UserStorageDestination[]
+  serverAssignments            UserServerAccess[]
+  sentInvitations              UserInvitation[]            @relation("InvitationCreator")
+  sessions                     UserSession[]
+  reviewedGuardRecommendations ServerGuardRecommendation[] @relation("ServerGuardRecommendationReviewer")
+  executedGuardCleanupPlans    ServerGuardCleanupPlan[]    @relation("ServerGuardCleanupPlanExecutor")
 
   @@index([activeOrganizationId])
   @@map("users")
@@ -55,15 +57,22 @@ model Organization {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  members     OrganizationMembership[]
-  activeUsers User[]                   @relation("UserActiveOrganization")
-  servers     Server[]
-  projects    Project[]
-  domains     Domain[]
-  apiKeys     ApiKey[]
-  invitations UserInvitation[]
-  auditLogs   AuditLog[]
-  deployments Deployment[]
+  members                          OrganizationMembership[]
+  activeUsers                      User[]                            @relation("UserActiveOrganization")
+  servers                          Server[]
+  projects                         Project[]
+  domains                          Domain[]
+  apiKeys                          ApiKey[]
+  invitations                      UserInvitation[]
+  auditLogs                        AuditLog[]
+  deployments                      Deployment[]
+  incidentEvents                   IncidentEvent[]
+  serverGuardPolicies              ServerGuardPolicy[]
+  serverGuardRecommendations       ServerGuardRecommendation[]
+  serverGuardEvidenceSnapshots     ServerGuardEvidenceSnapshot[]
+  serverGuardContainerLogSnapshots ServerGuardContainerLogSnapshot[]
+  serverGuardCleanupPlans          ServerGuardCleanupPlan[]
+  incidentNotificationDeliveries   IncidentNotificationDelivery[]
 
   @@index([createdById])
   @@map("organizations")
@@ -156,19 +165,19 @@ model UserSettings {
 }
 
 model UserNotificationProvider {
-  id                  String                   @id @default(cuid())
+  id                  String                         @id @default(cuid())
   userId              String
   organizationId      String
-  user                User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user                User                           @relation(fields: [userId], references: [id], onDelete: Cascade)
   type                NotificationProviderType
   name                String
-  enabled             Boolean                  @default(true)
-  actions             String[]                 @default([])
+  enabled             Boolean                        @default(true)
+  actions             String[]                       @default([])
   channel             String?
   webhookUrlEnc       String?
   smtpHost            String?
-  smtpPort            Int                      @default(587)
-  smtpSecure          Boolean                  @default(false)
+  smtpPort            Int                            @default(587)
+  smtpSecure          Boolean                        @default(false)
   smtpUsername        String?
   smtpPasswordEnc     String?
   smtpFromEmail       String?
@@ -179,8 +188,9 @@ model UserNotificationProvider {
   topic               String?
   userKey             String?
   apiKeyEnc           String?
-  createdAt           DateTime                 @default(now())
-  updatedAt           DateTime                 @updatedAt
+  createdAt           DateTime                       @default(now())
+  updatedAt           DateTime                       @updatedAt
+  incidentDeliveries  IncidentNotificationDelivery[]
 
   @@index([userId, organizationId, type])
   @@index([organizationId])
@@ -378,36 +388,46 @@ model ApiKey {
 // Servers
 // ========================
 model Server {
-  id             String       @id @default(cuid())
-  organizationId String
-  name           String
-  ip             String
-  sshPort        Int          @default(22)
-  username       String       @default("root")
-  authType       SshAuthType  @default(PASSWORD)
-  sshKeyEnc      String? // encrypted private key
-  passwordEnc    String? // encrypted password
-  status         ServerStatus @default(UNKNOWN)
-  os             String?
-  location       String?
-  tags           String[]
-  lastHealthAt   DateTime?
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  id                          String       @id @default(cuid())
+  organizationId              String
+  name                        String
+  ip                          String
+  sshPort                     Int          @default(22)
+  username                    String       @default("root")
+  authType                    SshAuthType  @default(PASSWORD)
+  sshKeyEnc                   String? // encrypted private key
+  passwordEnc                 String? // encrypted password
+  status                      ServerStatus @default(UNKNOWN)
+  os                          String?
+  location                    String?
+  tags                        String[]
+  lastHealthAt                DateTime?
+  runtimeCollectorEnabled     Boolean      @default(true)
+  runtimeCollectorIntervalSec Int          @default(300)
+  createdAt                   DateTime     @default(now())
+  updatedAt                   DateTime     @updatedAt
 
-  organization        Organization             @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  containers          Container[]
-  environments        Environment[]
-  networks            Network[]
-  storageDestinations UserStorageDestination[]
-  domains             Domain[]
-  auditLogs           AuditLog[]
-  deployments         Deployment[]
-  metrics             ServerMetric[]
-  appInstalls         AppInstall[]
-  backups             Backup[]
-  firewallRulePresets FirewallRulePreset[]
-  userAssignments     UserServerAccess[]
+  organization                     Organization                      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  containers                       Container[]
+  environments                     Environment[]
+  networks                         Network[]
+  storageDestinations              UserStorageDestination[]
+  domains                          Domain[]
+  auditLogs                        AuditLog[]
+  deployments                      Deployment[]
+  metrics                          ServerMetric[]
+  runtimeCollectorLease            RuntimeCollectorLease?
+  incidentEvents                   IncidentEvent[]
+  serverGuardPolicy                ServerGuardPolicy?
+  serverGuardRecommendations       ServerGuardRecommendation[]
+  serverGuardEvidenceSnapshots     ServerGuardEvidenceSnapshot[]
+  serverGuardContainerLogSnapshots ServerGuardContainerLogSnapshot[]
+  serverGuardCleanupPlans          ServerGuardCleanupPlan[]
+  incidentNotificationDeliveries   IncidentNotificationDelivery[]
+  appInstalls                      AppInstall[]
+  backups                          Backup[]
+  firewallRulePresets              FirewallRulePreset[]
+  userAssignments                  UserServerAccess[]
 
   @@index([organizationId])
   @@map("servers")
@@ -426,23 +446,51 @@ enum ServerStatus {
 }
 
 model ServerMetric {
-  id           String   @id @default(cuid())
-  serverId     String
-  server       Server   @relation(fields: [serverId], references: [id], onDelete: Cascade)
-  cpuPct       Float
-  ramPct       Float
-  diskPct      Float
-  ramUsed      BigInt
-  ramTotal     BigInt
-  diskUsed     BigInt
-  diskTotal    BigInt
-  networkRxBps BigInt?
-  networkTxBps BigInt?
-  uptimeSec    BigInt
-  recordedAt   DateTime @default(now())
+  id               String                 @id @default(cuid())
+  serverId         String
+  server           Server                 @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  cpuPct           Float
+  cpuCores         Int?
+  collectionSource MetricCollectionSource @default(ON_DEMAND)
+  ramPct           Float
+  diskPct          Float
+  ramUsed          BigInt
+  ramTotal         BigInt
+  diskUsed         BigInt
+  diskTotal        BigInt
+  networkRxBps     BigInt?
+  networkTxBps     BigInt?
+  uptimeSec        BigInt
+  recordedAt       DateTime               @default(now())
 
   @@index([serverId, recordedAt])
   @@map("server_metrics")
+}
+
+enum MetricCollectionSource {
+  ON_DEMAND
+  BACKGROUND
+}
+
+model RuntimeCollectorLease {
+  serverId            String    @id
+  server              Server    @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  ownerId             String?
+  token               String?   @unique
+  expiresAt           DateTime?
+  heartbeatAt         DateTime?
+  nextRunAt           DateTime  @default(now())
+  consecutiveFailures Int       @default(0)
+  lastStartedAt       DateTime?
+  lastCompletedAt     DateTime?
+  lastSuccessAt       DateTime?
+  lastDurationMs      Int?
+  lastErrorCode       String?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@index([nextRunAt, expiresAt])
+  @@map("runtime_collector_leases")
 }
 
 // ========================
@@ -618,6 +666,250 @@ model DeploymentEvent {
 
   @@index([deploymentId, createdAt])
   @@map("deployment_events")
+}
+
+model IncidentEvent {
+  id              String              @id @default(cuid())
+  organizationId  String
+  serverId        String?
+  correlationId   String?
+  source          IncidentEventSource
+  type            IncidentEventType
+  severity        IncidentSeverity    @default(INFO)
+  title           String
+  message         String
+  resourceType    String?
+  resourceId      String?
+  dedupeKey       String?             @unique
+  occurrenceCount Int                 @default(1)
+  metadata        Json?
+  occurredAt      DateTime
+  lastOccurredAt  DateTime
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  organization           Organization                   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  server                 Server?                        @relation(fields: [serverId], references: [id], onDelete: SetNull)
+  notificationDeliveries IncidentNotificationDelivery[]
+
+  @@index([organizationId, occurredAt])
+  @@index([serverId, occurredAt])
+  @@index([correlationId, occurredAt])
+  @@index([resourceType, resourceId, occurredAt])
+  @@map("incident_events")
+}
+
+enum IncidentEventSource {
+  DEPLOYMENT
+  RUNTIME
+  SERVER
+  PROXY
+  RECOVERY
+  OPERATOR
+  SYSTEM
+}
+
+enum IncidentEventType {
+  DEPLOYMENT_LIFECYCLE
+  HEALTH_TRANSITION
+  RESTART_LOOP
+  DOCKER_DAEMON_FAILURE
+  RESOURCE_PRESSURE
+  PROXY_ERROR
+  ROLLBACK
+  AUTOMATED_ACTION
+  OPERATOR_ACTION
+  PROBE_FAILURE
+}
+
+enum IncidentSeverity {
+  INFO
+  WARNING
+  ERROR
+  CRITICAL
+}
+
+enum IncidentNotificationDeliveryStatus {
+  PENDING
+  DELIVERED
+  FAILED
+}
+
+model IncidentNotificationDelivery {
+  id              String                             @id @default(cuid())
+  organizationId  String
+  serverId        String?
+  incidentEventId String
+  providerId      String
+  action          String
+  status          IncidentNotificationDeliveryStatus @default(PENDING)
+  attemptCount    Int                                @default(0)
+  maxAttempts     Int                                @default(2)
+  lastErrorCode   String?
+  deliveredAt     DateTime?
+  createdAt       DateTime                           @default(now())
+  updatedAt       DateTime                           @updatedAt
+
+  organization Organization             @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  server       Server?                  @relation(fields: [serverId], references: [id], onDelete: SetNull)
+  incident     IncidentEvent            @relation(fields: [incidentEventId], references: [id], onDelete: Cascade)
+  provider     UserNotificationProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@unique([incidentEventId, providerId, action])
+  @@index([organizationId, serverId, status, createdAt])
+  @@map("incident_notification_deliveries")
+}
+
+enum ServerGuardCheck {
+  CPU_PRESSURE
+  MEMORY_PRESSURE
+  DISK_PRESSURE
+  INODE_PRESSURE
+  DOCKER_DATA_ROOT_GROWTH
+  CONTAINER_LOG_GROWTH
+  SERVER_REACHABILITY
+  SSH_AUTHENTICATION
+  PROBE_TIMEOUT
+}
+
+enum ServerGuardRecommendationStatus {
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+  NO_APPROVAL_REQUIRED
+}
+
+enum ServerGuardCleanupPlanStatus {
+  READY
+  VALIDATED
+  STALE
+  EXPIRED
+  EXECUTING
+  COMPLETED
+  PARTIAL
+  FAILED
+}
+
+model ServerGuardPolicy {
+  serverId         String             @id
+  organizationId   String
+  enabled          Boolean            @default(true)
+  minimumSeverity  IncidentSeverity   @default(WARNING)
+  cooldownMinutes  Int                @default(30)
+  requiresApproval Boolean            @default(true)
+  excludedChecks   ServerGuardCheck[] @default([])
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  server       Server       @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@map("server_guard_policies")
+}
+
+model ServerGuardRecommendation {
+  id                String                          @id @default(cuid())
+  organizationId    String
+  serverId          String
+  incidentEventId   String?
+  check             ServerGuardCheck
+  severity          IncidentSeverity
+  status            ServerGuardRecommendationStatus
+  title             String
+  summary           String
+  recommendedAction String
+  evidence          Json
+  dryRunPreview     Json
+  reviewedById      String?
+  reviewedAt        DateTime?
+  reviewNote        String?
+  createdAt         DateTime                        @default(now())
+  updatedAt         DateTime                        @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  server       Server       @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  reviewedBy   User?        @relation("ServerGuardRecommendationReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  @@unique([incidentEventId, check])
+  @@index([organizationId, serverId, status, createdAt])
+  @@index([serverId, check, createdAt])
+  @@map("server_guard_recommendations")
+}
+
+model ServerGuardEvidenceSnapshot {
+  id                            String   @id @default(cuid())
+  organizationId                String
+  serverId                      String
+  inodePct                      Float?
+  dockerDataRoot                String?
+  dockerDataRootBytes           BigInt?
+  dockerLogBytes                BigInt?
+  dockerLogContainerCount       Int?
+  dockerLogAttributionTruncated Boolean  @default(false)
+  collectionErrors              String[] @default([])
+  recordedAt                    DateTime @default(now())
+
+  organization  Organization                      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  server        Server                            @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  containerLogs ServerGuardContainerLogSnapshot[]
+
+  @@index([organizationId, serverId, recordedAt])
+  @@index([serverId, recordedAt])
+  @@map("server_guard_evidence_snapshots")
+}
+
+model ServerGuardContainerLogSnapshot {
+  id                 String   @id @default(cuid())
+  organizationId     String
+  serverId           String
+  evidenceSnapshotId String
+  containerId        String
+  containerName      String?
+  logBytes           BigInt
+  recordedAt         DateTime
+
+  organization     Organization                @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  server           Server                      @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  evidenceSnapshot ServerGuardEvidenceSnapshot @relation(fields: [evidenceSnapshotId], references: [id], onDelete: Cascade)
+
+  @@unique([evidenceSnapshotId, containerId])
+  @@index([organizationId, serverId, recordedAt])
+  @@index([serverId, containerId, recordedAt])
+  @@map("server_guard_container_log_snapshots")
+}
+
+model ServerGuardCleanupPlan {
+  id                   String                       @id @default(cuid())
+  organizationId       String
+  serverId             String
+  revision             String
+  status               ServerGuardCleanupPlanStatus @default(READY)
+  candidates           Json
+  candidateCount       Int
+  candidateBytes       BigInt
+  sampledAt            DateTime
+  expiresAt            DateTime
+  lastValidatedAt      DateTime?
+  validation           Json?
+  attemptCount         Int                          @default(0)
+  maxAttempts          Int                          @default(1)
+  executedById         String?
+  executionStartedAt   DateTime?
+  executionCompletedAt DateTime?
+  executionOutcome     Json?
+  lastErrorCode        String?
+  createdAt            DateTime                     @default(now())
+  updatedAt            DateTime                     @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  server       Server       @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  executedBy   User?        @relation("ServerGuardCleanupPlanExecutor", fields: [executedById], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, serverId, createdAt])
+  @@index([serverId, expiresAt])
+  @@index([serverId, status, createdAt])
+  @@map("server_guard_cleanup_plans")
 }
 
 model DeploymentLock {

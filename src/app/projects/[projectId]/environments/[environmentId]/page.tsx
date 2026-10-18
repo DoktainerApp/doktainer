@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { useCurrentUser } from "@/lib/auth-state";
 import { getRoleCapabilities } from "@/lib/rbac";
 import DashboardLayout from "@/components/DashboardLayout";
+import IncidentTimelinePanel from "@/components/IncidentTimelinePanel";
 import IssueDetailsSummary from "@/components/IssueDetailsSummary";
 import ProcessLogsModal, {
   useProcessLogsModal,
@@ -123,6 +124,8 @@ export default function EnvironmentContainersPage() {
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
+  const [activeSection, setActiveSection] =
+    useState<"containers" | "incidents">("containers");
   const { toasts, pushToast, dismissToast } = useToastManager();
   const {
     modalState: processLogsState,
@@ -336,6 +339,52 @@ export default function EnvironmentContainersPage() {
             description="Environment container data could not be loaded or synced."
           />
         ) : null}
+        <nav
+          className="ui-tab-scroll"
+          aria-label="Environment detail sections"
+          style={{
+            width: "100%",
+            borderRadius: 6,
+            background: "var(--bg-card)",
+            minWidth: 0,
+          }}
+        >
+          {([
+            ["containers", "Containers"],
+            ["incidents", "Incident Timeline"],
+          ] as const).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              className="btn btn-ghost"
+              onClick={() => setActiveSection(id)}
+              aria-current={activeSection === id ? "page" : undefined}
+              style={{
+                minHeight: 44,
+                padding: "7px 12px",
+                borderRadius: 4,
+                fontSize: 12,
+                flex: "0 0 auto",
+                borderColor:
+                  activeSection === id
+                    ? "rgba(59,130,246,0.5)"
+                    : "transparent",
+                background:
+                  activeSection === id
+                    ? "rgba(59,130,246,0.16)"
+                    : "transparent",
+                color:
+                  activeSection === id
+                    ? "var(--accent-blue)"
+                    : "var(--text-secondary)",
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </nav>
+        {activeSection === "containers" ? (
+          <>
         <EnvironmentContainersSummary containers={environmentContainers} />
         <EnvironmentContainersToolbar
           search={search}
@@ -362,6 +411,52 @@ export default function EnvironmentContainersPage() {
           endItem={pagination.endItem}
           onPageChange={pagination.setCurrentPage}
         />
+          </>
+        ) : activeEnvironment ? (
+          <section className="card" style={{ padding: 16, minWidth: 0 }}>
+            <IncidentTimelinePanel
+              serverId={activeEnvironment.serverId}
+              scopeLabel={`environment ${activeEnvironment.name}`}
+              environmentId={activeEnvironment.id}
+              getResourceHref={(event) => {
+                if (
+                  event.resourceType !== "container" ||
+                  !event.resourceId ||
+                  !environmentContainers.some(
+                    (container) => container.id === event.resourceId,
+                  )
+                ) {
+                  return null;
+                }
+
+                return `/projects/${params.projectId}/environments/${params.environmentId}/containers/${event.resourceId}`;
+              }}
+              getCorrelationHref={(nextCorrelationId, event) => {
+                if (
+                  event.resourceType !== "container" ||
+                  !event.resourceId ||
+                  !environmentContainers.some(
+                    (container) => container.id === event.resourceId,
+                  )
+                ) {
+                  return null;
+                }
+
+                return `/projects/${params.projectId}/environments/${params.environmentId}/containers/${event.resourceId}?deploymentId=${encodeURIComponent(nextCorrelationId)}`;
+              }}
+            />
+          </section>
+        ) : (
+          <section
+            className="card"
+            role="status"
+            style={{ padding: 20, color: "var(--text-secondary)" }}
+          >
+            {loading
+              ? "Loading environment incident history..."
+              : "Incident history is unavailable because this environment could not be loaded."}
+          </section>
+        )}
       </div>
     </DashboardLayout>
   );

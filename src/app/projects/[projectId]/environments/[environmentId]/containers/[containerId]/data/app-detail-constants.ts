@@ -15,6 +15,7 @@ import type { AppAction, AppDetailTab } from "../types/app-detail-types";
 export const appTabs: Array<{ id: AppDetailTab; label: string }> = [
   { id: "overview", label: "Overview" },
   { id: "deployments", label: "Deployments" },
+  { id: "incidents", label: "Incidents" },
   { id: "runtime", label: "Runtime" },
   { id: "logs", label: "Logs" },
   { id: "terminal", label: "Terminal" },

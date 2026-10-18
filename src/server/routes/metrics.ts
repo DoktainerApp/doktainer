@@ -1,5 +1,6 @@
 import { FastifyInstance } from "fastify";
 import prisma from "../lib/prisma";
+import { getServerMetricsWindowStart } from "../lib/monitoring-policy";
 import { authenticate, requireApiKeyPermission } from "../middleware/auth";
 
 const metricsAccess = [authenticate, requireApiKeyPermission("read:metrics")];
@@ -61,7 +62,10 @@ export async function metricsRoutes(app: FastifyInstance) {
     { preHandler: metricsAccess },
     async (req, reply) => {
       const { serverId } = req.params as { serverId: string };
-      const { limit = "24" } = req.query as { limit?: string };
+      const { limit } = req.query as { limit?: string };
+      const parsedLimit = limit
+        ? Math.min(Math.max(Number.parseInt(limit, 10) || 1, 1), 10_000)
+        : null;
 
       const server = await prisma.server.findFirst({
         where: { id: serverId, organizationId: req.organizationId },
@@ -75,9 +79,14 @@ export async function metricsRoutes(app: FastifyInstance) {
       }
 
       const metrics = await prisma.serverMetric.findMany({
-        where: { serverId },
+        where: {
+          serverId,
+          ...(parsedLimit
+            ? {}
+            : { recordedAt: { gte: getServerMetricsWindowStart() } }),
+        },
         orderBy: { recordedAt: "desc" },
-        take: parseInt(limit),
+        ...(parsedLimit ? { take: parsedLimit } : {}),
       });
 
       return reply.send({
@@ -88,6 +97,8 @@ export async function metricsRoutes(app: FastifyInstance) {
           ramTotal: m.ramTotal.toString(),
           diskUsed: m.diskUsed.toString(),
           diskTotal: m.diskTotal.toString(),
+          networkRxBps: m.networkRxBps?.toString() ?? null,
+          networkTxBps: m.networkTxBps?.toString() ?? null,
           uptimeSec: m.uptimeSec.toString(),
         })),
       });

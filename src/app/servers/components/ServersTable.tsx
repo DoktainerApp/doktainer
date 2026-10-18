@@ -3,12 +3,10 @@ import SensitiveConnectionValue from "@/components/SensitiveConnectionValue";
 import type {
   DockerRuntimeStatus,
   Server as ServerType,
-  ServerMetric,
 } from "@/lib/api";
 import { canViewServerConnection } from "@/lib/api";
-import { Fragment, useCallback, useState } from "react";
+import { useCallback, useState } from "react";
 import {
-  Activity,
   Boxes,
   Loader2,
   MoreVertical,
@@ -16,12 +14,12 @@ import {
   Pencil,
   RefreshCw,
   Server,
+  ShieldCheck,
   Terminal,
   Trash2,
   Wifi,
 } from "lucide-react";
 import DockerBadge from "./DockerBadge";
-import ServerMetricsPanel from "./ServerMetricsPanel";
 import StatusBadge from "./StatusBadge";
 import { formatBytes, formatLastUpdated, formatUptime } from "./server-utils";
 
@@ -39,10 +37,6 @@ interface ServersTableProps {
   refreshing: Record<string, boolean>;
   deleting: string | null;
   openMenuId: string | null;
-  expandedMetricsId: string | null;
-  metricsHistory: Record<string, ServerMetric[]>;
-  metricsHistoryLoading: Record<string, boolean>;
-  metricsHistoryError: Record<string, string | null>;
   onPageChange: (page: number) => void;
   onRefreshMetrics: (serverId: string) => void | Promise<void>;
   onTestConnection: (serverId: string) => void | Promise<void>;
@@ -51,7 +45,7 @@ interface ServersTableProps {
   onOpenConfig: (server: ServerType) => void;
   onOpenWebServerManager: (server: ServerType) => void;
   onOpenDockerManager: (server: ServerType) => void;
-  onToggleMetrics: (server: ServerType) => void | Promise<void>;
+  onOpenServerGuard: (server: ServerType) => void;
   onEdit: (server: ServerType) => void;
   onDelete: (serverId: string) => void | Promise<void>;
 }
@@ -70,10 +64,6 @@ export default function ServersTable({
   refreshing,
   deleting,
   openMenuId,
-  expandedMetricsId,
-  metricsHistory,
-  metricsHistoryLoading,
-  metricsHistoryError,
   onPageChange,
   onRefreshMetrics,
   onTestConnection,
@@ -82,7 +72,7 @@ export default function ServersTable({
   onOpenConfig,
   onOpenWebServerManager,
   onOpenDockerManager,
-  onToggleMetrics,
+  onOpenServerGuard,
   onEdit,
   onDelete,
 }: ServersTableProps) {
@@ -98,7 +88,7 @@ export default function ServersTable({
 
       const rect = event.currentTarget.getBoundingClientRect();
       const menuWidth = 176;
-      const menuHeight = 212;
+      const menuHeight = 252;
       const nextLeft = Math.min(
         window.innerWidth - menuWidth - 12,
         Math.max(12, rect.right - menuWidth + rect.width),
@@ -163,11 +153,8 @@ export default function ServersTable({
               <tbody>
                 {items.map((server) => {
                   const metrics = server.metrics;
-                  const isMetricsOpen = expandedMetricsId === server.id;
-
                   return (
-                    <Fragment key={server.id}>
-                      <tr>
+                      <tr key={server.id}>
                         <td>
                           <div
                             style={{
@@ -407,24 +394,6 @@ export default function ServersTable({
                               <Terminal size={12} />
                             </button>}
                             <button
-                              title={
-                                isMetricsOpen
-                                  ? "Hide resource monitor"
-                                  : "Open resource monitor"
-                              }
-                              onClick={() => void onToggleMetrics(server)}
-                              className="btn btn-ghost"
-                              style={{
-                                padding: "4px 8px",
-                                fontSize: 11,
-                                color: isMetricsOpen
-                                  ? "var(--accent-blue)"
-                                  : "var(--text-secondary)",
-                              }}
-                            >
-                              <Activity size={12} />
-                            </button>
-                            <button
                               title="More actions"
                               onClick={(event) =>
                                 handleMenuToggle(event, server.id)
@@ -484,6 +453,13 @@ export default function ServersTable({
                                   <Boxes size={12} /> Manage Docker
                                 </button>
                                 <button
+                                  onClick={() => onOpenServerGuard(server)}
+                                  className="btn btn-ghost"
+                                  style={{ fontSize: 12, justifyContent: "flex-start" }}
+                                >
+                                  <ShieldCheck size={12} /> Server Guard
+                                </button>
+                                <button
                                   onClick={() => onEdit(server)}
                                   className="btn btn-ghost"
                                   style={{
@@ -518,30 +494,6 @@ export default function ServersTable({
                           </div>
                         </td>
                       </tr>
-                      {isMetricsOpen ? (
-                        <tr>
-                          <td colSpan={11} style={{ padding: "0 16px 16px" }}>
-                            <div
-                              style={{
-                                borderRadius: 16,
-                                border: "1px solid var(--metrics-border)",
-                                background: "var(--metrics-shell)",
-                                padding: 18,
-                              }}
-                            >
-                              <ServerMetricsPanel
-                                server={server}
-                                history={metricsHistory[server.id] ?? []}
-                                loading={
-                                  metricsHistoryLoading[server.id] ?? false
-                                }
-                                error={metricsHistoryError[server.id] ?? null}
-                              />
-                            </div>
-                          </td>
-                        </tr>
-                      ) : null}
-                    </Fragment>
                   );
                 })}
               </tbody>

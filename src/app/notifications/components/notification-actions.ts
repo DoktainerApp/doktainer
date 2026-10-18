@@ -64,6 +64,18 @@ export const NOTIFICATION_ACTION_OPTIONS = [
     label: "Server Threshold",
     description: "Trigger the action when the server threshold is reached.",
   },
+  {
+    value: "server_guard_alert",
+    label: "Server Guard Alert",
+    description:
+      "Deliver a policy-qualified Server Guard recommendation for review.",
+  },
+  {
+    value: "server_guard_recovered",
+    label: "Server Guard Recovered",
+    description:
+      "Deliver recovery after a previous Server Guard alert was sent.",
+  },
 ] as const;
 
 const NOTIFICATION_ACTION_ALIASES: Record<string, string> = {

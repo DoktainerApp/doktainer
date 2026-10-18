@@ -8,6 +8,7 @@ import {
 import prisma from "../lib/prisma";
 import { decrypt, encrypt } from "../lib/crypto";
 import { redactDeploymentErrorDetails } from "./deployment-error.service";
+import { recordDeploymentIncident } from "./incident-timeline.service";
 import {
   assertDeploymentTransition,
   IN_PROGRESS_DEPLOYMENT_STATUSES,
@@ -204,7 +205,7 @@ export async function createDeployment(input: CreateDeploymentInput) {
     : null;
 
   try {
-    return await prisma.deployment.create({
+    const created = await prisma.deployment.create({
       data: {
         containerId: input.containerId,
         organizationId: input.organizationId,
@@ -245,6 +246,20 @@ export async function createDeployment(input: CreateDeploymentInput) {
         },
       },
     });
+
+    await recordDeploymentIncident({
+      organizationId: created.organizationId,
+      serverId: created.serverId,
+      containerId: created.containerId,
+      deploymentId: created.id,
+      status: created.status,
+      level: eventLevelForStatus(created.status),
+      message: defaultEventMessage(created.status),
+      occurredAt: created.createdAt,
+    }).catch((incidentError) => {
+      console.error("[Incident timeline] Failed to mirror deployment creation:", incidentError);
+    });
+    return created;
   } catch (error) {
     if (idempotencyKey && error instanceof Prisma.PrismaClientKnownRequestError) {
       if (error.code === "P2002") {
@@ -341,7 +356,7 @@ export async function updateDeployment(
     patch.eventMessage ?? defaultEventMessage(patch.status),
   );
 
-  return prisma.$transaction(async (tx) => {
+  const updatedDeployment = await prisma.$transaction(async (tx) => {
     const updated = await tx.deployment.updateMany({
       where: { id, status: current.status },
       data: {
@@ -407,6 +422,21 @@ export async function updateDeployment(
 
     return tx.deployment.findUniqueOrThrow({ where: { id } });
   });
+
+  await recordDeploymentIncident({
+    organizationId: updatedDeployment.organizationId,
+    serverId: updatedDeployment.serverId,
+    containerId: updatedDeployment.containerId,
+    deploymentId: updatedDeployment.id,
+    status: patch.status,
+    level: eventLevelForStatus(patch.status),
+    message: eventMessage,
+    metadata: patch.eventMetadata,
+  }).catch((incidentError) => {
+    console.error("[Incident timeline] Failed to mirror deployment update:", incidentError);
+  });
+
+  return updatedDeployment;
 }
 
 export async function appendDeploymentEvent(input: {
@@ -416,18 +446,50 @@ export async function appendDeploymentEvent(input: {
   message: string;
   metadata?: DeploymentSnapshot;
 }) {
-  return prisma.deploymentEvent.create({
-    data: {
-      deploymentId: input.deploymentId,
+  const level = input.level ?? eventLevelForStatus(input.status);
+  const message = sanitizeDeploymentEventMessage(input.message);
+  const metadata =
+    input.metadata === undefined
+      ? undefined
+      : sanitizeDeploymentSnapshot(input.metadata);
+  const [event, deployment] = await prisma.$transaction([
+    prisma.deploymentEvent.create({
+      data: {
+        deploymentId: input.deploymentId,
+        status: input.status,
+        level,
+        message,
+        metadata,
+      },
+    }),
+    prisma.deployment.findUnique({
+      where: { id: input.deploymentId },
+      select: {
+        id: true,
+        organizationId: true,
+        serverId: true,
+        containerId: true,
+      },
+    }),
+  ]);
+
+  if (deployment) {
+    await recordDeploymentIncident({
+      organizationId: deployment.organizationId,
+      serverId: deployment.serverId,
+      containerId: deployment.containerId,
+      deploymentId: deployment.id,
       status: input.status,
-      level: input.level ?? eventLevelForStatus(input.status),
-      message: sanitizeDeploymentEventMessage(input.message),
-      metadata:
-        input.metadata === undefined
-          ? undefined
-          : sanitizeDeploymentSnapshot(input.metadata),
-    },
-  });
+      level,
+      message,
+      metadata: input.metadata,
+      occurredAt: event.createdAt,
+    }).catch((incidentError) => {
+      console.error("[Incident timeline] Failed to mirror deployment event:", incidentError);
+    });
+  }
+
+  return event;
 }
 
 export async function listDeployments(input: {

@@ -2,6 +2,10 @@ import type { Server } from "@prisma/client";
 import prisma from "../lib/prisma";
 import { isDeploymentLockActive } from "./deployment-lock.service";
 import { IN_PROGRESS_DEPLOYMENT_STATUSES } from "./deployment-state-machine";
+import {
+  recordDeploymentIncident,
+  recordIncidentEvent,
+} from "./incident-timeline.service";
 
 const RUNTIME_CREATION_CLOCK_SKEW_MS = 5_000;
 const INTERRUPTED_REBUILD_ERROR =
@@ -149,5 +153,45 @@ export async function reconcileInterruptedRebuild(input: {
     return true;
   });
 
-  return recovered ? { deploymentId: deployment.id, status } : null;
+  if (!recovered) return null;
+
+  const message =
+    status === "SUCCESS"
+      ? "Interrupted rebuild reconciled from the running replacement runtime."
+      : "Interrupted rebuild could not be confirmed and was marked failed.";
+  await recordDeploymentIncident({
+    organizationId: input.container.server.organizationId,
+    serverId: input.container.server.id,
+    containerId: input.container.id,
+    deploymentId: deployment.id,
+    status,
+    level: status === "SUCCESS" ? "INFO" : "ERROR",
+    message,
+    occurredAt: now,
+  }).catch((incidentError) => {
+    console.error("[Incident timeline] Failed to mirror deployment recovery:", incidentError);
+  });
+  await recordIncidentEvent({
+    organizationId: input.container.server.organizationId,
+    serverId: input.container.server.id,
+    correlationId: deployment.id,
+    source: "RECOVERY",
+    type: "AUTOMATED_ACTION",
+    severity: status === "SUCCESS" ? "INFO" : "ERROR",
+    title: "Interrupted rebuild reconciliation completed",
+    message,
+    resourceType: "container",
+    resourceId: input.container.id,
+    metadata: {
+      deploymentId: deployment.id,
+      action: "interrupted-rebuild-reconciliation",
+      outcome: status.toLowerCase(),
+    },
+    occurredAt: now,
+    dedupe: { fingerprint: "interrupted-rebuild:" + deployment.id },
+  }).catch((incidentError) => {
+    console.error("[Incident timeline] Failed to record automated recovery:", incidentError);
+  });
+
+  return { deploymentId: deployment.id, status };
 }

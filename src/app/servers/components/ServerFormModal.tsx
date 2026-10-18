@@ -190,6 +190,14 @@ export default function ServerFormModal({
               />
             </div>
           </div>
+          {!isEdit ? (
+            <p style={{ color: "var(--text-muted)", fontSize: 12, lineHeight: 1.5 }}>
+              Background monitoring starts automatically after adding this server,
+              about every 5 minutes. It records server metrics and can detect
+              incidents without an open dashboard. You can pause it later from
+              Server Guard in the server actions menu.
+            </p>
+          ) : null}
           <div
             style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}
           >

@@ -1436,6 +1436,8 @@ export interface Server {
   tags: string[];
   containers: number;
   lastHealth: string | null;
+  runtimeCollectorEnabled: boolean;
+  runtimeCollectorIntervalSec: number;
   createdAt: string;
   metrics?: ServerMetric | null;
 }
@@ -1444,6 +1446,8 @@ export interface ServerMetric {
   id: string;
   serverId: string;
   cpuPct: number;
+  cpuCores?: number | null;
+  collectionSource?: "ON_DEMAND" | "BACKGROUND";
   ramPct: number;
   diskPct: number;
   ramUsed: string;
@@ -1458,8 +1462,319 @@ export interface ServerMetric {
   recordedAt: string;
 }
 
+export type IncidentSeverity = "INFO" | "WARNING" | "ERROR" | "CRITICAL";
+export type IncidentEventType =
+  | "DEPLOYMENT_LIFECYCLE"
+  | "HEALTH_TRANSITION"
+  | "RESTART_LOOP"
+  | "DOCKER_DAEMON_FAILURE"
+  | "RESOURCE_PRESSURE"
+  | "PROXY_ERROR"
+  | "ROLLBACK"
+  | "AUTOMATED_ACTION"
+  | "OPERATOR_ACTION"
+  | "PROBE_FAILURE";
+
+export interface IncidentEventRecord {
+  id: string;
+  organizationId: string;
+  serverId: string | null;
+  correlationId: string | null;
+  source:
+    | "DEPLOYMENT"
+    | "RUNTIME"
+    | "SERVER"
+    | "PROXY"
+    | "RECOVERY"
+    | "OPERATOR"
+    | "SYSTEM";
+  type: IncidentEventType;
+  severity: IncidentSeverity;
+  title: string;
+  message: string;
+  resourceType: string | null;
+  resourceId: string | null;
+  occurrenceCount: number;
+  metadata: Record<string, unknown> | null;
+  occurredAt: string;
+  lastOccurredAt: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type ServerGuardCheck =
+  | "CPU_PRESSURE"
+  | "MEMORY_PRESSURE"
+  | "DISK_PRESSURE"
+  | "INODE_PRESSURE"
+  | "DOCKER_DATA_ROOT_GROWTH"
+  | "CONTAINER_LOG_GROWTH"
+  | "SERVER_REACHABILITY"
+  | "SSH_AUTHENTICATION"
+  | "PROBE_TIMEOUT";
+
+export type ServerGuardRecommendationStatus =
+  | "PENDING_APPROVAL"
+  | "APPROVED"
+  | "REJECTED"
+  | "NO_APPROVAL_REQUIRED";
+
+export interface ServerGuardPolicy {
+  serverId: string;
+  mode: "DRY_RUN";
+  enabled: boolean;
+  minimumSeverity: IncidentSeverity;
+  cooldownMinutes: number;
+  requiresApproval: boolean;
+  excludedChecks: ServerGuardCheck[];
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export type ServerGuardPolicyUpdate = Pick<
+  ServerGuardPolicy,
+  | "enabled"
+  | "minimumSeverity"
+  | "cooldownMinutes"
+  | "requiresApproval"
+  | "excludedChecks"
+>;
+
+export interface ServerGuardRecommendation {
+  id: string;
+  organizationId: string;
+  serverId: string;
+  incidentEventId: string | null;
+  check: ServerGuardCheck;
+  severity: IncidentSeverity;
+  status: ServerGuardRecommendationStatus;
+  title: string;
+  summary: string;
+  recommendedAction: string;
+  evidence: Record<string, unknown>;
+  dryRunPreview: {
+    mode: "DRY_RUN";
+    executionAllowed: false;
+    steps: string[];
+  };
+  reviewedById: string | null;
+  reviewedAt: string | null;
+  reviewNote: string | null;
+  reviewedBy: { id: string; name: string } | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ServerGuardState {
+  policy: ServerGuardPolicy;
+  recommendations: ServerGuardRecommendation[];
+  collectorEnabled: boolean;
+  latestEvidence: {
+    id: string;
+    inodePct: number | null;
+    dockerDataRoot: string | null;
+    dockerDataRootBytes: string | null;
+    dockerLogBytes: string | null;
+    dockerLogContainerCount: number | null;
+    dockerLogAttributionTruncated: boolean;
+    containerLogs: Array<{
+      containerId: string;
+      containerName: string | null;
+      latestBytes: string;
+      baselineBytes: string | null;
+      growthBytes: string | null;
+    }>;
+    containerLogBaselineAt: string | null;
+    collectionErrors: string[];
+    recordedAt: string;
+  } | null;
+  latestCleanupPlan: ServerGuardCleanupPlan | null;
+}
+
+export interface DockerCleanupPreview {
+  sampledAt: string;
+  executionAllowed: false;
+  truncated: boolean;
+  summary: {
+    items: number;
+    candidates: number;
+    protected: number;
+    reviewRequired: number;
+    candidateBytes: string;
+    dockerReclaimableBytes: string | null;
+    volumeBytes: string;
+    sizedVolumes: number;
+    totalVolumes: number;
+  };
+  items: Array<{
+    type: "IMAGE" | "CONTAINER" | "VOLUME" | "BUILD_CACHE";
+    id: string;
+    name: string;
+    sizeBytes: string | null;
+    ageDays: number | null;
+    state: string;
+    ownership: "DOKTAINER" | "UNKNOWN";
+    ownershipSource:
+      | "MANAGED_CONTAINER_RECORD"
+      | "DOKTAINER_IMAGE_NAMESPACE"
+      | "DOKTAINER_VOLUME_LABEL"
+      | "MANAGED_CONTAINER_MOUNT"
+      | "MANAGED_CONTAINER_CONFIGURATION"
+      | "COMPOSE_METADATA"
+      | "NONE";
+    ownershipEvidence: string[];
+    sizeSource:
+      | "DOCKER_INSPECT"
+      | "DOCKER_USAGE_DATA"
+      | "FILESYSTEM_DU"
+      | "DOCKER_DISK_SUMMARY"
+      | "UNAVAILABLE";
+    decision: "CANDIDATE" | "PROTECTED" | "REVIEW_REQUIRED";
+    reason: string;
+  }>;
+  errors: string[];
+}
+
+export interface ServerGuardCleanupPlan {
+  id: string;
+  revision: string;
+  status:
+    | "READY"
+    | "VALIDATED"
+    | "STALE"
+    | "EXPIRED"
+    | "EXECUTING"
+    | "COMPLETED"
+    | "PARTIAL"
+    | "FAILED";
+  candidates: Array<{
+    action: "REMOVE_IMAGE";
+    resourceType: "IMAGE";
+    resourceId: string;
+    name: string;
+    expectedSizeBytes: string | null;
+    expectedState: string;
+    expectedOwnership: "DOKTAINER";
+  }>;
+  candidateCount: number;
+  candidateBytes: string;
+  sampledAt: string;
+  expiresAt: string;
+  lastValidatedAt: string | null;
+  validation: Record<string, unknown> | null;
+  executionAllowed: boolean;
+  attemptCount: number;
+  maximumAttempts: number;
+  circuitBreaker: "BLOCKED" | "ARMED" | "LOCKED" | "COMPLETED" | "OPEN";
+  executionStartedAt: string | null;
+  executionCompletedAt: string | null;
+  executionOutcome: Record<string, unknown> | null;
+  lastErrorCode: string | null;
+  recoveryGuidance: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ServerGuardCleanupPlanResponse {
+  success: boolean;
+  data: {
+    plan: ServerGuardCleanupPlan;
+    preview: DockerCleanupPreview;
+  };
+  actionExecuted: false;
+}
+
+export interface ServerGuardCleanupExecutionResponse {
+  success: boolean;
+  data: {
+    plan: ServerGuardCleanupPlan;
+    preview: DockerCleanupPreview | null;
+  };
+  actionExecuted: boolean;
+}
+
 export interface ServerDetails extends Omit<Server, "metrics"> {
   metrics: ServerMetric[];
+}
+
+export interface CpuInvestigationSnapshot {
+  sampledAt: string;
+  processes: Array<{ pid: number; name: string; cpuPercent: number; memoryPercent: number }>;
+  containers: Array<{ id: string; name: string; cpuPercent: number; memoryPercent: number }>;
+  restartLoops: Array<{ id: string; name: string; status: string }>;
+  processError: string | null;
+  containerError: string | null;
+  restartError: string | null;
+  containerFailure: "DOCKER_DAEMON_UNAVAILABLE" | "DOCKER_ACCESS_DENIED" | "PROBE_FAILED" | null;
+}
+
+export interface RuntimeInsightSnapshot {
+  sampledAt: string;
+  truncated: boolean;
+  summary: {
+    containers: number;
+    networks: number;
+    composeProjects: number;
+    findings: number;
+  };
+  containers: Array<{
+    id: string;
+    name: string;
+    image: string;
+    status: string;
+    health: string | null;
+    restartCount: number;
+    composeProject: string | null;
+    composeService: string | null;
+    networks: string[];
+    managedResource: {
+      containerId: string;
+      environmentId: string;
+      environmentName: string;
+      projectId: string;
+      projectName: string;
+    } | null;
+  }>;
+  networks: Array<{
+    name: string;
+    driver: string | null;
+    scope: string | null;
+    containers: string[];
+  }>;
+  dependencies: Array<{
+    from: string;
+    to: string;
+    relation:
+      | "DEPENDS_ON"
+      | "NETWORK_ATTACHMENT"
+      | "SHARED_NAMESPACE"
+      | "LEGACY_LINK";
+    confidence: "HIGH" | "MEDIUM";
+    evidence: string;
+  }>;
+  startup: Array<{
+    containerId: string;
+    containerName: string;
+    creationToCurrentStartMs: number | null;
+    healthReadyMs: number | null;
+    healthStatus: string | null;
+    restartCount: number;
+  }>;
+  findings: Array<{
+    id: string;
+    category: "STARTUP" | "PORT" | "CONFIG" | "COMPOSE" | "NETWORK";
+    severity: "INFO" | "WARNING" | "CRITICAL";
+    confidence: "HIGH" | "MEDIUM";
+    title: string;
+    summary: string;
+    evidence: string;
+    remediation: string;
+    resources: string[];
+  }>;
+  errors: {
+    containers: string | null;
+    networks: string | null;
+  };
 }
 
 export interface DockerRuntimeStatus {
@@ -1633,6 +1948,8 @@ export interface ServerCreateBody {
   password?: string;
   location?: string;
   tags?: string[];
+  runtimeCollectorEnabled?: boolean;
+  runtimeCollectorIntervalSec?: number;
 }
 
 export interface ServerDeleteBody {
@@ -1927,6 +2244,103 @@ export const servers = {
       `/servers/${id}/docker/reinstall`,
       {},
       { timeoutMs: 60000 },
+    ),
+  timeline: (
+    id: string,
+    params?: {
+      page?: number;
+      pageSize?: number;
+      severity?: IncidentSeverity;
+      type?: IncidentEventType;
+      correlationId?: string;
+      resourceType?: string;
+      resourceId?: string;
+      containerId?: string;
+      environmentId?: string;
+      since?: string;
+    },
+  ) => {
+    const qs = new URLSearchParams();
+    if (params?.page) qs.set("page", String(params.page));
+    if (params?.pageSize) qs.set("pageSize", String(params.pageSize));
+    if (params?.severity) qs.set("severity", params.severity);
+    if (params?.type) qs.set("type", params.type);
+    if (params?.correlationId) qs.set("correlationId", params.correlationId);
+    if (params?.resourceType) qs.set("resourceType", params.resourceType);
+    if (params?.resourceId) qs.set("resourceId", params.resourceId);
+    if (params?.containerId) qs.set("containerId", params.containerId);
+    if (params?.environmentId) qs.set("environmentId", params.environmentId);
+    if (params?.since) qs.set("since", params.since);
+    const query = qs.toString();
+
+    return get<{
+      success: boolean;
+      data: {
+        items: IncidentEventRecord[];
+        total: number;
+        page: number;
+        pageSize: number;
+      };
+    }>(`/servers/${id}/timeline${query ? `?${query}` : ""}`);
+  },
+  cpuInvestigation: (id: string) =>
+    get<{ success: boolean; data: CpuInvestigationSnapshot }>(
+      `/servers/${id}/cpu-investigation`,
+      { timeoutMs: 45000 },
+    ),
+  runtimeInsights: (id: string) =>
+    get<{ success: boolean; data: RuntimeInsightSnapshot }>(
+      "/servers/" + id + "/runtime-insights",
+      { timeoutMs: 45000 },
+    ),
+  guard: (id: string) =>
+    get<{ success: boolean; data: ServerGuardState }>(
+      `/servers/${id}/guard`,
+    ),
+  guardCleanupPreview: (id: string) =>
+    get<{ success: boolean; data: DockerCleanupPreview }>(
+      `/servers/${id}/guard/cleanup-preview`,
+      { timeoutMs: 45000 },
+    ),
+  createGuardCleanupPlan: (id: string) =>
+    post<ServerGuardCleanupPlanResponse>(
+      `/servers/${id}/guard/cleanup-plans`,
+      {},
+      { timeoutMs: 45000 },
+    ),
+  validateGuardCleanupPlan: (id: string, planId: string) =>
+    post<ServerGuardCleanupPlanResponse>(
+      `/servers/${id}/guard/cleanup-plans/${planId}/validate`,
+      {},
+      { timeoutMs: 45000 },
+    ),
+  executeGuardCleanupPlan: (
+    id: string,
+    planId: string,
+    body: { revision: string; confirmation: "REMOVE ELIGIBLE IMAGES" },
+  ) =>
+    post<ServerGuardCleanupExecutionResponse>(
+      `/servers/${id}/guard/cleanup-plans/${planId}/execute`,
+      body,
+      { timeoutMs: 120000 },
+    ),
+  updateGuardPolicy: (id: string, body: ServerGuardPolicyUpdate) =>
+    put<{ success: boolean; data: ServerGuardPolicy }>(
+      `/servers/${id}/guard/policy`,
+      body,
+    ),
+  reviewGuardRecommendation: (
+    id: string,
+    recommendationId: string,
+    body: { decision: "APPROVE" | "REJECT"; note?: string },
+  ) =>
+    post<{
+      success: boolean;
+      data: ServerGuardRecommendation;
+      actionExecuted: false;
+    }>(
+      `/servers/${id}/guard/recommendations/${recommendationId}/review`,
+      body,
     ),
   refreshMetrics: (id: string) =>
     post<{ success: boolean; data: ServerMetric }>(

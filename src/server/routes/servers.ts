@@ -2,6 +2,7 @@ import { FastifyInstance } from "fastify";
 import { z } from "zod";
 import prisma from "../lib/prisma";
 import { encrypt } from "../lib/crypto";
+import { getServerThresholdBreaches } from "../lib/server-metric-policy";
 import {
   authenticate,
   requireApiKeyPermission,
@@ -9,6 +10,12 @@ import {
 } from "../middleware/auth";
 import { auditLog } from "../services/audit.service";
 import { dispatchRuntimeNotification } from "../services/notification.service";
+import {
+  isDockerDaemonFailure,
+  listIncidentEvents,
+  recordIncidentEvent,
+  type RecordIncidentEventInput,
+} from "../services/incident-timeline.service";
 import {
   getAccessibleServer,
   getAccessibleServerFilterForOrganization,
@@ -30,6 +37,7 @@ function serializeMetric(
     id: string;
     serverId: string;
     cpuPct: number;
+    cpuCores?: number | null;
     ramPct: number;
     diskPct: number;
     ramUsed: bigint;
@@ -62,33 +70,7 @@ function serializeMetric(
   };
 }
 
-function getServerThresholdBreaches(metrics: {
-  cpuPct: number;
-  ramPct: number;
-  diskPct: number;
-}) {
-  const breaches: Array<{
-    metric: "cpu" | "ram" | "disk";
-    value: number;
-    threshold: number;
-  }> = [];
-
-  if (metrics.cpuPct > 80) {
-    breaches.push({ metric: "cpu", value: metrics.cpuPct, threshold: 80 });
-  }
-
-  if (metrics.ramPct > 90) {
-    breaches.push({ metric: "ram", value: metrics.ramPct, threshold: 90 });
-  }
-
-  if (metrics.diskPct > 80) {
-    breaches.push({ metric: "disk", value: metrics.diskPct, threshold: 80 });
-  }
-
-  return breaches;
-}
-
-const ServerCreateSchema = z.object({
+export const ServerCreateSchema = z.object({
   name: z.string().min(1).max(64),
   ip: z.union([z.ipv4(), z.ipv6()]),
   sshPort: z.number().int().min(1).max(65535).default(22),
@@ -98,12 +80,45 @@ const ServerCreateSchema = z.object({
   password: z.string().optional(),
   location: z.string().optional(),
   tags: z.array(z.string()).optional(),
+  runtimeCollectorEnabled: z.boolean().default(true),
+  runtimeCollectorIntervalSec: z.number().int().min(60).max(3600).default(300),
 });
 
-const ServerUpdateSchema = ServerCreateSchema.partial();
+export const ServerUpdateSchema = ServerCreateSchema.partial().extend({
+  sshPort: z.number().int().min(1).max(65535).optional(),
+  username: z.string().optional(),
+  runtimeCollectorEnabled: z.boolean().optional(),
+  runtimeCollectorIntervalSec: z.number().int().min(60).max(3600).optional(),
+});
 const ServerDeleteSchema = z.object({
   confirmation: z.literal("DELETE"),
 });
+const IncidentTimelineQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(25),
+  severity: z.enum(["INFO", "WARNING", "ERROR", "CRITICAL"]).optional(),
+  type: z
+    .enum([
+      "DEPLOYMENT_LIFECYCLE",
+      "HEALTH_TRANSITION",
+      "RESTART_LOOP",
+      "DOCKER_DAEMON_FAILURE",
+      "RESOURCE_PRESSURE",
+      "PROXY_ERROR",
+      "ROLLBACK",
+      "AUTOMATED_ACTION",
+      "OPERATOR_ACTION",
+      "PROBE_FAILURE",
+    ])
+    .optional(),
+  correlationId: z.string().trim().min(1).max(128).optional(),
+  resourceType: z.string().trim().min(1).max(64).optional(),
+  resourceId: z.string().trim().min(1).max(191).optional(),
+  containerId: z.string().trim().min(1).max(191).optional(),
+  environmentId: z.string().trim().min(1).max(191).optional(),
+  since: z.coerce.date().optional(),
+});
+
 const ServerResetSchema = z.object({
   confirmation: z.literal("DELETE"),
 });
@@ -320,6 +335,10 @@ export async function serverRoutes(app: FastifyInstance) {
     authenticate,
     requireApiKeyPermission("write:servers"),
   ];
+  const serverMetricsAccess = [
+    authenticate,
+    requireApiKeyPermission("read:metrics"),
+  ];
   const serverSystemAccountWriteAccess = [
     ...serverWriteAccess,
     requireRole("OPERATOR"),
@@ -358,6 +377,8 @@ export async function serverRoutes(app: FastifyInstance) {
       os: s.os,
       location: s.location,
       tags: s.tags,
+      runtimeCollectorEnabled: s.runtimeCollectorEnabled,
+      runtimeCollectorIntervalSec: s.runtimeCollectorIntervalSec,
       containers: s._count.containers,
       lastHealth: s.lastHealthAt,
       createdAt: s.createdAt,
@@ -405,6 +426,269 @@ export async function serverRoutes(app: FastifyInstance) {
       },
     });
   });
+
+  // Explicit read-only snapshot for investigating current CPU usage.
+  app.get(
+    "/:id/cpu-investigation",
+    { preHandler: [...serverReadAccess, requireApiKeyPermission("read:containers")] },
+    async (req, reply) => {
+      const { id } = req.params as { id: string };
+      const server = await getAccessibleServer(req.userId, id, req.organizationId);
+      if (!server) {
+        return reply.status(403).send({
+          success: false,
+          error: "Forbidden — you do not have access to this server",
+        });
+      }
+
+      const data = await ssh.collectCpuInvestigation(server);
+      if (req.organizationId) {
+        const occurredAt = new Date(data.sampledAt);
+        const incidentWrites: Array<Promise<unknown>> = [];
+        const failedProbes = [
+          data.processError ? "host-processes" : null,
+          data.containerError &&
+          data.containerFailure !== "DOCKER_DAEMON_UNAVAILABLE"
+            ? "docker-stats"
+            : null,
+          data.restartError &&
+          data.containerFailure !== "DOCKER_DAEMON_UNAVAILABLE"
+            ? "docker-restarts"
+            : null,
+        ].filter((probe): probe is string => Boolean(probe));
+
+        for (const probe of failedProbes) {
+          incidentWrites.push(
+            recordIncidentEvent({
+              organizationId: req.organizationId,
+              serverId: id,
+              source: "RUNTIME",
+              type: "PROBE_FAILURE",
+              severity: "WARNING",
+              title: "Runtime investigation probe unavailable",
+              message:
+                probe === "docker-stats"
+                  ? "Docker statistics could not be collected."
+                  : probe === "docker-restarts"
+                    ? "Docker restart status could not be collected."
+                    : "Host process statistics could not be collected.",
+              resourceType: "server",
+              resourceId: id,
+              metadata: { probe },
+              occurredAt,
+              dedupe: { fingerprint: "cpu-investigation:" + probe },
+            }),
+          );
+        }
+
+        if (data.containerFailure === "DOCKER_DAEMON_UNAVAILABLE") {
+          incidentWrites.push(
+            recordIncidentEvent({
+              organizationId: req.organizationId,
+              serverId: id,
+              source: "RUNTIME",
+              type: "DOCKER_DAEMON_FAILURE",
+              severity: "CRITICAL",
+              title: "Docker daemon unavailable",
+              message: "The Docker daemon could not serve runtime inspection requests.",
+              resourceType: "server",
+              resourceId: id,
+              metadata: { probe: "cpu-investigation" },
+              occurredAt,
+              dedupe: { fingerprint: "docker-daemon-unavailable" },
+            }),
+          );
+        }
+
+        for (const restartLoop of data.restartLoops) {
+          incidentWrites.push(
+            recordIncidentEvent({
+              organizationId: req.organizationId,
+              serverId: id,
+              source: "RUNTIME",
+              type: "RESTART_LOOP",
+              severity: "ERROR",
+              title: "Container restart loop detected",
+              message: `Container "${restartLoop.name}" is repeatedly restarting.`,
+              resourceType: "docker_container",
+              resourceId: restartLoop.id,
+              metadata: {
+                containerName: restartLoop.name,
+                runtimeStatus: restartLoop.status,
+              },
+              occurredAt,
+              dedupe: { fingerprint: "restart-loop:" + restartLoop.id },
+            }),
+          );
+        }
+
+        await Promise.all(
+          incidentWrites.map((write) =>
+            write.catch((incidentError) => {
+              req.log.warn(
+                { err: incidentError, serverId: id },
+                "Failed to persist incident timeline event",
+              );
+            }),
+          ),
+        );
+      }
+
+      return reply.send({ success: true, data });
+    },
+  );
+
+  // Read-only, bounded Docker facts converted into evidence-backed insights.
+  app.get(
+    "/:id/runtime-insights",
+    {
+      preHandler: [
+        ...serverReadAccess,
+        requireApiKeyPermission("read:containers"),
+      ],
+    },
+    async (req, reply) => {
+      const { id } = req.params as { id: string };
+      const server = await getAccessibleServer(
+        req.userId,
+        id,
+        req.organizationId,
+      );
+      if (!server) {
+        return reply.status(403).send({
+          success: false,
+          error: "Forbidden — you do not have access to this server",
+        });
+      }
+
+      const data = await ssh.collectRuntimeInsights(server);
+      const managedContainers =
+        data.containers.length === 0
+          ? []
+          : await prisma.container.findMany({
+              where: {
+                serverId: id,
+                OR: [
+                  { dockerId: { in: data.containers.map((item) => item.id) } },
+                  { name: { in: data.containers.map((item) => item.name) } },
+                ],
+              },
+              select: {
+                id: true,
+                dockerId: true,
+                name: true,
+                environment: {
+                  select: {
+                    id: true,
+                    name: true,
+                    project: { select: { id: true, name: true } },
+                  },
+                },
+              },
+            });
+      const managedByDockerId = new Map(
+        managedContainers
+          .filter((item) => item.dockerId)
+          .map((item) => [item.dockerId as string, item]),
+      );
+      const managedByName = new Map(
+        managedContainers.map((item) => [item.name, item]),
+      );
+      const enrichedData = {
+        ...data,
+        containers: data.containers.map((container) => {
+          const managed =
+            managedByDockerId.get(container.id) ??
+            managedByName.get(container.name) ??
+            null;
+          return {
+            ...container,
+            managedResource:
+              managed?.environment
+                ? {
+                    containerId: managed.id,
+                    environmentId: managed.environment.id,
+                    environmentName: managed.environment.name,
+                    projectId: managed.environment.project.id,
+                    projectName: managed.environment.project.name,
+                  }
+                : null,
+          };
+        }),
+      };
+      if (req.organizationId) {
+        const organizationId = req.organizationId;
+        const failedProbes = [
+          data.errors.containers ? "containers" : null,
+          data.errors.networks ? "networks" : null,
+        ].filter((probe): probe is string => Boolean(probe));
+
+        await Promise.all(
+          failedProbes.map((probe) =>
+            recordIncidentEvent({
+              organizationId,
+              serverId: id,
+              source: "RUNTIME",
+              type: "PROBE_FAILURE",
+              severity: "WARNING",
+              title: "Runtime insight probe unavailable",
+              message:
+                probe === "containers"
+                  ? "Container configuration facts could not be inspected."
+                  : "Docker network inventory could not be inspected.",
+              resourceType: "server",
+              resourceId: id,
+              metadata: { probe },
+              occurredAt: new Date(data.sampledAt),
+              dedupe: { fingerprint: "runtime-insights:" + probe },
+            }).catch((incidentError) => {
+              req.log.warn(
+                { err: incidentError, serverId: id, probe },
+                "Failed to persist runtime insight probe event",
+              );
+            }),
+          ),
+        );
+      }
+
+      return reply.send({ success: true, data: enrichedData });
+    },
+  );
+
+  // GET /servers/:id/timeline — bounded, persistent operational events.
+  app.get(
+    "/:id/timeline",
+    { preHandler: serverReadAccess },
+    async (req, reply) => {
+      const { id } = req.params as { id: string };
+      const query = IncidentTimelineQuerySchema.safeParse(req.query);
+      if (!query.success) {
+        return reply.status(400).send({
+          success: false,
+          error: query.error.flatten(),
+        });
+      }
+
+      const server = await getAccessibleServer(
+        req.userId,
+        id,
+        req.organizationId,
+      );
+      if (!server) {
+        return reply.status(403).send({
+          success: false,
+          error: "Forbidden — you do not have access to this server",
+        });
+      }
+
+      const data = await listIncidentEvents({
+        organizationId: req.organizationId!,
+        serverId: id,
+        ...query.data,
+      });
+      return reply.send({ success: true, data });
+    },
+  );
 
   // POST /servers — add new server
   app.post("/", { preHandler: serverWriteAccess }, async (req, reply) => {
@@ -575,8 +859,17 @@ export async function serverRoutes(app: FastifyInstance) {
         where: { serverId: id, organizationId: req.organizationId! },
         data: { serverId: null },
       });
+      await tx.incidentEvent.updateMany({
+        where: { serverId: id, organizationId: req.organizationId! },
+        data: { serverId: null },
+      });
       await tx.userServerAccess.deleteMany({ where: { serverId: id } });
       await tx.serverMetric.deleteMany({ where: { serverId: id } });
+      await tx.runtimeCollectorLease.deleteMany({ where: { serverId: id } });
+      await tx.serverGuardEvidenceSnapshot.deleteMany({ where: { serverId: id } });
+      await tx.serverGuardCleanupPlan.deleteMany({ where: { serverId: id } });
+      await tx.serverGuardRecommendation.deleteMany({ where: { serverId: id } });
+      await tx.serverGuardPolicy.deleteMany({ where: { serverId: id } });
       await tx.container.deleteMany({ where: { serverId: id } });
       await tx.environment.deleteMany({ where: { serverId: id } });
       await tx.network.deleteMany({ where: { serverId: id } });
@@ -704,6 +997,26 @@ export async function serverRoutes(app: FastifyInstance) {
           isolated: false,
           timeoutMs: 18000,
         });
+        if (req.organizationId && isDockerDaemonFailure(docker)) {
+          await recordIncidentEvent({
+            organizationId: req.organizationId,
+            serverId: id,
+            source: "RUNTIME",
+            type: "DOCKER_DAEMON_FAILURE",
+            severity: "CRITICAL",
+            title: "Docker daemon unavailable",
+            message: docker.reason || "The Docker daemon is not running.",
+            resourceType: "server",
+            resourceId: id,
+            metadata: { probe: "docker-runtime-status" },
+            dedupe: { fingerprint: "docker-daemon-unavailable" },
+          }).catch((incidentError) => {
+            req.log.warn(
+              { err: incidentError, serverId: id },
+              "Failed to persist incident timeline event",
+            );
+          });
+        }
         return reply.send({ success: true, data: docker });
       } catch (err: any) {
         const message = err?.message || "Failed to inspect Docker runtime";
@@ -1604,6 +1917,22 @@ export async function serverRoutes(app: FastifyInstance) {
           message: `Reboot initiated for \"${server.name}\"`,
         });
 
+        await recordIncidentEvent({
+          organizationId: req.organizationId!,
+          serverId: id,
+          source: "OPERATOR",
+          type: "OPERATOR_ACTION",
+          severity: "WARNING",
+          title: "Server reboot initiated",
+          message: "An operator initiated a server reboot.",
+          resourceType: "server",
+          resourceId: id,
+        }).catch((incidentError) => {
+          req.log.warn(
+            { err: incidentError, serverId: id },
+            "Failed to persist incident timeline event",
+          );
+        });
         return reply.send({
           success: true,
           message: `Reboot initiated for ${server.name}`,
@@ -1646,6 +1975,22 @@ export async function serverRoutes(app: FastifyInstance) {
           message: `Web server restart executed on \"${server.name}\"`,
         });
 
+        await recordIncidentEvent({
+          organizationId: req.organizationId!,
+          serverId: id,
+          source: "OPERATOR",
+          type: "OPERATOR_ACTION",
+          severity: "INFO",
+          title: "Nginx restart completed",
+          message: "An operator restarted the Nginx service.",
+          resourceType: "service",
+          resourceId: "nginx",
+        }).catch((incidentError) => {
+          req.log.warn(
+            { err: incidentError, serverId: id },
+            "Failed to persist incident timeline event",
+          );
+        });
         return reply.send({
           success: true,
           message: `Web server restarted on ${server.name}`,
@@ -1689,6 +2034,23 @@ export async function serverRoutes(app: FastifyInstance) {
           meta: { service },
         });
 
+        await recordIncidentEvent({
+          organizationId: req.organizationId!,
+          serverId: id,
+          source: "OPERATOR",
+          type: "OPERATOR_ACTION",
+          severity: "INFO",
+          title: "Managed service restart completed",
+          message: "An operator restarted managed service " + service + ".",
+          resourceType: "service",
+          resourceId: service,
+          metadata: { service },
+        }).catch((incidentError) => {
+          req.log.warn(
+            { err: incidentError, serverId: id, service },
+            "Failed to persist incident timeline event",
+          );
+        });
         return reply.send({
           success: true,
           message: `Service ${service} restarted on ${server.name}`,
@@ -2067,7 +2429,7 @@ export async function serverRoutes(app: FastifyInstance) {
   // POST /servers/:id/health — collect metrics
   app.post(
     "/:id/health",
-    { preHandler: serverWriteAccess },
+    { preHandler: serverMetricsAccess },
     async (req, reply) => {
       const { id } = req.params as { id: string };
       const server = await getAccessibleServer(
@@ -2091,17 +2453,107 @@ export async function serverRoutes(app: FastifyInstance) {
         const status =
           metrics.cpuPct > 90 || metrics.ramPct > 95 ? "WARNING" : "ONLINE";
 
-        await prisma.$transaction([
-          prisma.serverMetric.create({ data: { serverId: id, ...metricData } }),
+        const observedAt = new Date();
+        const [recordedMetric] = await prisma.$transaction([
+          prisma.serverMetric.create({
+            data: { serverId: id, ...metricData, recordedAt: observedAt },
+          }),
           prisma.server.update({
             where: { id },
             data: {
               status: status as any,
               os,
-              lastHealthAt: new Date(),
+              lastHealthAt: observedAt,
             },
           }),
         ]);
+        const serializedMetric = serializeMetric(recordedMetric);
+        if (!serializedMetric) {
+          throw new Error("Failed to serialize the recorded server metric");
+        }
+
+        if (req.organizationId) {
+          const incidentWrites: Array<Promise<unknown>> = [];
+          if (server.status !== status) {
+            incidentWrites.push(
+              recordIncidentEvent({
+                organizationId: req.organizationId,
+                serverId: id,
+                source: "SERVER",
+                type: "HEALTH_TRANSITION",
+                severity: status === "WARNING" ? "WARNING" : "INFO",
+                title: "Server health status changed",
+                message:
+                  "Server health changed from " +
+                  server.status.toLowerCase() +
+                  " to " +
+                  status.toLowerCase() +
+                  ".",
+                resourceType: "server",
+                resourceId: id,
+                metadata: {
+                  previousStatus: server.status,
+                  currentStatus: status,
+                },
+                occurredAt: observedAt,
+              }),
+            );
+          }
+
+          if (thresholdBreaches.length > 0) {
+            const fingerprint = thresholdBreaches
+              .map((breach) => breach.metric)
+              .sort()
+              .join(",");
+            incidentWrites.push(
+              recordIncidentEvent({
+                organizationId: req.organizationId,
+                serverId: id,
+                source: "SERVER",
+                type: "RESOURCE_PRESSURE",
+                severity:
+                  metrics.cpuPct >= 95 ||
+                  metrics.ramPct >= 97 ||
+                  metrics.diskPct >= 95
+                    ? "CRITICAL"
+                    : "WARNING",
+                title: "Server resource pressure detected",
+                message: thresholdBreaches
+                  .map(
+                    (breach) =>
+                      breach.metric.toUpperCase() +
+                      " reached " +
+                      breach.value.toFixed(1) +
+                      "% (threshold " +
+                      breach.threshold +
+                      "%).",
+                  )
+                  .join(" "),
+                resourceType: "server",
+                resourceId: id,
+                metadata: {
+                  breaches: thresholdBreaches,
+                  cpuPct: metrics.cpuPct,
+                  ramPct: metrics.ramPct,
+                  diskPct: metrics.diskPct,
+                },
+                occurredAt: observedAt,
+                dedupe: { fingerprint },
+              }),
+            );
+          }
+
+          await Promise.all(
+            incidentWrites.map((write) =>
+              write.catch((incidentError) => {
+                req.log.warn(
+                  { err: incidentError, serverId: id },
+                  "Failed to persist incident timeline event",
+                );
+              }),
+            ),
+          );
+        }
 
         if (req.organizationId && metrics.cpuPct > 80) {
           await dispatchRuntimeNotification({
@@ -2170,18 +2622,8 @@ export async function serverRoutes(app: FastifyInstance) {
         return reply.send({
           success: true,
           data: {
-            ...metrics,
-            ramUsed: metrics.ramUsed.toString(),
-            ramTotal: metrics.ramTotal.toString(),
-            diskUsed: metrics.diskUsed.toString(),
-            diskTotal: metrics.diskTotal.toString(),
-            networkRxBps: metrics.networkRxBps.toString(),
-            networkTxBps: metrics.networkTxBps.toString(),
-            networkMbps:
-              ((Number(metrics.networkRxBps) + Number(metrics.networkTxBps)) *
-                8) /
-                1_000_000 || null,
-            uptimeSec: metrics.uptimeSec.toString(),
+            ...serializedMetric,
+            os,
             uptime: ssh.formatUptime(metrics.uptimeSec),
             status,
           },
@@ -2200,6 +2642,55 @@ export async function serverRoutes(app: FastifyInstance) {
         }
 
         if (req.organizationId && !stillConnected) {
+          const observedAt = new Date();
+          const incidentInputs: RecordIncidentEventInput[] = [
+            {
+              organizationId: req.organizationId,
+              serverId: id,
+              source: "SERVER",
+              type: "PROBE_FAILURE",
+              severity: "CRITICAL",
+              title: "Server health probe failed",
+              message: errorMessage,
+              resourceType: "server",
+              resourceId: id,
+              occurredAt: observedAt,
+              dedupe: { fingerprint: "health-probe-unreachable" },
+            },
+          ];
+          if (server.status !== "OFFLINE") {
+            incidentInputs.push({
+              organizationId: req.organizationId,
+              serverId: id,
+              source: "SERVER",
+              type: "HEALTH_TRANSITION",
+              severity: "CRITICAL",
+              title: "Server health status changed",
+              message:
+                "Server health changed from " +
+                server.status.toLowerCase() +
+                " to offline.",
+              resourceType: "server",
+              resourceId: id,
+              metadata: {
+                previousStatus: server.status,
+                currentStatus: "OFFLINE",
+              },
+              occurredAt: observedAt,
+            });
+          }
+
+          await Promise.all(
+            incidentInputs.map((input) =>
+              recordIncidentEvent(input).catch((incidentError) => {
+                req.log.warn(
+                  { err: incidentError, serverId: id },
+                  "Failed to persist incident timeline event",
+                );
+              }),
+            ),
+          );
+
           await dispatchRuntimeNotification({
             organizationId: req.organizationId,
             action: "server_down",

@@ -1,6 +1,7 @@
 import type { UserRole } from "@/lib/api";
 import {
   Activity,
+  ChartLine,
   Bell,
   BookOpen,
   Boxes,
@@ -73,6 +74,12 @@ export const navigation: NavSection[] = [
         icon: Server,
         label: "Servers",
         keywords: ["hosts", "vps", "instances", "ssh"],
+      },
+      {
+        href: "/monitoring",
+        icon: ChartLine,
+        label: "Monitoring",
+        keywords: ["metrics", "cpu", "ram", "incident", "resources"],
       },
       {
         href: "/networks",

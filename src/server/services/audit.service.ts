@@ -1,6 +1,57 @@
 import prisma from "../lib/prisma";
 import { LogCategory, LogLevel } from "@prisma/client";
 
+export const AUDIT_LOG_RETENTION_DAYS = 180;
+export const AUDIT_LOG_RETENTION_BATCH_SIZE = 1000;
+const AUDIT_LOG_RETENTION_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
+let retentionInProgress = false;
+
+export function getAuditLogRetentionCutoff(now = new Date()): Date {
+  return new Date(now.getTime() - AUDIT_LOG_RETENTION_DAYS * 24 * 60 * 60 * 1000);
+}
+
+export async function runAuditLogRetentionCleanup(now = new Date()) {
+  if (retentionInProgress) return { skipped: true, deletedLogs: 0 };
+  retentionInProgress = true;
+
+  try {
+    const expired = await prisma.auditLog.findMany({
+      where: { createdAt: { lt: getAuditLogRetentionCutoff(now) } },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      take: AUDIT_LOG_RETENTION_BATCH_SIZE,
+      select: { id: true },
+    });
+    if (expired.length === 0) return { skipped: false, deletedLogs: 0 };
+
+    const deleted = await prisma.auditLog.deleteMany({
+      where: { id: { in: expired.map((log) => log.id) } },
+    });
+    return { skipped: false, deletedLogs: deleted.count };
+  } finally {
+    retentionInProgress = false;
+  }
+}
+
+export function startAuditLogRetentionScheduler() {
+  const runCleanup = async () => {
+    try {
+      const result = await runAuditLogRetentionCleanup();
+      if (result.deletedLogs > 0) {
+        console.info("[Audit retention] Deleted expired logs:", result.deletedLogs);
+      }
+    } catch (error) {
+      console.error("[Audit retention] Cleanup failed:", error);
+    }
+  };
+
+  const timer = setInterval(() => void runCleanup(), AUDIT_LOG_RETENTION_INTERVAL_MS);
+  timer.unref?.();
+  void runCleanup();
+
+  return () => clearInterval(timer);
+}
+
 interface LogEntry {
   userId?: string;
   organizationId?: string;

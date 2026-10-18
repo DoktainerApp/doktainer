@@ -10,16 +10,17 @@ import ServerConfigModal from "@/app/servers/components/ServerConfigModal";
 import WebServerManagerModal from "@/app/servers/components/WebServerManagerModal";
 import DockerManagerModal from "@/app/servers/components/DockerManagerModal";
 import ServerFormModal from "@/app/servers/components/ServerFormModal";
+import ServerGuardSettingsModal from "@/app/servers/components/ServerGuardSettingsModal";
 import ServersSummary from "@/app/servers/components/ServersSummary";
 import ServersTable from "@/app/servers/components/ServersTable";
 import ServersToolbar from "@/app/servers/components/ServersToolbar";
 import {
   type DockerRuntimeStatus,
   servers as serversApi,
-  type ServerMetric,
   type Server as ServerType,
   canViewServerConnection,
 } from "@/lib/api";
+import { SERVER_METRICS_REFRESH_INTERVAL_MS } from "@/lib/monitoring-policy";
 import { useTablePagination } from "@/lib/use-table-pagination";
 import { useToastManager } from "@/lib/use-toast-manager";
 
@@ -63,46 +64,9 @@ export default function ServersPage() {
     useState<ServerType | null>(null);
   const [dockerManagerServer, setDockerManagerServer] =
     useState<ServerType | null>(null);
-  const [expandedMetricsId, setExpandedMetricsId] = useState<string | null>(
-    null,
-  );
-  const [metricsHistory, setMetricsHistory] = useState<
-    Record<string, ServerMetric[]>
-  >({});
-  const [metricsHistoryLoading, setMetricsHistoryLoading] = useState<
-    Record<string, boolean>
-  >({});
-  const [metricsHistoryError, setMetricsHistoryError] = useState<
-    Record<string, string | null>
-  >({});
+  const [serverGuardServer, setServerGuardServer] = useState<ServerType | null>(null);
   const { toasts, pushToast, dismissToast } = useToastManager();
   const refreshAllMetricsInFlightRef = useRef(false);
-
-  const mergeMetricHistory = useCallback(
-    (serverId: string, metric: ServerMetric | null | undefined) => {
-      if (!metric) {
-        return;
-      }
-
-      setMetricsHistory((prev) => {
-        if (!prev[serverId]) {
-          return prev;
-        }
-
-        const deduped = prev[serverId].filter((item) => item.id !== metric.id);
-        const nextHistory = [...deduped, metric]
-          .sort(
-            (left, right) =>
-              new Date(left.recordedAt).getTime() -
-              new Date(right.recordedAt).getTime(),
-          )
-          .slice(-24);
-
-        return { ...prev, [serverId]: nextHistory };
-      });
-    },
-    [],
-  );
 
   const fetchDockerStatuses = useCallback(async (serverIds: string[]) => {
     if (serverIds.length === 0) {
@@ -206,7 +170,6 @@ export default function ServersPage() {
                   : server,
               ),
             );
-            mergeMetricHistory(id, res.data);
           } catch {
             // Ignore individual polling failures so the table keeps updating.
           }
@@ -215,14 +178,14 @@ export default function ServersPage() {
     } finally {
       refreshAllMetricsInFlightRef.current = false;
     }
-  }, [data, mergeMetricHistory]);
+  }, [data]);
 
   useEffect(() => {
     if (data.length === 0) return;
 
     const timer = window.setInterval(() => {
       void refreshAllMetrics();
-    }, 15000);
+    }, SERVER_METRICS_REFRESH_INTERVAL_MS);
 
     return () => window.clearInterval(timer);
   }, [data.length, refreshAllMetrics]);
@@ -234,22 +197,6 @@ export default function ServersPage() {
         data.find((server) => server.id === id)?.name ?? "Server";
       await serversApi.delete(id, { confirmation: "DELETE" });
       setData((prev) => prev.filter((server) => server.id !== id));
-      setExpandedMetricsId((current) => (current === id ? null : current));
-      setMetricsHistory((prev) => {
-        const next = { ...prev };
-        delete next[id];
-        return next;
-      });
-      setMetricsHistoryLoading((prev) => {
-        const next = { ...prev };
-        delete next[id];
-        return next;
-      });
-      setMetricsHistoryError((prev) => {
-        const next = { ...prev };
-        delete next[id];
-        return next;
-      });
       setDockerStates((prev) => {
         const next = { ...prev };
         delete next[id];
@@ -289,7 +236,6 @@ export default function ServersPage() {
           server.id === id ? { ...server, metrics: res.data } : server,
         ),
       );
-      mergeMetricHistory(id, res.data);
       await fetchDockerStatuses([id]);
     } catch {
       /* ignore */
@@ -320,48 +266,6 @@ export default function ServersPage() {
       setRefreshing((prev) => ({ ...prev, [`test_${id}`]: false }));
     }
   };
-
-  const handleToggleMetrics = useCallback(
-    async (server: ServerType) => {
-      setOpenMenuId(null);
-      setExpandedMetricsId((current) =>
-        current === server.id ? null : server.id,
-      );
-
-      if (metricsHistory[server.id] || metricsHistoryLoading[server.id]) {
-        return;
-      }
-
-      setMetricsHistoryLoading((prev) => ({ ...prev, [server.id]: true }));
-      setMetricsHistoryError((prev) => ({ ...prev, [server.id]: null }));
-
-      try {
-        const res = await serversApi.get(server.id);
-        const history = [...(res.data.metrics ?? [])].sort(
-          (left, right) =>
-            new Date(left.recordedAt).getTime() -
-            new Date(right.recordedAt).getTime(),
-        );
-
-        setMetricsHistory((prev) => ({
-          ...prev,
-          [server.id]: history,
-        }));
-      } catch (err: unknown) {
-        const message =
-          err instanceof Error ? err.message : "Failed to load metrics history";
-        setMetricsHistoryError((prev) => ({ ...prev, [server.id]: message }));
-        pushToast({
-          tone: "error",
-          title: "Resource Monitor",
-          message,
-        });
-      } finally {
-        setMetricsHistoryLoading((prev) => ({ ...prev, [server.id]: false }));
-      }
-    },
-    [metricsHistory, metricsHistoryLoading, pushToast],
-  );
 
   const filtered = data.filter((server) => {
     const matchesFilter = filter === "ALL" || server.status === filter;
@@ -676,6 +580,16 @@ export default function ServersPage() {
           }}
         />
       ) : null}
+      {serverGuardServer ? (
+        <ServerGuardSettingsModal
+          server={serverGuardServer}
+          onClose={() => setServerGuardServer(null)}
+          onSaved={(message) => {
+            pushToast({ tone: "success", message, showProgress: true });
+            void load();
+          }}
+        />
+      ) : null}
       <div
         className="animate-slide-in"
         style={{ display: "flex", flexDirection: "column", gap: 16 }}
@@ -704,10 +618,6 @@ export default function ServersPage() {
           refreshing={refreshing}
           deleting={deleting}
           openMenuId={openMenuId}
-          expandedMetricsId={expandedMetricsId}
-          metricsHistory={metricsHistory}
-          metricsHistoryLoading={metricsHistoryLoading}
-          metricsHistoryError={metricsHistoryError}
           onPageChange={pagination.setCurrentPage}
           onRefreshMetrics={handleRefreshMetrics}
           onTestConnection={handleTestConnection}
@@ -731,7 +641,10 @@ export default function ServersPage() {
             setDockerManagerServer(server);
             setOpenMenuId(null);
           }}
-          onToggleMetrics={handleToggleMetrics}
+          onOpenServerGuard={(server) => {
+            setServerGuardServer(server);
+            setOpenMenuId(null);
+          }}
           onEdit={(server) => {
             setEditingServer(server);
             setOpenMenuId(null);

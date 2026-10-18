@@ -1,12 +1,14 @@
 "use client";
 
 import { AlertTriangle, History, X } from "lucide-react";
+import IncidentTimelinePanel from "@/components/IncidentTimelinePanel";
 import type { DeploymentRecord } from "@/lib/api";
 
 interface DeploymentDetailsModalProps {
   deployment: DeploymentRecord | null;
   loading: boolean;
   error: string | null;
+  serverId: string | null;
   onClose: () => void;
 }
 
@@ -26,6 +28,7 @@ export default function DeploymentDetailsModal({
   deployment,
   loading,
   error,
+  serverId,
   onClose,
 }: DeploymentDetailsModalProps) {
   if (!deployment && !loading && !error) return null;
@@ -261,6 +264,24 @@ export default function DeploymentDetailsModal({
                   {JSON.stringify(deployment.configSnapshot ?? {}, null, 2)}
                 </pre>
               </section>
+
+              {serverId ? (
+                <section
+                  style={{
+                    minWidth: 0,
+                    paddingTop: 18,
+                    borderTop: "1px solid var(--border)",
+                  }}
+                >
+                  <IncidentTimelinePanel
+                    key={deployment.id}
+                    serverId={serverId}
+                    scopeLabel={`deployment ${deployment.version ?? deployment.id}`}
+                    correlationId={deployment.id}
+                    showFilters={false}
+                  />
+                </section>
+              ) : null}
             </>
           ) : null}
         </div>
@@ -268,5 +289,3 @@ export default function DeploymentDetailsModal({
     </div>
   );
 }
-
-

@@ -8,6 +8,7 @@ import {
   ContainerSourceType,
   ContainerStatus,
   RepositoryVisibility,
+  type Server,
 } from "@prisma/client";
 import { decrypt, encrypt } from "../lib/crypto";
 import {
@@ -1413,24 +1414,7 @@ async function persistDeploymentSourceMetadata(
 }
 
 async function syncContainersForServers(
-  servers: Array<{
-    id: string;
-    organizationId: string;
-    name: string;
-    ip: string;
-    sshPort: number;
-    username: string;
-    authType: "PASSWORD" | "SSH_KEY";
-    sshKeyEnc: string | null;
-    passwordEnc: string | null;
-    status: any;
-    os: string | null;
-    location: string | null;
-    tags: string[];
-    lastHealthAt: Date | null;
-    createdAt: Date;
-    updatedAt: Date;
-  }>,
+  servers: Server[],
   userId?: string,
   timingSink?: DockerCommandTimingSink,
 ) {

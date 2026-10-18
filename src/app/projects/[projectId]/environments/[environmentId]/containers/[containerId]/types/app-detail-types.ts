@@ -3,6 +3,7 @@ import type { LucideIcon } from "lucide-react";
 export type AppDetailTab =
   | "overview"
   | "deployments"
+  | "incidents"
   | "runtime"
   | "logs"
   | "terminal"
