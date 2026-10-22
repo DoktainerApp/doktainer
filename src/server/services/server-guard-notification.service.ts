@@ -19,8 +19,25 @@ export function buildServerGuardAlertMessage(
     Pick<ServerGuardRecommendation, "title" | "recommendedAction">
   >,
 ) {
-  const titles = recommendations.map((item) => item.title).join("; ");
-  return `${incident.message} Recommended review: ${titles}`;
+  const guidance = recommendations
+    .slice(0, 3)
+    .map((item) => `${item.title}: ${item.recommendedAction}`)
+    .join(" ");
+  const remaining = recommendations.length - 3;
+  return (
+    `${incident.message} Recommended action: ${guidance}` +
+    (remaining > 0
+      ? ` Review ${remaining} additional recommendation${remaining === 1 ? "" : "s"} in Doktainer.`
+      : "")
+  );
+}
+
+function readIncidentMetadata(incident: IncidentEvent) {
+  return incident.metadata &&
+    typeof incident.metadata === "object" &&
+    !Array.isArray(incident.metadata)
+    ? (incident.metadata as Record<string, unknown>)
+    : {};
 }
 
 export async function dispatchServerGuardNotification(input: {
@@ -34,6 +51,7 @@ export async function dispatchServerGuardNotification(input: {
   }
 
   if (recommendations.length > 0) {
+    const incidentMetadata = readIncidentMetadata(incident);
     return dispatchIncidentNotification({
       organizationId: incident.organizationId,
       serverId: incident.serverId,
@@ -47,6 +65,8 @@ export async function dispatchServerGuardNotification(input: {
         status: incident.severity,
         serverName,
         target: recommendations.map((item) => item.check),
+        breaches: incidentMetadata.breaches,
+        detectedAt: incident.occurredAt.toISOString(),
       },
     });
   }
@@ -63,6 +83,20 @@ export async function dispatchServerGuardNotification(input: {
     return { sent: 0, failed: 0, skipped: true };
   }
 
+  const incidentMetadata = readIncidentMetadata(incident);
+  const pressureRecovery =
+    incidentMetadata.transition === "resource-pressure-recovered";
+  const sourceIncidentId =
+    pressureRecovery && typeof incidentMetadata.sourceIncidentId === "string"
+      ? incidentMetadata.sourceIncidentId
+      : undefined;
+  const sourceIncidentIds =
+    pressureRecovery && Array.isArray(incidentMetadata.sourceIncidentIds)
+      ? incidentMetadata.sourceIncidentIds.filter(
+          (value): value is string => typeof value === "string",
+        )
+      : undefined;
+
   const since = new Date(
     incident.occurredAt.getTime() -
       SERVER_GUARD_RECOVERY_LOOKBACK_DAYS * 24 * 60 * 60 * 1000,
@@ -72,6 +106,8 @@ export async function dispatchServerGuardNotification(input: {
     serverId: incident.serverId,
     action: SERVER_GUARD_ALERT_ACTION,
     since,
+    incidentEventId: sourceIncidentId,
+    incidentEventIds: sourceIncidentIds,
   });
   if (!hadDeliveredAlert) {
     return { sent: 0, failed: 0, skipped: true };
@@ -82,14 +118,19 @@ export async function dispatchServerGuardNotification(input: {
     serverId: incident.serverId,
     incidentEventId: incident.id,
     action: SERVER_GUARD_RECOVERY_ACTION,
-    title: "Server Guard: background monitoring recovered",
+    title: pressureRecovery
+      ? `Server Guard: ${incident.title}`
+      : "Server Guard: background monitoring recovered",
     message: incident.message,
     resourceType: incident.resourceType ?? "server",
     resourceId: incident.resourceId ?? incident.serverId,
     metadata: {
       status: "RECOVERED",
       serverName,
-      target: "Background metrics collector",
+      target: pressureRecovery
+        ? `${String(incidentMetadata.metric ?? "resource").toUpperCase()} pressure`
+        : "Background metrics collector",
+      detectedAt: incident.occurredAt.toISOString(),
     },
   });
 }

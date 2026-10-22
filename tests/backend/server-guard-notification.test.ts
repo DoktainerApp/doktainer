@@ -34,6 +34,8 @@ test("Server Guard alert content contains recommendations without raw evidence",
   );
 
   assert.match(message, /Investigate sustained CPU pressure/);
+  assert.match(message, /Review CPU attribution/);
+  assert.match(message, /Recommended action/);
   assert.doesNotMatch(message, /token|private key|password/i);
 });
 

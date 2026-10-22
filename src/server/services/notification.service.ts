@@ -243,6 +243,7 @@ function buildNotificationFacts(input: {
 
   pushFact("Server", metadata.serverName);
   pushFact("IP", metadata.serverIp);
+  pushFact("Detected", metadata.detectedAt);
   pushFact("Backup", metadata.backupName);
   pushFact("Type", metadata.backupType);
   pushFact("Target", metadata.target);
@@ -265,9 +266,8 @@ function buildNotificationFacts(input: {
         const metric = formatMetadataValue(
           (entry as Record<string, unknown>).metric,
         );
-        const value = formatMetadataValue(
-          (entry as Record<string, unknown>).value,
-        );
+        const breach = entry as Record<string, unknown>;
+        const value = formatMetadataValue(breach.value ?? breach.latest);
         const threshold = formatMetadataValue(
           (entry as Record<string, unknown>).threshold,
         );
@@ -916,11 +916,18 @@ export async function hasDeliveredIncidentNotification(input: {
   serverId: string;
   action: string;
   since: Date;
+  incidentEventId?: string;
+  incidentEventIds?: string[];
 }) {
   const delivery = await prisma.incidentNotificationDelivery.findFirst({
     where: {
       organizationId: input.organizationId,
       serverId: input.serverId,
+      ...(input.incidentEventIds?.length
+        ? { incidentEventId: { in: input.incidentEventIds } }
+        : input.incidentEventId
+          ? { incidentEventId: input.incidentEventId }
+          : {}),
       action: normalizeRuntimeAction(input.action),
       status: IncidentNotificationDeliveryStatus.DELIVERED,
       deliveredAt: { gte: input.since },
