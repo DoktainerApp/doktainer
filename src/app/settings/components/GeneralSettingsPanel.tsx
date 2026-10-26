@@ -32,20 +32,23 @@ export default function GeneralSettingsPanel({
   return (
     <div
       className="card"
-      style={{ padding: 24, display: "flex", flexDirection: "column", gap: 20 }}
+      style={{ overflow: "hidden" }}
     >
-      <h2
+      <div
         style={{
-          fontSize: 15,
-          fontWeight: 700,
-          color: "var(--text-primary)",
-          marginBottom: 4,
+          padding: "18px 22px",
+          borderBottom: "1px solid var(--border)",
         }}
       >
-        General Settings
-      </h2>
+        <h2 style={{ fontSize: 15, fontWeight: 700, color: "var(--text-primary)" }}>
+          General settings
+        </h2>
+        <p style={{ marginTop: 5, fontSize: 12, color: "var(--text-muted)", lineHeight: 1.5 }}>
+          Control the panel display and how long inactive sessions remain open.
+        </p>
+      </div>
 
-      <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+      <div style={{ padding: 22, display: "flex", flexDirection: "column", gap: 22 }}>
         <div>
           <div
             style={{
@@ -54,7 +57,7 @@ export default function GeneralSettingsPanel({
               color: "var(--text-primary)",
             }}
           >
-            Panel Identity
+            Panel preferences
           </div>
           <div
             style={{
@@ -64,7 +67,7 @@ export default function GeneralSettingsPanel({
               lineHeight: 1.5,
             }}
           >
-            Name and workspace preferences
+            Your panel name is managed during installation. The remaining options apply to your current browser session.
           </div>
         </div>
 
@@ -86,6 +89,9 @@ export default function GeneralSettingsPanel({
                 updateGeneral("panelName", event.target.value)
               }
             />
+            <p style={{ marginTop: 6, fontSize: 12, color: "var(--text-muted)" }}>
+              This value is set during installation.
+            </p>
           </div>
           <div>
             <FieldLabel>Timezone</FieldLabel>
@@ -103,9 +109,8 @@ export default function GeneralSettingsPanel({
                 </option>
               ))}
             </select>
-            <p style={{ marginTop: 6, fontSize: 12, color: "var(--text-muted)" }}>
-              Activity extends the inactivity window. Every login still follows
-              the server&apos;s absolute session lifetime.
+            <p style={{ marginTop: 6, fontSize: 12, color: "var(--text-muted)", lineHeight: 1.5 }}>
+              Activity extends the inactivity window. Each login still follows the server&apos;s absolute session lifetime.
             </p>
           </div>
         </div>
@@ -136,11 +141,17 @@ export default function GeneralSettingsPanel({
                 </option>
               ))}
             </select>
+            <p style={{ marginTop: 6, fontSize: 12, color: "var(--text-muted)" }}>
+              End an inactive session after this period.
+            </p>
           </div>
         </div>
 
-        <div>
+        <div style={{ padding: 16, border: "1px solid var(--border)", borderRadius: 8, background: "var(--bg-input)" }}>
           <FieldLabel>Theme</FieldLabel>
+          <p style={{ marginBottom: 12, fontSize: 12, color: "var(--text-muted)" }}>
+            Choose how Doktainer appears on this device.
+          </p>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             {THEME_OPTIONS.map((theme) => {
               const active = settings.general.theme === theme;
@@ -169,15 +180,8 @@ export default function GeneralSettingsPanel({
             })}
           </div>
         </div>
+        <SettingsFooterActions saving={saving} resetting={resetting} activeTabLabel="General" onReset={onReset} onSave={onSave} />
       </div>
-
-      <SettingsFooterActions
-        saving={saving}
-        resetting={resetting}
-        activeTabLabel="General"
-        onReset={onReset}
-        onSave={onSave}
-      />
     </div>
   );
 }

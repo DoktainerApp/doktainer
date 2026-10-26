@@ -80,28 +80,25 @@ export default function SecuritySettingsPanel({
   return (
     <div
       className="card"
-      style={{ padding: 24, display: "flex", flexDirection: "column", gap: 20 }}
+      style={{ overflow: "hidden" }}
     >
-      <h2
+      <div
         style={{
-          fontSize: 15,
-          fontWeight: 700,
-          color: "var(--text-primary)",
-          marginBottom: 20,
+          padding: "18px 22px",
+          borderBottom: "1px solid var(--border)",
         }}
       >
-        Security Settings
-      </h2>
+        <h2 style={{ fontSize: 15, fontWeight: 700, color: "var(--text-primary)" }}>Security settings</h2>
+        <p style={{ marginTop: 5, fontSize: 12, color: "var(--text-muted)", lineHeight: 1.5 }}>Protect access to your panel and limit where it can be reached from.</p>
+      </div>
+      <div style={{ padding: 22, display: "flex", flexDirection: "column", gap: 20 }}>
       <div
         style={{
           display: "flex",
-          gap: 8,
+          gap: 4,
           flexWrap: "wrap",
-          padding: 6,
-          borderRadius: 12,
-          background: "var(--bg-input)",
-          border: "1px solid var(--border)",
-          alignSelf: "flex-start",
+          paddingBottom: 10,
+          borderBottom: "1px solid var(--border)",
         }}
       >
         {securitySections.map((section) => {
@@ -111,9 +108,10 @@ export default function SecuritySettingsPanel({
               key={section.id}
               type="button"
               onClick={() => setActiveSection(section.id)}
+              aria-current={active ? "page" : undefined}
               style={{
-                padding: "8px 14px",
-                borderRadius: 8,
+                padding: "7px 12px",
+                borderRadius: 4,
                 border: active
                   ? "1px solid rgba(37,99,235,0.24)"
                   : "1px solid transparent",
@@ -132,6 +130,10 @@ export default function SecuritySettingsPanel({
 
       {activeSection === "password" ? (
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <div>
+            <h3 style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)" }}>Change password</h3>
+            <p style={{ marginTop: 3, fontSize: 12, color: "var(--text-muted)" }}>Use a unique password with at least 8 characters.</p>
+          </div>
           <div>
             <FieldLabel>Current Password</FieldLabel>
             <input
@@ -456,6 +458,7 @@ export default function SecuritySettingsPanel({
           />
         </>
       ) : null}
+      </div>
     </div>
   );
 }

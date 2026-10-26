@@ -70,28 +70,33 @@ export default function DatabaseSettingsPanel({
           if (file) void restore(file);
         }}
       />
-      <section className="card" style={{ padding: 24 }}>
-      <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
-        <Database size={20} style={{ color: "#2563eb", marginTop: 2 }} />
+      <section className="card" style={{ overflow: "hidden" }}>
+      <div style={{ display: "flex", gap: 12, alignItems: "flex-start", padding: "18px 22px", borderBottom: "1px solid var(--border)" }}>
+        <Database size={18} style={{ color: "var(--accent-blue)", marginTop: 1 }} />
         <div>
-          <h2 style={{ fontSize: 16, fontWeight: 700, color: "var(--text-primary)" }}>Database backup & restore</h2>
-          <p style={{ fontSize: 13, color: "var(--text-muted)", marginTop: 6, lineHeight: 1.6 }}>
-            Export the internal Doktainer database as a PostgreSQL dump or restore it from a previous dump file.
+          <h2 style={{ fontSize: 15, fontWeight: 700, color: "var(--text-primary)" }}>Database backup and restore</h2>
+          <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 5, lineHeight: 1.5 }}>
+            Download a PostgreSQL backup, or restore the panel from a previous backup file.
           </p>
         </div>
       </div>
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 24 }}>
-        <button className="btn btn-primary" type="button" onClick={() => void download()} disabled={loading !== null}>
+      <div style={{ padding: 22, display: "flex", flexDirection: "column", gap: 14 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 16, padding: 16, border: "1px solid var(--border)", borderRadius: 8 }}>
+          <div><h3 style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)" }}>Create backup</h3><p style={{ marginTop: 3, fontSize: 12, color: "var(--text-muted)" }}>Save the current Doktainer database as a dump file.</p></div>
+          <button className="btn btn-primary" type="button" onClick={() => void download()} disabled={loading !== null}>
           {loading === "backup" ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
           Download backup
         </button>
-        <input ref={fileInput} type="file" accept=".dump,.backup,application/octet-stream" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) setRestoreFile(file); }} />
-        <button className="btn btn-ghost" type="button" onClick={() => fileInput.current?.click()} disabled={loading !== null}>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 16, padding: 16, border: "1px solid rgba(245,158,11,0.28)", borderRadius: 8, background: "rgba(245,158,11,0.06)" }}>
+          <div><h3 style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)" }}>Restore backup</h3><p style={{ marginTop: 3, fontSize: 12, color: "var(--text-muted)", lineHeight: 1.5 }}>This replaces the current database. Download a fresh backup first.</p></div>
+          <input ref={fileInput} type="file" accept=".dump,.backup,application/octet-stream" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) setRestoreFile(file); }} />
+          <button className="btn btn-ghost" type="button" onClick={() => fileInput.current?.click()} disabled={loading !== null}>
           {loading === "restore" ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
           Restore from dump
         </button>
       </div>
-      <p style={{ fontSize: 12, color: "#b45309", marginTop: 18 }}>Restoring will overwrite the current database data. Ensure you have downloaded the latest backup.</p>
+      </div>
       </section>
     </>
   );
