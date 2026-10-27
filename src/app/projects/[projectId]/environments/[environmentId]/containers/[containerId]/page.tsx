@@ -478,15 +478,15 @@ function createDeploymentOperationTimeline(
     {
       id: "prepare",
       label: `Preparing ${operationLabel.toLowerCase()}`,
-      progress: 10,
+      description: "Preparing the operation request.",
     },
     {
       id: operation,
       label: `Waiting for ${operationLabel.toLowerCase()}`,
-      progress: "Running",
+      description: "Waiting for the server job to finish. See Terminal Logs for details.",
     },
-    { id: "sync", label: "Refreshing container detail", progress: 85 },
-    { id: "complete", label: `${operationLabel} completed`, progress: 100 },
+    { id: "sync", label: "Refreshing container detail", description: "Reloading the latest container information." },
+    { id: "complete", label: `${operationLabel} completed` },
   ];
 
   return steps.map((step, index) => ({
@@ -1398,6 +1398,8 @@ export default function AppContainerDetailPage() {
       `[${operation}] Server ID: ${containerRecord.serverId}`,
     ];
     let latestTerminalLines = [...baseTerminalLines];
+    let operationStep = 0;
+    let jobWasCancelled = false;
 
     const updateProcessTerminal = (
       lines: string[],
@@ -1411,10 +1413,8 @@ export default function AppContainerDetailPage() {
     };
 
     openProcessLogs({
-      title: `${operationLabel} logs - ${containerRecord.name}`,
-      description: isRedeploy
-        ? "Runtime replacement from the stored current revision. No source fetch or image build is performed."
-        : "Source rebuild progress, inventory sync, and terminal-style output for this request.",
+      title: operationLabel,
+      description: containerRecord.name,
       imageUrl: "/assets/images/img-chibi-fixing.png",
       imageAlt: "Illustration of a character fixing something",
       timelineLogs: createDeploymentOperationTimeline(operation, 0),
@@ -1424,6 +1424,7 @@ export default function AppContainerDetailPage() {
     });
 
     try {
+      operationStep = 1;
       latestTerminalLines = [
         ...baseTerminalLines,
         `[${operation}] Creating backend ${operation} job`,
@@ -1455,28 +1456,30 @@ export default function AppContainerDetailPage() {
         },
       );
 
+      const requestCancel = () => {
+        const jobId = rebuildJobIdRef.current;
+        if (!jobId || rebuildCancelRequestedRef.current) return;
+        if (!window.confirm(`Request cancellation of ${operationLabel.toLowerCase()}? The server may need time to stop the job.`)) return;
+        rebuildCancelRequestedRef.current = true;
+        updateProcessLogs({
+          statusLabel: "Cancelling",
+          cancelAction: { label: "Cancel", loadingLabel: "Cancelling", isLoading: true, onClick: requestCancel },
+        });
+        void containersApi.cancelJob(jobId).catch((error: unknown) => {
+          if (rebuildJobIdRef.current !== jobId) return;
+          rebuildCancelRequestedRef.current = false;
+          const message = error instanceof Error ? error.message : "Cancellation request failed.";
+          updateProcessTerminal([...latestTerminalLines, `[error] ${message}`], {
+            statusLabel: "Cancellation request failed",
+            cancelAction: { label: "Cancel", loadingLabel: "Cancelling", onClick: requestCancel },
+          });
+        });
+      };
       updateProcessLogs({
         cancelAction: {
           label: "Cancel",
           loadingLabel: "Cancelling",
-          onClick: () => {
-            const jobId = rebuildJobIdRef.current;
-            if (!jobId || rebuildCancelRequestedRef.current) return;
-
-            rebuildCancelRequestedRef.current = true;
-            updateProcessLogs({
-              statusLabel: "Cancelling",
-              cancelAction: {
-                label: "Cancel",
-                loadingLabel: "Cancelling",
-                isLoading: true,
-                disabled: true,
-                onClick: () => undefined,
-              },
-            });
-
-            void containersApi.cancelJob(jobId).catch(() => undefined);
-          },
+          onClick: requestCancel,
         },
       });
 
@@ -1484,7 +1487,7 @@ export default function AppContainerDetailPage() {
         onLog: (entry) => {
           updateProcessTerminal([...latestTerminalLines, entry.message], {
             timelineLogs: createDeploymentOperationTimeline(operation, 1),
-            statusLabel: "Streaming",
+            statusLabel: rebuildCancelRequestedRef.current ? "Cancelling" : "Streaming",
           });
         },
         onStatus: (nextJob) => {
@@ -1510,9 +1513,11 @@ export default function AppContainerDetailPage() {
       }
 
       if (finalStatus === "cancelled") {
+        jobWasCancelled = true;
         throw new Error(finalError || `${operationLabel} cancelled`);
       }
 
+      operationStep = 2;
       updateProcessLogs({
         timelineLogs: createDeploymentOperationTimeline(operation, 2),
         terminalLogs: [
@@ -1546,15 +1551,15 @@ export default function AppContainerDetailPage() {
         operationError instanceof Error
           ? operationError.message
           : `${operationLabel} failed`;
-      setActionError(message);
+      setActionError(jobWasCancelled ? "" : message);
       updateProcessLogs({
-        timelineLogs: createFailedDeploymentOperationTimeline(operation, 1),
+        timelineLogs: createFailedDeploymentOperationTimeline(operation, operationStep).map((step, index) => jobWasCancelled && index === operationStep ? { ...step, status: "skipped" as const } : step),
         terminalLogs: [
-          ...baseTerminalLines,
-          `[${operation}] ${operationLabel} failed`,
+          ...latestTerminalLines,
+          `[${operation}] ${operationLabel} ${jobWasCancelled ? "cancelled" : "failed"}`,
           `[error] ${message}`,
         ],
-        statusLabel: "Failed",
+        statusLabel: jobWasCancelled ? "Cancelled" : "Failed",
       });
       updateProcessLogs({ cancelAction: undefined });
     } finally {

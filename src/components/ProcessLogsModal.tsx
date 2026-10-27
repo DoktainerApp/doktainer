@@ -3,6 +3,7 @@
 import {
   Check,
   Circle,
+  Copy,
   ImageIcon,
   Loader2,
   OctagonX,
@@ -19,7 +20,9 @@ import {
   useState,
 } from "react";
 import Image from "next/image";
+import ToastViewport from "@/components/ToastViewport";
 import { sanitizeLogText } from "@/lib/terminal-output";
+import { useToastManager } from "@/lib/use-toast-manager";
 
 export type ProcessLogStepStatus =
   | "pending"
@@ -83,15 +86,15 @@ const statusTone: Record<
 > = {
   success: {
     color: "#16a34a",
-    border: "rgba(22, 163, 74, 0.55)",
-    background: "rgba(34, 197, 94, 0.2)",
+    border: "#16a34a",
+    background: "#16a34a",
     icon: <Check size={13} strokeWidth={3} />,
   },
   running: {
-    color: "#16a34a",
-    border: "rgba(22, 163, 74, 0.55)",
-    background: "rgba(34, 197, 94, 0.18)",
-    icon: <Loader2 size={13} className="animate-spin" />,
+    color: "#2563eb",
+    border: "rgba(59, 130, 246, 0.65)",
+    background: "rgba(59, 130, 246, 0.13)",
+    icon: <Loader2 size={15} className="animate-spin" />,
   },
   pending: {
     color: "#8b949e",
@@ -112,14 +115,6 @@ const statusTone: Record<
     icon: <X size={13} strokeWidth={3} />,
   },
 };
-
-function formatProgress(progress: ProcessLogStep["progress"]) {
-  if (progress === undefined || progress === null || progress === "") {
-    return "";
-  }
-
-  return typeof progress === "number" ? `${progress}%` : progress;
-}
 
 export function useProcessLogsModal() {
   const [modalState, setModalState] = useState<ProcessLogsModalState | null>(
@@ -173,7 +168,15 @@ export default function ProcessLogsModal({
     null,
   );
   const terminalViewportRef = useRef<HTMLPreElement>(null);
+  const [autoScroll, setAutoScroll] = useState(true);
+  const [copied, setCopied] = useState(false);
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const { toasts, pushToast, dismissToast, clearToasts } = useToastManager();
   const activeTab = selectedTab ?? initialTab;
+
+  useEffect(() => () => {
+    if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+  }, []);
 
   const sanitizedTerminalLogs = useMemo(() => {
     const rawLogs = Array.isArray(terminalLogs)
@@ -184,43 +187,46 @@ export default function ProcessLogsModal({
   }, [terminalLogs]);
 
   useEffect(() => {
-    if (!open || activeTab !== "terminal") return;
+    if (!open || activeTab !== "terminal" || !autoScroll) return;
 
     const viewport = terminalViewportRef.current;
     if (!viewport) return;
 
     viewport.scrollTop = viewport.scrollHeight;
-  }, [activeTab, open, sanitizedTerminalLogs]);
+  }, [activeTab, autoScroll, open, sanitizedTerminalLogs]);
 
   const handleClose = useCallback(() => {
     setSelectedTab(null);
+    setAutoScroll(true);
+    setCopied(false);
+    if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+    clearToasts();
     onClose();
-  }, [onClose]);
+  }, [clearToasts, onClose]);
 
   if (!open) {
     return null;
   }
 
-  const latestActiveStep =
-    [...timelineLogs]
-      .reverse()
-      .find((step) => step.status === "running" || step.status === "success") ??
-    timelineLogs[0];
-  const progressLabel =
-    statusLabel ?? formatProgress(latestActiveStep?.progress);
-  const progressBarWidth =
-    typeof latestActiveStep?.progress === "number"
-      ? `${Math.min(Math.max(latestActiveStep.progress, 0), 100)}%`
-      : latestActiveStep?.status === "running"
-        ? "50%"
-        : "100%";
+  const currentStep = (statusLabel === "Cancelled" ? timelineLogs.find((step) => step.status === "skipped") : undefined) ??
+    timelineLogs.find((step) => step.status === "error") ??
+    timelineLogs.find((step) => step.status === "running") ??
+    [...timelineLogs].reverse().find((step) => step.status === "success");
+  const processStatus = currentStep?.status === "error" ? "Failed" :
+    currentStep?.status === "running" ? "In progress" :
+    currentStep?.status === "success" ? "Completed" : "Pending";
+  const statusColor = currentStep?.status === "error" ? "#dc2626" :
+    currentStep?.status === "running" ? "#2563eb" : "#16a34a";
 
   return (
     <div
       className="modal-overlay"
       onClick={closeOnOverlayClick ? handleClose : undefined}
     >
-      <div className="modal-shell" style={{ maxWidth: 620 }}>
+      <div onClick={(event) => event.stopPropagation()}>
+        <ToastViewport toasts={toasts} onClose={dismissToast} />
+      </div>
+      <div className="modal-shell" style={{ maxWidth: 640 }}>
         <div
           className="modal animate-slide-in"
           role="dialog"
@@ -228,7 +234,7 @@ export default function ProcessLogsModal({
           aria-labelledby="process-logs-modal-title"
           style={{
             width: "100%",
-            maxWidth: 620,
+            maxWidth: 640,
             padding: 0,
             overflow: "hidden",
             maxHeight: "92vh",
@@ -283,6 +289,13 @@ export default function ProcessLogsModal({
               >
                 {description}
               </p>
+              <div role="status" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12, marginTop: 10, fontSize: 12 }}>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 6, color: currentStep?.status === "running" ? "#15803d" : statusColor, background: currentStep?.status === "error" ? "rgba(239,68,68,0.12)" : "rgba(34,197,94,0.14)", borderRadius: 999, padding: "4px 10px", fontWeight: 700 }}>
+                  {currentStep?.status === "running" ? <Loader2 size={13} className="animate-spin" aria-hidden="true" /> : null}
+                  {statusLabel === "Cancelling" || statusLabel === "Cancelled" || statusLabel === "Cancellation request failed" ? statusLabel : processStatus}
+                </span>
+                {currentStep ? <span style={{ color: "var(--text-muted)", borderLeft: "1px solid var(--border)", paddingLeft: 12, overflowWrap: "anywhere" }}>{currentStep.label}</span> : null}
+              </div>
             </div>
           </div>
 
@@ -353,6 +366,7 @@ export default function ProcessLogsModal({
             type="button"
             className="btn btn-ghost"
             onClick={() => setSelectedTab("timeline")}
+            aria-pressed={activeTab === "timeline"}
             style={{
               minHeight: 34,
               justifyContent: "center",
@@ -374,6 +388,7 @@ export default function ProcessLogsModal({
             type="button"
             className="btn btn-ghost"
             onClick={() => setSelectedTab("terminal")}
+            aria-pressed={activeTab === "terminal"}
             style={{
               minHeight: 34,
               justifyContent: "center",
@@ -398,8 +413,8 @@ export default function ProcessLogsModal({
             <div style={{ display: "grid", gap: 22 }}>
               <div
                 style={{
-                  width: 144,
-                  height: 115,
+                  width: 120,
+                  height: 96,
                   border: "1px solid var(--border)",
                   borderRadius: 18,
                   margin: "0 auto",
@@ -429,30 +444,24 @@ export default function ProcessLogsModal({
                   ))}
               </div>
 
-              <div style={{ display: "grid", gap: 14 }}>
-                {timelineLogs.map((step) => {
+              <div style={{ display: "grid" }}>
+                {timelineLogs.map((step, index) => {
                   const status = step.status ?? "pending";
                   const tone = statusTone[status];
-                  const stepProgress = formatProgress(step.progress);
+                  const stepStatus = { pending: "Pending", running: "Running", success: "Completed", error: "Failed", skipped: "Skipped" }[status];
 
                   return (
                     <div
                       key={step.id}
                       style={{
-                        display: "grid",
-                        gridTemplateColumns: "minmax(0, 1fr) auto",
-                        alignItems: "center",
+                        position: "relative",
+                        display: "flex",
+                        alignItems: "flex-start",
                         gap: 14,
+                        paddingBottom: index === timelineLogs.length - 1 ? 0 : 20,
                       }}
                     >
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 10,
-                          minWidth: 0,
-                        }}
-                      >
+                      {index < timelineLogs.length - 1 ? <span aria-hidden="true" style={{ position: "absolute", left: 13, top: 27, bottom: 0, width: 1, background: "var(--border)" }} /> : null}
                         <span
                           aria-hidden="true"
                           style={{
@@ -462,7 +471,7 @@ export default function ProcessLogsModal({
                             display: "grid",
                             placeItems: "center",
                             flex: "0 0 auto",
-                            color: tone.color,
+                            color: status === "success" ? "#fff" : tone.color,
                             border: `1px solid ${tone.border}`,
                             background: tone.background,
                           }}
@@ -497,46 +506,38 @@ export default function ProcessLogsModal({
                             </span>
                           ) : null}
                         </span>
-                      </div>
-                      {stepProgress ? (
-                        <strong
-                          style={{
-                            color: tone.color,
-                            fontSize: 14,
-                            fontWeight: 750,
-                            whiteSpace: "nowrap",
-                          }}
-                        >
-                          {stepProgress}
-                        </strong>
-                      ) : null}
+                      <span style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clipPath: "inset(50%)" }}>{stepStatus}</span>
                     </div>
                   );
                 })}
               </div>
 
-              {progressLabel ? (
-                <div
-                  aria-label={`Current progress ${progressLabel}`}
-                  style={{
-                    height: 8,
-                    borderRadius: 999,
-                    background: "var(--bg-input)",
-                    overflow: "hidden",
-                  }}
-                >
-                  <div
-                    style={{
-                      width: progressBarWidth,
-                      height: "100%",
-                      borderRadius: 999,
-                      background: "#16a34a",
-                    }}
-                  />
-                </div>
-              ) : null}
             </div>
           ) : (
+            <div style={{ borderRadius: 12, overflow: "hidden", border: "1px solid rgba(148,163,184,0.2)", background: "#0d1117" }}>
+            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12, padding: "10px 14px", borderBottom: "1px solid rgba(148,163,184,0.2)", color: "#cbd5e1", fontSize: 12 }}>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 7, color: currentStep?.status === "running" ? "#4ade80" : "#cbd5e1", fontWeight: 700 }}><span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: "50%", background: currentStep?.status === "running" ? "#22c55e" : "#94a3b8" }} />{currentStep?.status === "running" ? "In progress" : "Process logs"}</span>
+              <span style={{ color: "#94a3b8", borderLeft: "1px solid #334155", paddingLeft: 12 }}>{currentStep?.status === "running" ? "Receiving process output" : "Process output"}</span>
+              <label style={{ display: "flex", alignItems: "center", gap: 7, marginLeft: "auto", cursor: "pointer" }}>
+                Auto-scroll <span className="process-log-toggle" style={{ position: "relative", display: "inline-flex", width: 34, height: 19, borderRadius: 999, background: autoScroll ? "#2563eb" : "#64748b", alignItems: "center", padding: 2 }}>
+                  <input type="checkbox" checked={autoScroll} onChange={(event) => setAutoScroll(event.target.checked)} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", margin: 0, opacity: 0, cursor: "pointer" }} />
+                  <span aria-hidden="true" style={{ width: 15, height: 15, borderRadius: "50%", background: "white", transform: autoScroll ? "translateX(15px)" : "none", pointerEvents: "none" }} />
+                </span>
+              </label>
+              <button type="button" className="btn btn-ghost process-log-copy" style={{ color: "#e6edf3", padding: "3px 6px 3px 12px", minHeight: 28, border: 0, borderLeft: "1px solid #334155", borderRadius: 0, background: "transparent" }} onClick={() => {
+                void (async () => {
+                  try {
+                    await navigator.clipboard.writeText(sanitizedTerminalLogs);
+                    setCopied(true);
+                    if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+                    copyTimerRef.current = setTimeout(() => setCopied(false), 1200);
+                    pushToast({ tone: "success", message: "Logs copied to clipboard." });
+                  } catch {
+                    pushToast({ tone: "error", message: "Could not copy logs to clipboard." });
+                  }
+                })();
+              }}>{copied ? <Check size={14} className="process-log-copy-check" /> : <Copy size={14} />} Copy logs</button>
+            </div>
             <pre
               ref={terminalViewportRef}
               className="terminal-text"
@@ -546,8 +547,7 @@ export default function ProcessLogsModal({
                 overflow: "auto",
                 margin: 0,
                 padding: 18,
-                borderRadius: 12,
-                border: "1px solid rgba(148,163,184,0.2)",
+                border: 0,
                 background: "#0d1117",
                 color: "#e6edf3",
                 lineHeight: 1.65,
@@ -555,8 +555,12 @@ export default function ProcessLogsModal({
                 wordBreak: "break-word",
               }}
             >
-              {sanitizedTerminalLogs}
+              {sanitizedTerminalLogs.split("\n").map((line, index) => {
+                const prefix = line.match(/^\[[^\]\n]+\]/)?.[0];
+                return <span key={index}>{prefix ? <><span style={{ color: "#60a5fa" }}>{prefix}</span>{line.slice(prefix.length)}</> : line}{"\n"}</span>;
+              })}
             </pre>
+            </div>
           )}
         </div>
         </div>
@@ -564,5 +568,3 @@ export default function ProcessLogsModal({
     </div>
   );
 }
-
-

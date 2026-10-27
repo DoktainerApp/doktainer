@@ -1568,3 +1568,32 @@ body {
   opacity: 1;
   transform: translateX(-50%) translateY(0);
 }
+.process-log-toggle:focus-within {
+  outline: 2px solid #93c5fd;
+  outline-offset: 2px;
+}
+
+.process-log-copy {
+  transition: transform 140ms ease, opacity 140ms ease;
+}
+
+.process-log-copy:active {
+  transform: scale(0.94);
+  opacity: 0.8;
+}
+
+.process-log-copy-check {
+  color: #4ade80;
+  animation: process-log-copy-confirm 220ms ease-out;
+}
+
+@keyframes process-log-copy-confirm {
+  from { transform: scale(0.65); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .process-log-copy { transition: none; }
+  .process-log-copy:active { transform: none; }
+  .process-log-copy-check { animation: none; }
+}
