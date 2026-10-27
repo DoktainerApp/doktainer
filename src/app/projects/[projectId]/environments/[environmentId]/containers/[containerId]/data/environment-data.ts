@@ -146,17 +146,8 @@ export function createEnvironmentData({
       {
         label: "Variables",
         value: String(variables.length),
-        subvalue: `${runtimeVariables.length} from Docker inspect`,
+        subvalue: `${runtimeVariables.length} additional keys from Docker inspect`,
         tone: variables.length > 0 ? "blue" : "amber",
-      },
-      {
-        label: "Required",
-        value:
-          required.length > 0
-            ? `${required.length - missingRequired.length}/${required.length}`
-            : "0/0",
-        subvalue: "Required values detected",
-        tone: missingRequired.length > 0 ? "amber" : "green",
       },
       {
         label: "Environment",
@@ -165,10 +156,10 @@ export function createEnvironmentData({
         tone: "cyan",
       },
       {
-        label: "Secret Hygiene",
-        value: secrets.length > 0 ? "Masked" : "None",
-        subvalue: `${secrets.length} sensitive key(s) detected`,
-        tone: secrets.length > 0 ? "purple" : "amber",
+        label: "Sensitive key names",
+        value: String(secrets.length),
+        subvalue: "Matched by key name; not a security check",
+        tone: "purple",
       },
     ],
     variables,
@@ -222,12 +213,12 @@ export function createEnvironmentData({
           description: "Each non-empty line follows KEY=value format.",
         },
         {
-          label: "Secret placeholders",
-          status: secrets.length > 0 ? "Warning" : "Ready",
+          label: "Environment values",
+          status: !projectEnv?.found && secrets.length > 0 ? "Warning" : "Ready",
           description:
             !projectEnv?.found && secrets.length > 0
               ? "Masked secrets are placeholders and must be replaced before saving."
-              : "Project .env content is shown as stored on the server.",
+              : "A found .env file is shown as stored. Runtime values are masked only when their key name matches a sensitive pattern.",
         },
         {
           label: "Apply strategy",

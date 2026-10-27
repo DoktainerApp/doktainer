@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import {
   containers as containersApi,
   Container,
@@ -21,12 +21,16 @@ import {
   DomainConfigMode,
   PortOption,
 } from "./domain-types";
-import { isIpv4WithPort, parseInspectPortOptions } from "./domain-utils";
+import {
+  isIpv4WithPort,
+  parseInspectPortOptions,
+} from "./domain-utils";
 
 interface AddDomainModalProps {
   serverList: Server[];
   existingDomains: Domain[];
   domainToEdit?: Domain | null;
+  initialTarget?: { serverId: string; containerId: string };
   onClose: () => void;
   onSaved: (
     domainName: string,
@@ -40,26 +44,29 @@ export default function AddDomainModal({
   serverList,
   existingDomains,
   domainToEdit,
+  initialTarget,
   onClose,
   onSaved,
 }: AddDomainModalProps) {
-  const buildInitialForm = (domain?: Domain | null): AddDomainFormState => ({
+  const isContainerContext = Boolean(initialTarget);
+  const buildInitialForm = useCallback((domain?: Domain | null): AddDomainFormState => ({
     name: domain?.name ?? "",
     type: domain?.type ?? "A",
     value: domain?.value ?? "",
-    serverId: domain?.serverId ?? "",
-    targetContainerId: domain?.targetContainerId ?? "",
+    serverId: domain?.serverId ?? initialTarget?.serverId ?? "",
+    targetContainerId: domain?.targetContainerId ?? initialTarget?.containerId ?? "",
     targetPort: domain?.targetPort ?? "",
     proxy: domain?.proxy ?? "NONE",
     proxyConfigMode: domain?.configMode ?? "ISOLATED",
     isPrimary: domain?.isPrimary ?? false,
     sslEnabled: domain?.sslEnabled ?? false,
     autoRenew: domain?.autoRenew ?? true,
-  });
+  }), [initialTarget?.serverId, initialTarget?.containerId]);
 
-  const detectInitialConfigMode = (
+  const detectInitialConfigMode = useCallback((
     domain?: Domain | null,
   ): DomainConfigMode => {
+    if (isContainerContext) return "CONTAINER";
     if (
       domain &&
       (domain.targetContainerId != null || domain.targetPort != null)
@@ -68,7 +75,7 @@ export default function AddDomainModal({
     }
 
     return "MANUAL";
-  };
+  }, [isContainerContext]);
 
   const isEditMode = Boolean(domainToEdit);
   const [form, setForm] = useState<AddDomainFormState>({
@@ -155,7 +162,7 @@ export default function AddDomainModal({
     setConfigMode(detectInitialConfigMode(domainToEdit));
     setError("");
     setLoading(false);
-  }, [domainToEdit]);
+  }, [domainToEdit, buildInitialForm, detectInitialConfigMode]);
 
   const updateForm = (updates: Partial<AddDomainFormState>) => {
     setForm((current) => ({
@@ -205,6 +212,7 @@ export default function AddDomainModal({
     setProxyCapabilityError("");
 
     const containersRequest = containersApi.list({ serverId: form.serverId });
+
     void Promise.all([
       serversApi.getDomainProxyCapability(form.serverId),
       containersRequest,
@@ -215,7 +223,15 @@ export default function AddDomainModal({
         }
 
         const proxies: DomainProxy[] = ["NONE"];
-        if (containersRes.data.some((container) => `${container.name} ${container.image}`.toLowerCase().includes("traefik"))) proxies.push("TRAEFIK");
+        if (
+          containersRes.data.some((container) =>
+            `${container.name} ${container.image}`
+              .toLowerCase()
+              .includes("traefik"),
+          )
+        ) {
+          proxies.push("TRAEFIK");
+        }
         if (capabilityRes.data.nginx) proxies.push("NGINX");
         if (capabilityRes.data.caddy) proxies.push("CADDY");
         const hasCertbot = capabilityRes.data.certbot;
@@ -252,13 +268,23 @@ export default function AddDomainModal({
 
     void containersRequest
       .then((containersRes) => {
-        if (!cancelled) setServerContainers(containersRes.data.filter((container) => container.status === "RUNNING"));
+        if (cancelled) {
+          return;
+        }
+
+        setServerContainers(
+          containersRes.data.filter((container) => container.status === "RUNNING"),
+        );
       })
       .catch(() => {
-        if (!cancelled) setServerContainers([]);
+        if (!cancelled) {
+          setServerContainers([]);
+        }
       })
       .finally(() => {
-        if (!cancelled) setServerContainersLoading(false);
+        if (!cancelled) {
+          setServerContainersLoading(false);
+        }
       });
 
     return () => {
@@ -298,7 +324,7 @@ export default function AddDomainModal({
             (option) => option.value === current.targetPort,
           )
             ? current.targetPort
-            : (nextPortOptions[0]?.value ?? ""),
+            : isContainerContext ? "" : (nextPortOptions[0]?.value ?? ""),
         }));
       })
       .catch(() => {
@@ -318,7 +344,7 @@ export default function AddDomainModal({
     return () => {
       cancelled = true;
     };
-  }, [form.targetContainerId]);
+  }, [form.targetContainerId, isContainerContext]);
 
   const toggle = (key: "sslEnabled" | "autoRenew") => {
     setForm((current) => {
@@ -372,6 +398,11 @@ export default function AddDomainModal({
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError("");
+
+    if (initialTarget && (serverContainersLoading || !serverContainers.some((container) => container.id === initialTarget.containerId))) {
+      setError("The target container is unavailable or not running. Reload and try again.");
+      return;
+    }
 
     const effectiveType = isContainerMode ? "A" : form.type;
     const effectiveValue = isContainerMode
@@ -545,10 +576,10 @@ export default function AddDomainModal({
           onSubmit={submit}
           style={{ display: "flex", flexDirection: "column", gap: 14 }}
         >
-          <AddDomainModeSelector
+          {!initialTarget ? <AddDomainModeSelector
             configMode={configMode}
             onChange={switchConfigMode}
-          />
+          /> : null}
 
           <div
             style={{
@@ -593,6 +624,7 @@ export default function AddDomainModal({
             <select
               className="input"
               value={form.serverId}
+              disabled={Boolean(initialTarget)}
               onChange={(event) =>
                 updateForm({
                   serverId: event.target.value,
@@ -636,6 +668,7 @@ export default function AddDomainModal({
               containerInspectLoading={containerInspectLoading}
               selectableProxies={selectableProxies}
               targetingEnabled={targetingEnabled}
+              lockContainer={Boolean(initialTarget)}
               allowSharedTargetReuse={
                 isContainerMode &&
                 form.proxy === "NGINX" &&
@@ -696,7 +729,7 @@ export default function AddDomainModal({
                   }}
                 >
                   {form.proxyConfigMode === "SHARED"
-                    ? "Shared mode groups the root domain and its subdomains into one root-domain Nginx file, for example /etc/nginx/sites-available/example.com.conf. Each hostname can still point to a different container and port."
+                    ? "Shared mode groups exact hostnames that use the same container and port on the same server into one Nginx service configuration."
                     : "Isolated mode means exactly one domain per Nginx file, for example /etc/nginx/sites-available/app.example.com.conf. Domain lain seperti api.example.com atau admin.example.com tidak otomatis ikut masuk ke file ini dan harus dibuat sendiri, atau dipindah ke Shared mode jika memang ingin satu config bersama."}
                 </p>
               </div>

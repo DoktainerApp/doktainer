@@ -1,6 +1,5 @@
 import type { Container, ContainerDetails } from "@/lib/api";
 import type {
-  RuntimeMount,
   RuntimePortBinding,
   RuntimeProcess,
   RuntimeTabData,
@@ -20,10 +19,6 @@ function getRecord(value: unknown, key: string): JsonRecord | null {
 
 function getString(value: unknown, fallback = "-") {
   return typeof value === "string" && value.trim() ? value : fallback;
-}
-
-function getBoolean(value: unknown) {
-  return typeof value === "boolean" ? value : null;
 }
 
 function formatCommand(value: unknown) {
@@ -92,18 +87,6 @@ function buildPortsFromInspect(inspect: JsonRecord): RuntimePortBinding[] {
   });
 }
 
-function buildMountsFromInspect(inspect: JsonRecord): RuntimeMount[] {
-  const mounts = inspect.Mounts;
-  if (!Array.isArray(mounts)) return [];
-
-  return mounts.filter(isRecord).map((mount) => ({
-    source: getString(mount.Source, getString(mount.Name)),
-    target: getString(mount.Destination),
-    type: getString(mount.Type, "Volume"),
-    access: getBoolean(mount.RW) === false ? "Read only" : "Read / Write",
-  }));
-}
-
 function buildProcesses(detail: ContainerDetails | null): RuntimeProcess[] {
   if (!detail?.processes.length) return [];
 
@@ -119,7 +102,7 @@ function buildProcesses(detail: ContainerDetails | null): RuntimeProcess[] {
 function buildHealthStatus(detail: ContainerDetails | null) {
   const state = getRecord(detail?.inspect, "State");
   const health = getRecord(state, "Health");
-  return getString(health?.Status, detail ? "available" : "unavailable");
+  return getString(health?.Status, Object.keys(isRecord(detail?.inspect) ? detail.inspect : {}).length ? "No health status reported" : "Inspect unavailable");
 }
 
 export function createRuntimeData(
@@ -137,40 +120,15 @@ export function createRuntimeData(
     portsFromInspect.length > 0
       ? portsFromInspect
       : container.ports.map(extractPortPair);
-  const mounts = buildMountsFromInspect(inspect);
   const processes = buildProcesses(detail);
 
   return {
-    summaries: [
-      {
-        label: "Runtime Engine",
-        value: "Docker",
-        subvalue: `Server: ${detail?.server.name ?? container.server?.name ?? "-"}`,
-        tone: "blue",
-      },
-      {
-        label: "Network Mode",
-        value: getString(hostConfig?.NetworkMode, "bridge"),
-        subvalue: "Container network namespace",
-        tone: "cyan",
-      },
-      {
-        label: "Restart Policy",
-        value: getString(restartPolicy?.Name, container.restartPolicy || "-"),
-        subvalue: "Docker restart behavior",
-        tone: "green",
-      },
-      {
-        label: "Runtime State",
-        value: getString(state?.Status, container.status).toUpperCase(),
-        subvalue:
-          detail && container.status === "RUNNING"
-            ? "Runtime detail loaded"
-            : "Runtime detail unavailable",
-        tone: container.status === "RUNNING" ? "green" : "amber",
-      },
-    ],
     configuration: [
+      { label: "Docker Inspect Data", value: Object.keys(inspect).length > 0 ? "Available" : "Unavailable" },
+      { label: "Runtime Engine", value: "Docker" },
+      { label: "Network Mode", value: getString(hostConfig?.NetworkMode, "Unavailable") },
+      { label: "Restart Policy", value: getString(restartPolicy?.Name, container.restartPolicy || "-") },
+      { label: "Docker State", value: getString(state?.Status, "Unavailable") },
       { label: "Container ID", value: container.dockerId ?? container.id },
       { label: "Image", value: container.image },
       { label: "Entrypoint", value: formatCommand(config?.Entrypoint) },
@@ -180,51 +138,7 @@ export function createRuntimeData(
       { label: "Server IP", value: detail?.server.ip ?? container.server?.ip ?? "-" },
     ],
     ports,
-    mounts,
     processes,
-    healthChecks: [
-      {
-        name: "Docker health",
-        status: healthStatus,
-        interval: "From image config",
-        lastRun: detail ? "Loaded just now" : "Unavailable",
-      },
-      {
-        name: "Container state",
-        status: getString(state?.Status, container.status),
-        interval: "On refresh",
-        lastRun: detail ? "Loaded just now" : "Unavailable",
-      },
-      {
-        name: "Process table",
-        status: processes.length > 0 ? "Available" : "No processes",
-        interval: "On refresh",
-        lastRun: detail ? "Loaded just now" : "Unavailable",
-      },
-    ],
-    events: [
-      {
-        time: "now",
-        message: detail
-          ? "Runtime inspect data loaded from Docker"
-          : "Runtime inspect data is unavailable for this container",
-        tone: detail ? "success" : "warning",
-      },
-      {
-        time: "now",
-        message: `${ports.length} port binding(s) detected`,
-        tone: "info",
-      },
-      {
-        time: "now",
-        message: `${mounts.length} mount(s) detected`,
-        tone: "info",
-      },
-      {
-        time: "now",
-        message: `${processes.length} process(es) detected`,
-        tone: processes.length > 0 ? "success" : "warning",
-      },
-    ],
+    healthStatus,
   };
 }

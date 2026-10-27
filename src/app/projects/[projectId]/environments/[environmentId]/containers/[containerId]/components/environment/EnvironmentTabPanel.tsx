@@ -4,13 +4,11 @@ import { useEffect, useMemo, useState } from "react";
 import { useTablePagination } from "@/lib/use-table-pagination";
 import { canViewEnvironmentValues } from "@/lib/api";
 import {
-  CheckCircle2,
   ClipboardCheck,
   Loader2,
   FileWarning,
   RotateCcw,
   Save,
-  ShieldAlert,
 } from "lucide-react";
 import type {
   EnvironmentCheck,
@@ -229,15 +227,12 @@ export default function EnvironmentTabPanel({
       </div> */}
 
       <PanelShell title="Project .env Editor">
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns:
-              "minmax(min(620px, 100%), 1.35fr) minmax(min(320px, 100%), 0.65fr)",
-            gap: 12,
-            alignItems: "start",
-          }}
-        >
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, minWidth: 0 }}>
+          {!isViewer && environment.editor.found ? (
+            <div style={{ color: "var(--text-muted)", fontSize: 12, overflowWrap: "anywhere" }}>
+              {environment.editor.source === "container" ? "Container file" : "Project file"}: {environment.editor.path ?? "Path unavailable"}. Values are shown as stored and may include secrets.
+            </div>
+          ) : null}
           <div>
             {editorDisabled ? (
               <div
@@ -281,6 +276,7 @@ export default function EnvironmentTabPanel({
               </div>
             ) : (
               <textarea
+                aria-label="Project environment file contents"
                 value={editorContent}
                 onChange={(event) => {
                   setEditorDraft({
@@ -303,7 +299,6 @@ export default function EnvironmentTabPanel({
                   fontFamily: "var(--font--code)",
                   fontSize: 12,
                   lineHeight: 1.6,
-                  outline: "none",
                 }}
               />
             )}
@@ -362,7 +357,7 @@ export default function EnvironmentTabPanel({
                 <button
                   type="button"
                   className="btn btn-primary"
-                  disabled={!canSave || saving}
+                  disabled={!canSave || saving || editorDisabled}
                   onClick={() => void handleSaveProjectEnv()}
                 >
                   {saving ? (
@@ -376,69 +371,14 @@ export default function EnvironmentTabPanel({
             </div>
           </div>
 
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            <div
-              style={{
-                border: "1px solid var(--border)",
-                borderRadius: 7,
-                background: "var(--bg-input)",
-                padding: 12,
-              }}
-            >
-              <p
-                style={{
-                  margin: 0,
-                  color: "var(--text-primary)",
-                  fontSize: 13,
-                  fontWeight: 800,
-                }}
-              >
-                Editor Status
-              </p>
-              <p
-                style={{
-                  marginTop: 6,
-                  color:
-                    editorStatus === "saved"
-                      ? "var(--accent-green)"
-                      : editorStatus === "validated"
-                        ? "var(--accent-blue)"
-                        : editorDirty
-                          ? "var(--accent-yellow)"
-                          : "var(--text-muted)",
-                  fontSize: 12,
-                  lineHeight: 1.5,
-                }}
-              >
-                {editorStatus === "saved"
-                  ? "Project .env saved. Restart or rebuild the app to apply the changes."
-                  : editorStatus === "validated"
-                    ? "Draft format checked in the UI."
-                      : editorDirty
-                        ? "You have unsaved editor changes."
-                        : environment.editor.found
-                          ? environment.editor.source === "container"
-                            ? "Editor is loaded from container filesystem .env."
-                            : "Editor is loaded from project .env file."
-                          : "Editor is disabled because no project .env file was found."}
-              </p>
-              <p
-                style={{
-                  marginTop: 8,
-                  color: "var(--text-muted)",
-                  fontSize: 11,
-                  fontFamily: "var(--font--code)",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                {environment.editor.path ?? "No project .env path"}
-              </p>
-            </div>
-
+          {!editorDisabled ? (
+            <p style={{ margin: 0, color: "var(--text-muted)", fontSize: 12 }}>
+              Changes may require a restart or rebuild to take effect.
+            </p>
+          ) : null}
             {editorNotice ? (
               <div
+                role={editorNotice.tone === "error" ? "alert" : "status"}
                 style={{
                   border: "1px solid var(--border)",
                   borderRadius: 7,
@@ -467,78 +407,6 @@ export default function EnvironmentTabPanel({
               </div>
             ) : null}
 
-            {!environment.editor.found ? (
-              <div
-                style={{
-                  border: "1px solid var(--border)",
-                  borderRadius: 7,
-                  background: "rgba(245,158,11,0.1)",
-                  color: "var(--accent-yellow)",
-                  padding: 11,
-                  fontSize: 12,
-                  lineHeight: 1.45,
-                }}
-              >
-                {environment.editor.message ||
-                  "No project .env file was found. The editor is read-only until a .env file exists in the deployment or mounted project path."}
-              </div>
-            ) : null}
-
-            {environment.editor.validation.map((item) => (
-              <div
-                key={item.label}
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "auto minmax(0, 1fr)",
-                  gap: 9,
-                  alignItems: "start",
-                  border: "1px solid var(--border)",
-                  borderRadius: 7,
-                  background: "var(--bg-input)",
-                  padding: 11,
-                }}
-              >
-                <span
-                  style={{
-                    color:
-                      item.status === "Ready"
-                        ? "var(--accent-green)"
-                        : "var(--accent-yellow)",
-                    display: "inline-flex",
-                    marginTop: 1,
-                  }}
-                >
-                  {item.status === "Ready" ? (
-                    <CheckCircle2 size={15} />
-                  ) : (
-                    <ShieldAlert size={15} />
-                  )}
-                </span>
-                <div style={{ minWidth: 0 }}>
-                  <p
-                    style={{
-                      margin: 0,
-                      color: "var(--text-primary)",
-                      fontSize: 12,
-                      fontWeight: 700,
-                    }}
-                  >
-                    {item.label}
-                  </p>
-                  <p
-                    style={{
-                      marginTop: 4,
-                      color: "var(--text-muted)",
-                      fontSize: 11,
-                      lineHeight: 1.45,
-                    }}
-                  >
-                    {item.description}
-                  </p>
-                </div>
-              </div>
-            ))}
-          </div>
         </div>
       </PanelShell>
     </section>

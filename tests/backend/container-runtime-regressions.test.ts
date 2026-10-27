@@ -91,9 +91,41 @@ test("logs auto refresh keeps tab visibility and in-flight guards", () => {
     "return (",
   );
 
+  assert.match(source, /logsAutoRefresh, setLogsAutoRefresh\] = useState\(true\)/);
   assert.match(refreshLogsBlock, /logsInFlightRef\.current/);
   assert.match(refreshLogsBlock, /LOGS_REFRESH_TAIL_LINES/);
   assert.match(autoRefreshBlock, /activeTab === "logs"/);
   assert.match(autoRefreshBlock, /!document\.hidden/);
   assert.match(autoRefreshBlock, /LOGS_REFRESH_INTERVAL_MS/);
+});
+
+
+test("container terminal preserves shell input and protects multiline paste", () => {
+  const source = readSource("src/app/projects/[projectId]/environments/[environmentId]/containers/[containerId]/components/terminal/TerminalTabPanel.tsx");
+  assert.match(source, /requestFullscreen\(\)/);
+  assert.match(source, /fullscreenchange/);
+  assert.match(source, /event\.ctrlKey && event\.shiftKey/);
+  assert.match(source, /term\.onData\(sendInput\)/);
+  assert.match(source, /addEventListener\("paste", handlePaste, true\)/);
+  assert.match(source, /window\.confirm/);
+  assert.match(source, /term\.paste\(text\)/);
+});
+
+
+test("container shell uses interactive bash when available and keeps a sh fallback", () => {
+  const source = readSource("src/app/projects/[projectId]/environments/[environmentId]/containers/[containerId]/components/terminal/TerminalTabPanel.tsx");
+  assert.match(source, /command -v bash/);
+  assert.match(source, /exec bash -i/);
+  assert.match(source, /exec \${shellQuote\(shell\)} -i/);
+  assert.match(source, /docker exec -it -e TERM=xterm-256color/);
+  assert.match(source, /cd \${shellQuote\(initialPath\)} 2>\/dev\/null \|\| cd \//);
+});
+
+
+test("container metrics are limited to overview and runtime", () => {
+  const source = readSource(CONTAINER_DETAIL_PAGE);
+  assert.match(source, /activeTab !== "overview" && activeTab !== "runtime"/);
+  assert.match(source, /activeTab === "overview" \|\| activeTab === "runtime"/);
+  assert.match(source, /metricsResult.status === "fulfilled" \? buildMetrics\(metricsResult.value.data\) : current.metrics/);
+  assert.doesNotMatch(source, /function sparkline\(/);
 });

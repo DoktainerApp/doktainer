@@ -1,6 +1,5 @@
 import type {
   Container,
-  ContainerDetails,
   DeploymentRecord,
 } from "@/lib/api";
 import type {
@@ -12,17 +11,6 @@ function formatDate(value: string | null | undefined) {
   if (!value) return "-";
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? "-" : date.toLocaleString();
-}
-
-function getDeploymentStatus(
-  container: Container,
-): DeploymentHistoryItem["status"] {
-  if (container.status === "RUNNING") return "Success";
-  if (container.status === "ERROR") return "Failed";
-  if (container.status === "STARTING" || container.status === "STOPPING") {
-    return "Running";
-  }
-  return "Rolled Back";
 }
 
 function getImageTag(image: string) {
@@ -114,14 +102,10 @@ function mapDeploymentHistory(items: DeploymentRecord[]) {
 
 export function createDeploymentsData(
   container: Container,
-  detail: ContainerDetails | null,
   deploymentRecords: DeploymentRecord[] = [],
 ): DeploymentTabData {
-  const status = getDeploymentStatus(container);
   const history = mapDeploymentHistory(deploymentRecords);
   const latest = history[0];
-  const runtimeLoaded = detail !== null;
-  const isSuccessful = status === "Success";
 
   return {
     summaries: [
@@ -129,7 +113,7 @@ export function createDeploymentsData(
         label: "Latest Deployment",
         value: latest?.version ?? "No deployments",
         subvalue: latest ? `${latest.status} - ${latest.deployedAt}` : "No history yet",
-        tone: isSuccessful ? "green" : "amber",
+        tone: latest?.status === "Success" ? "green" : "amber",
       },
       {
         label: "Image Tag",
@@ -142,12 +126,6 @@ export function createDeploymentsData(
         value: container.deployMode ?? "IMAGE",
         subvalue: container.sourceType ?? "MANUAL",
         tone: "cyan",
-      },
-      {
-        label: "Runtime Detail",
-        value: runtimeLoaded ? "Loaded" : "Unavailable",
-        subvalue: runtimeLoaded ? "Docker inspect available" : "Using DB record",
-        tone: runtimeLoaded ? "blue" : "amber",
       },
     ],
     history,

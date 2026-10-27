@@ -1,5 +1,7 @@
 import { Container, DomainProxy } from "@/lib/api";
-import SearchableSelect, { type SearchableSelectOption } from "@/components/SearchableSelect";
+import SearchableSelect, {
+  type SearchableSelectOption,
+} from "@/components/SearchableSelect";
 import { Loader2 } from "lucide-react";
 import { AddDomainFormState, PortOption } from "./domain-types";
 
@@ -13,6 +15,7 @@ interface AddDomainTargetingSectionProps {
   containerInspectLoading: boolean;
   selectableProxies: DomainProxy[];
   targetingEnabled: boolean;
+  lockContainer?: boolean;
   allowSharedTargetReuse: boolean;
   linkedContainerDomains: Map<string, string[]>;
   linkedPortDomains: Map<number, string[]>;
@@ -31,16 +34,31 @@ export default function AddDomainTargetingSection({
   containerInspectLoading,
   selectableProxies,
   targetingEnabled,
+  lockContainer = false,
   allowSharedTargetReuse,
   linkedContainerDomains,
   linkedPortDomains,
   onChange,
 }: AddDomainTargetingSectionProps) {
-  const containerOptions: SearchableSelectOption[] = serverContainers.map((container) => {
-    const linkedDomains = linkedContainerDomains.get(container.id) ?? [];
-    const disabled = linkedDomains.length > 0 && !allowSharedTargetReuse;
-    return { value: container.id, label: `${container.name} (${container.image})`, keywords: `${container.name} ${container.image} ${container.dockerId ?? ""}`, description: disabled ? linkedDomains.length > 1 ? "Used by 1+ domains" : `Used by ${linkedDomains.join(", ")}` : undefined, disabled };
-  });
+  const containerOptions: SearchableSelectOption[] = serverContainers.map(
+    (container) => {
+      const linkedDomains = linkedContainerDomains.get(container.id) ?? [];
+      const disabled =
+        linkedDomains.length > 0 && !allowSharedTargetReuse;
+
+      return {
+        value: container.id,
+        label: `${container.name} (${container.image})`,
+        keywords: `${container.name} ${container.image} ${container.dockerId ?? ""}`,
+        description: disabled
+          ? linkedDomains.length > 1
+            ? "Used by 1+ domains"
+            : `Used by ${linkedDomains.join(", ")}`
+          : undefined,
+        disabled,
+      };
+    },
+  );
 
   return (
     <>
@@ -74,7 +92,12 @@ export default function AddDomainTargetingSection({
             placeholder="Select container..."
             searchPlaceholder="Search containers..."
             emptyText="No matching containers found"
-            disabled={!form.serverId || serverContainersLoading || !targetingEnabled}
+            disabled={
+              lockContainer ||
+              !form.serverId ||
+              serverContainersLoading ||
+              !targetingEnabled
+            }
             style={{ width: "100%" }}
           />
           {/*
@@ -151,7 +174,22 @@ export default function AddDomainTargetingSection({
       </div>
 
       {form.serverId && serverContainersLoading && (
-        <div role="status" aria-live="polite" style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 8, padding: "8px 10px", border: "1px solid rgba(59,130,246,0.28)", borderRadius: 7, background: "rgba(59,130,246,0.08)", color: "var(--text-muted)", fontSize: 12 }}>
+        <div
+          role="status"
+          aria-live="polite"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 7,
+            marginTop: 8,
+            padding: "8px 10px",
+            border: "1px solid rgba(59,130,246,0.28)",
+            borderRadius: 7,
+            background: "rgba(59,130,246,0.08)",
+            color: "var(--text-muted)",
+            fontSize: 12,
+          }}
+        >
           <Loader2 size={14} className="animate-spin" aria-hidden="true" />
           Loading running containers from the selected server…
         </div>
@@ -218,8 +256,19 @@ export default function AddDomainTargetingSection({
             );
           })}
         </div>
-        <p style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "var(--text-muted)", marginTop: 6 }}>
-          {form.serverId && capabilityLoading && <Loader2 size={13} className="animate-spin" aria-hidden="true" />}
+        <p
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            fontSize: 11,
+            color: "var(--text-muted)",
+            marginTop: 6,
+          }}
+        >
+          {form.serverId && capabilityLoading && (
+            <Loader2 size={13} className="animate-spin" aria-hidden="true" />
+          )}
           {form.serverId
             ? capabilityLoading
               ? "Checking reverse proxy availability on the selected server…"

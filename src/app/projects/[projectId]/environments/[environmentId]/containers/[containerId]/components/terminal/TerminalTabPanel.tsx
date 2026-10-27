@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Loader2, RotateCw, TerminalSquare } from "lucide-react";
+import { Loader2, Maximize2, Minimize2, RotateCw, TerminalSquare } from "lucide-react";
 import { terminal as terminalApi } from "@/lib/api";
 import { createClientId } from "@/lib/random-id";
 import { sanitizeTerminalStreamChunk } from "@/lib/terminal-output";
@@ -76,9 +76,9 @@ function createContainerShellCommand({
 }: Pick<TerminalTabData, "execTarget" | "shell" | "workingDirectory">) {
   const initialPath = workingDirectory || "/";
   const enterWorkingDirectory = `cd ${shellQuote(initialPath)} 2>/dev/null || cd /`;
-  const startShell = `exec ${shellQuote(shell)}`;
+  const startShell = `if command -v bash >/dev/null 2>&1; then exec bash -i; else exec ${shellQuote(shell)} -i; fi`;
 
-  return `docker exec -it ${shellQuote(execTarget)} ${shellQuote(
+  return `docker exec -it -e TERM=xterm-256color ${shellQuote(execTarget)} ${shellQuote(
     shell,
   )} -c ${shellQuote(`${enterWorkingDirectory}; ${startShell}`)}`;
 }
@@ -321,6 +321,24 @@ function ContainerTerminalPane({
         term.element.style.height = "100%";
       }
 
+      term.attachCustomKeyEventHandler((event) => {
+        if (event.type === "keydown" && event.ctrlKey && event.shiftKey && event.key.toLowerCase() === "c") {
+          event.preventDefault();
+          const selection = term.getSelection();
+          if (selection) {
+            if (!navigator.clipboard?.writeText) {
+              enqueueTerminalOutput("\r\nCopy is unavailable in this browser context.\r\n");
+            } else {
+              void navigator.clipboard.writeText(selection).catch(() => {
+                enqueueTerminalOutput("\r\nCopy failed. Check browser clipboard permissions.\r\n");
+              });
+            }
+          }
+          return false;
+        }
+        return true;
+      });
+
       termRef.current = term;
       termForEffect = term;
       fitRef.current = fitAddon;
@@ -414,12 +432,24 @@ function ContainerTerminalPane({
 
       term.onData(sendInput);
 
+      const handlePaste = (event: ClipboardEvent) => {
+        const text = event.clipboardData?.getData("text/plain");
+        if (!text || !/[\r\n]/.test(text)) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        if (window.confirm("Paste multiple lines into the terminal? Commands may run immediately.")) {
+          term.paste(text);
+        }
+      };
+      const containerElement = containerRef.current!;
+      containerElement.addEventListener("paste", handlePaste, true);
       const resizeObs = new ResizeObserver(scheduleResize);
       resizeObs.observe(containerRef.current!);
       resizeObserverRef.current = resizeObs;
 
       return () => {
         resizeObs.disconnect();
+        containerElement.removeEventListener("paste", handlePaste, true);
         resizeObserverRef.current = null;
       };
     }
@@ -506,6 +536,23 @@ export default function TerminalTabPanel({ terminal }: TerminalTabPanelProps) {
   const [session, setSession] = useState<StoredTerminalSession>(() =>
     getInitialSession(terminal),
   );
+  const fullscreenRef = useRef<HTMLDivElement>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [fullscreenError, setFullscreenError] = useState("");
+  useEffect(() => {
+    const syncFullscreen = () => setIsFullscreen(document.fullscreenElement === fullscreenRef.current);
+    document.addEventListener("fullscreenchange", syncFullscreen);
+    return () => document.removeEventListener("fullscreenchange", syncFullscreen);
+  }, []);
+  const toggleFullscreen = async () => {
+    try {
+      setFullscreenError("");
+      if (document.fullscreenElement === fullscreenRef.current) await document.exitFullscreen();
+      else await fullscreenRef.current?.requestFullscreen();
+    } catch {
+      setFullscreenError("Fullscreen is unavailable in this browser or context.");
+    }
+  };
   const [status, setStatus] = useState<TerminalStatus>("idle");
   const [sender, setSender] = useState<TerminalSender | null>(null);
   const [sessionHistory, setSessionHistory] = useState<TerminalSessionEvent[]>(
@@ -630,6 +677,7 @@ export default function TerminalTabPanel({ terminal }: TerminalTabPanelProps) {
         ))}
       </div> */}
 
+      <div ref={fullscreenRef} style={{ background: "var(--bg-card)", overflow: "auto", padding: isFullscreen ? 12 : 0 }}>
       <PanelShell
         title="Container Terminal"
         action={
@@ -650,13 +698,24 @@ export default function TerminalTabPanel({ terminal }: TerminalTabPanelProps) {
             </span>
             <button
               type="button"
-              className="btn btn-ghost"
+              className="btn btn-ghost tooltip"
+              aria-label={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
+              onClick={() => void toggleFullscreen()}
+              style={{ minHeight: 26, padding: "3px 8px", fontSize: 11 }}
+            >
+              {isFullscreen ? <Minimize2 size={12} aria-hidden="true" /> : <Maximize2 size={12} aria-hidden="true" />}
+              <span className="tooltip-content" aria-hidden="true">{isFullscreen ? "Exit fullscreen" : "Fullscreen"}</span>
+            </button>
+            <button
+              type="button"
+              className="btn btn-ghost tooltip"
+              aria-label="Reconnect (starts a new session)"
               disabled={!terminal.canExecute}
               onClick={reconnect}
-              style={{ minHeight: 28, fontSize: 11 }}
+              style={{ minHeight: 26, padding: "3px 8px", fontSize: 11 }}
             >
-              <RotateCw size={13} />
-              Reconnect
+              <RotateCw size={12} aria-hidden="true" />
+              <span className="tooltip-content" aria-hidden="true" style={{ left: "auto", right: 0, transform: "none", width: "max-content", maxWidth: "min(240px, calc(100vw - 60px))", whiteSpace: "normal" }}>Reconnect (starts a new session)</span>
             </button>
           </div>
         }
@@ -665,6 +724,7 @@ export default function TerminalTabPanel({ terminal }: TerminalTabPanelProps) {
           style={{
             position: "relative",
             minHeight: 540,
+            height: isFullscreen ? "calc(100dvh - 110px)" : 540,
             border: "1px solid var(--border)",
             borderRadius: 7,
             background: "#0d1117",
@@ -706,7 +766,12 @@ export default function TerminalTabPanel({ terminal }: TerminalTabPanelProps) {
             </div>
           )}
         </div>
+        <p style={{ color: "var(--text-muted)", fontSize: 11, margin: "8px 0 0" }}>
+          Ctrl+C interrupts a command. Ctrl+Shift+C copies selected text; Ctrl+Shift+V pastes.
+        </p>
+        {fullscreenError ? <p role="alert" style={{ color: "var(--text-danger)", fontSize: 12 }}>{fullscreenError}</p> : null}
       </PanelShell>
+      </div>
 
       {/* <div
         style={{

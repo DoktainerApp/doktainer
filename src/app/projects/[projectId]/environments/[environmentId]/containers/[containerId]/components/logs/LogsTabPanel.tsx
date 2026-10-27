@@ -7,7 +7,6 @@ import {
   Filter,
   Loader2,
   Search,
-  TerminalSquare,
   ToggleLeft,
   ToggleRight,
 } from "lucide-react";
@@ -35,17 +34,6 @@ const sourceStatusClass: Record<
   Streaming: "badge-online",
   Paused: "badge-warning",
   Unavailable: "badge-danger",
-};
-
-const summaryToneColor: Record<
-  LogsTabData["summaries"][number]["tone"],
-  string
-> = {
-  blue: "var(--accent-blue)",
-  green: "var(--accent-green)",
-  purple: "var(--accent-purple)",
-  amber: "var(--accent-yellow)",
-  cyan: "var(--accent-cyan)",
 };
 
 export default function LogsTabPanel({
@@ -102,75 +90,6 @@ export default function LogsTabPanel({
 
   return (
     <section style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns:
-            "repeat(auto-fit, minmax(min(190px, 100%), 1fr))",
-          gap: 12,
-        }}
-      >
-        {logs.summaries.map((summary) => (
-          <div
-            key={summary.label}
-            className="card"
-            style={{
-              padding: 14,
-              minHeight: 112,
-              background: "var(--bg-card)",
-              display: "flex",
-              flexDirection: "column",
-              justifyContent: "space-between",
-            }}
-          >
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: 10,
-              }}
-            >
-              <p
-                style={{
-                  margin: 0,
-                  color: "var(--text-muted)",
-                  fontSize: 11,
-                  fontWeight: 700,
-                }}
-              >
-                {summary.label}
-              </p>
-              <TerminalSquare
-                size={16}
-                style={{ color: summaryToneColor[summary.tone] }}
-              />
-            </div>
-            <div>
-              <p
-                style={{
-                  margin: 0,
-                  color: "var(--text-primary)",
-                  fontSize: 22,
-                  fontWeight: 800,
-                }}
-              >
-                {summary.value}
-              </p>
-              <p
-                style={{
-                  marginTop: 5,
-                  color: "var(--text-muted)",
-                  fontSize: 11,
-                }}
-              >
-                {summary.subvalue}
-              </p>
-            </div>
-          </div>
-        ))}
-      </div>
-
       <PanelShell
         title="Log Stream"
         action={
@@ -178,6 +97,7 @@ export default function LogsTabPanel({
             type="button"
             className="btn btn-ghost"
             onClick={() => onAutoRefreshChange(!autoRefresh)}
+            aria-pressed={autoRefresh}
             style={{
               display: "inline-flex",
               alignItems: "center",
@@ -188,7 +108,7 @@ export default function LogsTabPanel({
               color: autoRefresh ? "var(--accent-blue)" : "var(--text-muted)",
             }}
           >
-            Auto refresh
+            Auto refresh (10s)
             {refreshing ? (
               <Loader2 size={15} className="animate-spin" />
             ) : autoRefresh ? (
@@ -199,6 +119,14 @@ export default function LogsTabPanel({
           </button>
         }
       >
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 16px", color: "var(--text-muted)", fontSize: 12, marginBottom: 10 }} aria-label="Log buffer summary">
+          {logs.summaries.map((summary) => (
+            <span key={summary.label}>
+              {summary.label}: <strong style={{ color: "var(--text-secondary)" }}>{summary.value === "-" ? "Unavailable" : summary.value}</strong>
+            </span>
+          ))}
+          <span>Counts reflect the loaded buffer, before filters.</span>
+        </div>
         <div
           style={{
             display: "grid",

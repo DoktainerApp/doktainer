@@ -1,9 +1,7 @@
 import type { Container, ContainerDetails } from "@/lib/api";
 import type {
   StorageMountItem,
-  StoragePathItem,
   StorageTabData,
-  StorageVolumeItem,
 } from "../types/app-detail-types";
 
 type JsonRecord = Record<string, unknown>;
@@ -39,10 +37,6 @@ function formatBytes(value: number | null | undefined) {
   return `${size >= 10 ? size.toFixed(0) : size.toFixed(1)} ${units[unitIndex]}`;
 }
 
-function formatPathLabel(path: string, fallback: string) {
-  return path.split("/").filter(Boolean).at(-1) || fallback;
-}
-
 function createMountsFromInspect(detail: ContainerDetails | null) {
   const inspect = isRecord(detail?.inspect) ? detail.inspect : null;
   const mounts = Array.isArray(inspect?.Mounts) ? inspect.Mounts : [];
@@ -63,58 +57,11 @@ function createMountsFromInspect(detail: ContainerDetails | null) {
       type:
         type === "bind" ? "Bind" : type === "tmpfs" ? "Tmpfs" : "Volume",
       access: getBoolean(mount.RW) === false ? "Read only" : "Read / Write",
-      size: "Not measured",
-      usage: 0,
-      status: "Mounted",
+      driver: getString(mount.Driver),
+      mode: getString(mount.Mode),
+      propagation: getString(mount.Propagation),
     };
   });
-}
-
-function createVolumesFromMounts(
-  mounts: StorageMountItem[],
-  detail: ContainerDetails | null,
-): StorageVolumeItem[] {
-  const inspect = isRecord(detail?.inspect) ? detail.inspect : null;
-  const rawMounts = Array.isArray(inspect?.Mounts)
-    ? inspect.Mounts.filter(isRecord)
-    : [];
-
-  return rawMounts.flatMap((mount, index) => {
-    const type = getString(mount.Type, "").toLowerCase();
-    if (type !== "volume") return [];
-
-    const source = getString(mount.Source, getString(mount.Name));
-    const name = getString(mount.Name, formatPathLabel(source, `volume-${index + 1}`));
-    const matchedMount = mounts[index];
-    const driver = getString(mount.Driver, "local");
-    const mode = getString(mount.Mode, "");
-    const propagation = getString(mount.Propagation, "");
-
-    return [
-      {
-        id: `${name}-${index}`,
-        name,
-        driver,
-        mountpoint: source,
-        scope: "local",
-        createdAt: "-",
-        labels: [
-          matchedMount?.access ?? "Read / Write",
-          mode ? `mode=${mode}` : "",
-          propagation ? `propagation=${propagation}` : "",
-        ].filter(Boolean),
-      },
-    ];
-  });
-}
-
-function createPathsFromMounts(mounts: StorageMountItem[]): StoragePathItem[] {
-  return mounts.map((mount) => ({
-    label: formatPathLabel(mount.target, mount.name),
-    path: mount.target,
-    purpose: `${mount.type} mounted from ${mount.source}`,
-    status: mount.access === "Read only" ? "Readonly" : "Available",
-  }));
 }
 
 export function createStorageData(
@@ -123,12 +70,11 @@ export function createStorageData(
 ): StorageTabData {
   const inspect = isRecord(detail?.inspect) ? detail.inspect : {};
   const mounts = createMountsFromInspect(detail);
-  const volumes = createVolumesFromMounts(mounts, detail);
-  const paths = createPathsFromMounts(mounts);
   const writableLayerSize = formatBytes(getNumber(inspect.SizeRw));
   const rootFsSize = formatBytes(getNumber(inspect.SizeRootFs));
 
   return {
+    inspectAvailable: Object.keys(inspect).length > 0,
     summaries: [
       {
         label: "Writable Layer",
@@ -141,11 +87,13 @@ export function createStorageData(
       },
       {
         label: "Mounts",
-        value: String(mounts.length),
+        value: Object.keys(inspect).length ? String(mounts.length) : "Unavailable",
         subvalue:
-          mounts.length > 0
-            ? "Detected from Docker inspect"
-            : "No mounted storage detected",
+          Object.keys(inspect).length === 0
+            ? "Docker inspect is not available"
+            : mounts.length > 0
+              ? "Detected from Docker inspect"
+              : "No mounted storage detected",
         tone: "green",
       },
       {
@@ -162,8 +110,5 @@ export function createStorageData(
       },
     ],
     mounts,
-    volumes,
-    backups: [],
-    paths,
   };
 }

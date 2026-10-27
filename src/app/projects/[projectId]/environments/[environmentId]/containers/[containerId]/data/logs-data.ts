@@ -90,13 +90,13 @@ export function createLogsData({
       {
         label: "Warnings",
         value: String(warnCount),
-        subvalue: "From visible stream",
+        subvalue: "In current log buffer",
         tone: warnCount > 0 ? "amber" : "cyan",
       },
       {
         label: "Errors",
         value: String(errorCount),
-        subvalue: "From visible stream",
+        subvalue: "In current log buffer",
         tone: errorCount > 0 ? "amber" : "purple",
       },
     ],

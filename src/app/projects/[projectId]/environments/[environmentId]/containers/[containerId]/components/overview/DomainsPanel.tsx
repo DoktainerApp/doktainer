@@ -1,16 +1,22 @@
 import Link from "next/link";
-import { ExternalLink, Globe2, Settings } from "lucide-react";
+import { ExternalLink, Globe2, Plus, Settings } from "lucide-react";
 import type { LinkedDomainSummary } from "../../types/app-detail-types";
 import PanelShell from "./PanelShell";
 
 interface DomainsPanelProps {
   domains: LinkedDomainSummary[];
   variant?: "compact" | "tab";
+  onAdd?: () => void;
+  adding?: boolean;
+  addDisabledReason?: string;
 }
 
 export default function DomainsPanel({
   domains,
   variant = "compact",
+  onAdd,
+  adding = false,
+  addDisabledReason,
 }: DomainsPanelProps) {
   const isTabVariant = variant === "tab";
 
@@ -18,6 +24,8 @@ export default function DomainsPanel({
     <PanelShell
       title="Domains"
       action={
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+        {isTabVariant && onAdd ? <button type="button" className="btn btn-ghost" onClick={onAdd} disabled={adding || Boolean(addDisabledReason)} title={addDisabledReason} style={{ minHeight: 26, padding: "3px 8px", fontSize: 11 }}><Plus size={12} /> {adding ? "Loading..." : "Add Domain"}</button> : null}
         <Link
           href="/domains"
           className="btn btn-ghost"
@@ -26,8 +34,10 @@ export default function DomainsPanel({
           <Settings size={12} />
           Manage
         </Link>
+        </div>
       }
     >
+      {isTabVariant && addDisabledReason ? <p style={{ color: "var(--text-muted)", fontSize: 12, marginBottom: 10 }}>{addDisabledReason}</p> : null}
       {domains.length > 0 ? (
         <div
           style={{

@@ -142,3 +142,18 @@ test("configuration preview and header reuse established UI primitives", () => {
   assert.match(primaryActions, /label: "Edit configuration"/);
   assert.doesNotMatch(headerActions, /id: "edit"/);
 });
+
+
+test("container domain entry uses the existing modal with a locked target and explicit port", () => {
+  const detail = read(paths.detailPage);
+  const modal = readFileSync("src/app/domains/components/AddDomainModal.tsx", "utf8");
+  const targeting = readFileSync("src/app/domains/components/AddDomainTargetingSection.tsx", "utf8");
+  assert.match(detail, /canMutateContainers \? \(\) => void openAddDomain\(\)/);
+  assert.match(detail, /initialTarget=\{\{/);
+  assert.match(detail, /was added, but the list could not be refreshed/);
+  assert.match(detail, /revision !== domainsRevisionRef\.current/);
+  assert.match(modal, /disabled=\{Boolean\(initialTarget\)\}/);
+  assert.match(modal, /isContainerContext \? "" : \(nextPortOptions/);
+  assert.match(modal, /target container is unavailable or not running/i);
+  assert.match(targeting, /lockContainer \|\|/);
+});

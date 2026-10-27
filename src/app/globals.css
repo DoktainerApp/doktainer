@@ -1563,7 +1563,8 @@ body {
   z-index: 100;
   box-shadow: 0 10px 24px rgba(15, 23, 42, 0.16);
 }
-.tooltip:hover .tooltip-content {
+.tooltip:hover .tooltip-content,
+.tooltip:focus-visible .tooltip-content {
   opacity: 1;
   transform: translateX(-50%) translateY(0);
 }

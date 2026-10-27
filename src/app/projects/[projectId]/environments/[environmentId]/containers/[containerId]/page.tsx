@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useCurrentUser } from "@/lib/auth-state";
 import { getRoleCapabilities } from "@/lib/rbac";
+import AddDomainModal from "@/app/domains/components/AddDomainModal";
 import ConfirmActionDialog from "@/components/ConfirmActionDialog";
 import DashboardLayout from "@/components/DashboardLayout";
 import IncidentTimelinePanel from "@/components/IncidentTimelinePanel";
@@ -16,6 +17,7 @@ import {
   containers as containersApi,
   domains as domainsApi,
   projectsApi,
+  servers as serversApi,
   type Container,
   type ContainerDetails,
   type ContainerProcess,
@@ -23,6 +25,7 @@ import {
   type ContainerRuntimeStats,
   type DeploymentRecord,
   type Domain,
+  type Server,
   type ProjectEnvironmentRecord,
   type ProjectRecord,
 } from "@/lib/api";
@@ -48,6 +51,7 @@ import {
   headerActions,
   primaryActions,
 } from "./data/app-detail-constants";
+import { appendMetricSample, type MetricSample } from "./data/metric-history";
 import { createAdvancedData } from "./data/advanced-data";
 import { createDeploymentsData } from "./data/deployments-data";
 import { createEnvironmentData } from "./data/environment-data";
@@ -224,13 +228,6 @@ function getLinkedDomains(
     }));
 }
 
-function sparkline(seed: number) {
-  return Array.from({ length: 14 }, (_, index) => {
-    const wave = Math.sin((index + seed) / 1.8) * 12;
-    return Math.max(4, Math.round(seed + index * 2 + wave));
-  });
-}
-
 function parseRecentLogs(logs: string, limit = 8): RecentLogLine[] {
   const lines = logs
     .split("\n")
@@ -259,44 +256,10 @@ function parseRecentLogs(logs: string, limit = 8): RecentLogLine[] {
   });
 }
 
-function buildFallbackMetrics(container: Container): AppMetric[] {
-  return [
-    {
-      label: "CPU Usage",
-      value: container.cpuUsage ?? "0%",
-      subvalue: "Runtime stats unavailable",
-      tone: "blue",
-      points: sparkline(4),
-    },
-    {
-      label: "Memory Usage",
-      value: container.ramUsage ?? "-",
-      subvalue: "Runtime stats unavailable",
-      tone: "cyan",
-      points: sparkline(4),
-    },
-    {
-      label: "Network In / Out",
-      value: "-",
-      subvalue: "Container is not running",
-      tone: "purple",
-      points: sparkline(4),
-    },
-    {
-      label: "Block I/O",
-      value: "-",
-      subvalue: "Container is not running",
-      tone: "purple",
-      points: sparkline(4),
-    },
-    {
-      label: "Processes",
-      value: "0",
-      subvalue: "No active runtime process",
-      tone: "green",
-      points: sparkline(4),
-    },
-  ];
+function buildFallbackMetrics(): AppMetric[] {
+  return ["CPU Usage", "Memory Usage", "Network In / Out", "Block I/O", "Processes"].map((label) => ({
+    label, value: "Unavailable", subvalue: "Runtime stats unavailable", tone: "blue",
+  }));
 }
 
 type RuntimeMetricSource = {
@@ -351,9 +314,8 @@ function createRuntimeDetailSnapshot({
 
 function buildMetrics(
   detail: RuntimeMetricSource | null,
-  container: Container,
 ): AppMetric[] {
-  if (!detail) return buildFallbackMetrics(container);
+  if (!detail) return buildFallbackMetrics();
 
   return [
     {
@@ -361,7 +323,6 @@ function buildMetrics(
       value: `${detail.stats.cpuPercent.toFixed(2)}%`,
       subvalue: `Container processes: ${detail.stats.pids}`,
       tone: "blue",
-      points: sparkline(Math.max(8, detail.stats.cpuPercent)),
     },
     {
       label: "Memory Usage",
@@ -370,7 +331,6 @@ function buildMetrics(
         ? `${detail.stats.memory.limit} limit`
         : `${detail.stats.memoryPercent.toFixed(2)}%`,
       tone: "cyan",
-      points: sparkline(Math.max(12, detail.stats.memoryPercent)),
     },
     {
       label: "Network In / Out",
@@ -379,7 +339,6 @@ function buildMetrics(
         .filter(Boolean)
         .join(" / "),
       tone: "purple",
-      points: sparkline(18),
     },
     {
       label: "Block I/O",
@@ -388,7 +347,6 @@ function buildMetrics(
         .filter(Boolean)
         .join(" / "),
       tone: "purple",
-      points: sparkline(14),
     },
     {
       label: "Processes",
@@ -397,7 +355,6 @@ function buildMetrics(
         ? `${detail.processes.length} visible processes`
         : `${detail.stats.pids} running PIDs`,
       tone: "green",
-      points: sparkline(Math.max(8, detail.stats.pids)),
     },
   ];
 }
@@ -456,7 +413,7 @@ function buildAppDetail({
       getDomainUrl(domains, container) ?? getContainerWebUiUrl(container),
     domains: getLinkedDomains(domains, container),
     runtime: createRuntimeData(container, detail),
-    deployments: createDeploymentsData(container, detail),
+    deployments: createDeploymentsData(container),
     advanced: createAdvancedData(container, detail),
     environment: createEnvironmentData({
       container,
@@ -471,7 +428,7 @@ function buildAppDetail({
       recentLogs: logStream,
     }),
     terminal: createTerminalData(container, detail),
-    metrics: buildMetrics(metricSource, container),
+    metrics: buildMetrics(metricSource),
     deployment: {
       status: currentOperation
         ? formatDeploymentPhase(currentOperation.status)
@@ -622,12 +579,16 @@ export default function AppContainerDetailPage() {
   const [activeAction, setActiveAction] = useState<AppAction["id"] | null>(
     null,
   );
+  const [domainModal, setDomainModal] = useState<{ servers: Server[]; domains: Domain[]; serverId: string; containerId: string } | null>(null);
+  const [domainLoading, setDomainLoading] = useState(false);
+  const [domainNotice, setDomainNotice] = useState("");
   const [showFileManager, setShowFileManager] = useState(false);
   const [showConfigurationEditor, setShowConfigurationEditor] = useState(false);
   const [error, setError] = useState("");
   const [actionError, setActionError] = useState("");
   const [runtimeNotice, setRuntimeNotice] = useState("");
-  const [logsAutoRefresh, setLogsAutoRefresh] = useState(false);
+  const [metricSamples, setMetricSamples] = useState<MetricSample[]>([]);
+  const [logsAutoRefresh, setLogsAutoRefresh] = useState(true);
   const [logsRefreshing, setLogsRefreshing] = useState(false);
   const [confirmDialog, setConfirmDialog] =
     useState<PendingConfirmAction | null>(null);
@@ -642,12 +603,14 @@ export default function AppContainerDetailPage() {
   const rebuildJobIdRef = useRef<string | null>(null);
   const rebuildCancelRequestedRef = useRef(false);
   const runtimeMetricsInFlightRef = useRef(false);
+  const metricsViewRef = useRef(false);
   const runtimeDetailRef = useRef<ContainerDetails | null>(null);
   const environmentRecordRef = useRef<ProjectEnvironmentRecord | null>(null);
   const deploymentHistoryRef = useRef<DeploymentRecord[]>([]);
   const projectEnvRef = useRef<ContainerProjectEnvFile | null>(null);
   const domainsLoadedRef = useRef(false);
   const domainsLoadingRef = useRef(false);
+  const domainsRevisionRef = useRef(0);
   const runtimeDetailLoadedRef = useRef(false);
   const runtimeDetailLoadingRef = useRef(false);
   const projectEnvLoadedRef = useRef(false);
@@ -666,9 +629,11 @@ export default function AppContainerDetailPage() {
     setError("");
     setActionError("");
     setRuntimeNotice("");
+    setMetricSamples([]);
     runtimeDetailRef.current = null;
     projectEnvRef.current = null;
     domainsLoadedRef.current = false;
+    domainsRevisionRef.current += 1;
     runtimeDetailLoadedRef.current = false;
     projectEnvLoadedRef.current = false;
     logsLoadedRef.current = false;
@@ -734,6 +699,7 @@ export default function AppContainerDetailPage() {
       if (metricsResult.notice) {
         setRuntimeNotice(metricsResult.notice);
       }
+      if (metrics && container.status === "RUNNING" && metricsViewRef.current && !document.hidden) setMetricSamples((current) => appendMetricSample(current, metrics.stats, Date.now()));
       setContainerRecord(container);
       environmentRecordRef.current = environment;
       runtimeDetailRef.current = metrics
@@ -814,7 +780,6 @@ export default function AppContainerDetailPage() {
                 },
                 deployments: createDeploymentsData(
                   container,
-                  runtimeDetailRef.current,
                   records,
                 ),
               };
@@ -922,6 +887,7 @@ export default function AppContainerDetailPage() {
     try {
       const response = await containersApi.metrics(params.containerId);
       const metrics = response.data;
+      if (metricsViewRef.current && !document.hidden) setMetricSamples((current) => appendMetricSample(current, metrics.stats, Date.now()));
       const nextCpu = `${metrics.stats.cpuPercent.toFixed(2)}%`;
       const nextMemory = metrics.stats.memory.used || container.ramUsage || "-";
       runtimeDetailRef.current = runtimeDetailRef.current
@@ -945,7 +911,7 @@ export default function AppContainerDetailPage() {
         current
           ? {
               ...current,
-              metrics: buildMetrics(metrics, container),
+              metrics: buildMetrics(metrics),
               runtimeContainers: [
                 {
                   name: container.name,
@@ -960,11 +926,45 @@ export default function AppContainerDetailPage() {
           : current,
       );
     } catch {
-      // Keep the last known metrics visible when a realtime sample is missed.
+      setMetricSamples([]);
+      setRuntimeNotice("Could not refresh metrics. The last available sample may be outdated.");
     } finally {
       runtimeMetricsInFlightRef.current = false;
     }
   }, [params.containerId]);
+
+  const openAddDomain = useCallback(async () => {
+    const container = containerRecordRef.current;
+    if (!container || container.status !== "RUNNING" || !canMutateContainers || domainLoading) return;
+    setDomainLoading(true);
+    setDomainNotice("");
+    try {
+      const [servers, domains] = await Promise.all([serversApi.list(), domainsApi.list()]);
+      if (containerRecordRef.current?.id !== container.id) return;
+      if (!servers.data?.some((server) => server.id === container.serverId)) throw new Error("The container server is unavailable.");
+      setDomainModal({ servers: servers.data, domains: domains.data ?? [], serverId: container.serverId, containerId: container.id });
+    } catch (cause) {
+      setDomainNotice(cause instanceof Error ? cause.message : "Could not load domain setup.");
+    } finally {
+      setDomainLoading(false);
+    }
+  }, [canMutateContainers, domainLoading]);
+
+  const handleDomainCreated = useCallback(async (name: string, containerId: string) => {
+    const container = containerRecordRef.current;
+    if (!container || container.id !== containerId) return;
+    domainsRevisionRef.current += 1;
+    try {
+      const response = await domainsApi.list();
+      if (containerRecordRef.current?.id !== container.id) return;
+      const domains = response.data ?? [];
+      domainsLoadedRef.current = true;
+      setAppDetail((current) => current ? { ...current, domains: getLinkedDomains(domains, container), openUrl: getDomainUrl(domains, container) ?? getContainerWebUiUrl(container) } : current);
+      setDomainNotice(`Domain ${name} added.`);
+    } catch {
+      setDomainNotice(`Domain ${name} was added, but the list could not be refreshed. Refresh the page to see it.`);
+    }
+  }, []);
 
   const hydrateDomains = useCallback(async () => {
     const container = containerRecordRef.current;
@@ -973,9 +973,11 @@ export default function AppContainerDetailPage() {
     }
 
     domainsLoadingRef.current = true;
+    const revision = domainsRevisionRef.current;
 
     try {
       const response = await domainsApi.list();
+      if (revision !== domainsRevisionRef.current || containerRecordRef.current?.id !== container.id) return;
       const domains = response.data ?? [];
       domainsLoadedRef.current = true;
 
@@ -991,7 +993,7 @@ export default function AppContainerDetailPage() {
           : current,
       );
     } catch {
-      domainsLoadedRef.current = true;
+      if (revision === domainsRevisionRef.current) domainsLoadedRef.current = true;
     } finally {
       domainsLoadingRef.current = false;
     }
@@ -1036,7 +1038,10 @@ export default function AppContainerDetailPage() {
       });
       runtimeDetailRef.current = detail;
       runtimeDetailLoadedRef.current = true;
-      setRuntimeNotice("");
+      if (metricsResult.status === "fulfilled") {
+        if (container.status === "RUNNING" && metricsViewRef.current && !document.hidden) setMetricSamples((current) => appendMetricSample(current, metricsResult.value.data.stats, Date.now()));
+        setRuntimeNotice("");
+      }
 
       setAppDetail((current) => {
         const environment = environmentRecordRef.current;
@@ -1046,12 +1051,11 @@ export default function AppContainerDetailPage() {
           ...current,
           serverName: detail.server.name,
           serverIp: detail.server.ip,
-          metrics: buildMetrics(detail, container),
+          metrics: metricsResult.status === "fulfilled" ? buildMetrics(metricsResult.value.data) : current.metrics,
           health: getDockerHealthSummary(detail.inspect),
           runtime: createRuntimeData(container, detail),
           deployments: createDeploymentsData(
             container,
-            detail,
             deploymentHistoryRef.current,
           ),
           advanced: createAdvancedData(container, detail),
@@ -1836,8 +1840,13 @@ export default function AppContainerDetailPage() {
   ]);
 
   useEffect(() => {
-    if (!appDetailId || containerRecord?.status !== "RUNNING") return;
+    metricsViewRef.current = activeTab === "overview" || activeTab === "runtime";
+  }, [activeTab]);
 
+  useEffect(() => {
+    if (!appDetailId || containerRecord?.status !== "RUNNING" || (activeTab !== "overview" && activeTab !== "runtime")) return;
+
+    const frame = window.requestAnimationFrame(() => void refreshRuntimeMetrics());
     const intervalId = window.setInterval(() => {
       void refreshRuntimeMetrics();
     }, CONTAINER_METRICS_REFRESH_INTERVAL_MS);
@@ -1851,10 +1860,11 @@ export default function AppContainerDetailPage() {
     document.addEventListener("visibilitychange", handleVisibilityChange);
 
     return () => {
+      window.cancelAnimationFrame(frame);
       window.clearInterval(intervalId);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [appDetailId, containerRecord?.status, refreshRuntimeMetrics]);
+  }, [activeTab, appDetailId, containerRecord?.status, refreshRuntimeMetrics]);
 
   useEffect(() => {
     if (!logsAutoRefresh) return;
@@ -1895,6 +1905,9 @@ export default function AppContainerDetailPage() {
           current?.onConfirm();
         }}
       />
+      {domainModal && domainModal.containerId === params.containerId ? (
+        <AddDomainModal serverList={domainModal.servers} existingDomains={domainModal.domains} initialTarget={{ serverId: domainModal.serverId, containerId: domainModal.containerId }} onClose={() => setDomainModal(null)} onSaved={(name) => handleDomainCreated(name, domainModal.containerId)} />
+      ) : null}
       <DeploymentDetailsModal
         deployment={selectedDeployment}
         loading={deploymentDetailLoading}
@@ -1979,7 +1992,7 @@ export default function AppContainerDetailPage() {
               <IssueDetailsSummary
                 label="Runtime Stats"
                 message={runtimeNotice}
-                description="Runtime stats are unavailable for this container."
+                description="Check the latest container metrics before making decisions."
               />
             ) : null}
             {actionError ? (
@@ -2003,7 +2016,9 @@ export default function AppContainerDetailPage() {
               activeTab={activeTab}
               onChange={handleTabChange}
             />
-            <AppMetricsGrid metrics={appDetail.metrics} />
+            {activeTab === "overview" || activeTab === "runtime" ? (
+              <AppMetricsGrid metrics={appDetail.metrics} samples={metricSamples} />
+            ) : null}
             {activeTab === "overview" ? (
               <AppOverview
                 app={appDetail}
@@ -2012,7 +2027,10 @@ export default function AppContainerDetailPage() {
                 onLogsAutoRefreshChange={setLogsAutoRefresh}
               />
             ) : activeTab === "domains" ? (
-              <DomainsPanel domains={appDetail.domains} variant="tab" />
+              <>
+                {domainNotice ? <div role="status" className="card" style={{ padding: 12 }}>{domainNotice}</div> : null}
+                <DomainsPanel domains={appDetail.domains} variant="tab" onAdd={canMutateContainers ? () => void openAddDomain() : undefined} adding={domainLoading} addDisabledReason={canMutateContainers && containerRecord?.status !== "RUNNING" ? "Start the container before adding a domain." : undefined} />
+              </>
             ) : activeTab === "runtime" ? (
               <RuntimeTabPanel runtime={appDetail.runtime} />
             ) : activeTab === "logs" ? (
@@ -2035,6 +2053,7 @@ export default function AppContainerDetailPage() {
               <section className="card" style={{ padding: 16, minWidth: 0 }}>
                 <IncidentTimelinePanel
                   serverId={containerRecord.serverId}
+                  pageSize={10}
                   scopeLabel={`container ${appDetail.name}`}
                   containerId={containerRecord.id}
                   onOpenCorrelation={openDeploymentDetails}

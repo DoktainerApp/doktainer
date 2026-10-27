@@ -17,7 +17,6 @@ export interface AppMetric {
   value: string;
   subvalue: string;
   tone: "blue" | "green" | "purple" | "amber" | "cyan";
-  points: number[];
 }
 
 export interface AppAction {
@@ -81,25 +80,11 @@ export interface LinkedDomainSummary {
   url: string;
 }
 
-export interface RuntimeStatusSummary {
-  label: string;
-  value: string;
-  subvalue: string;
-  tone: "blue" | "green" | "purple" | "amber" | "cyan";
-}
-
 export interface RuntimePortBinding {
   containerPort: string;
   publicEndpoint: string;
   protocol: string;
   mode: string;
-}
-
-export interface RuntimeMount {
-  source: string;
-  target: string;
-  type: string;
-  access: string;
 }
 
 export interface RuntimeProcess {
@@ -110,27 +95,11 @@ export interface RuntimeProcess {
   memory: string;
 }
 
-export interface RuntimeHealthCheck {
-  name: string;
-  status: string;
-  interval: string;
-  lastRun: string;
-}
-
-export interface RuntimeEvent {
-  time: string;
-  message: string;
-  tone: "info" | "success" | "warning";
-}
-
 export interface RuntimeTabData {
-  summaries: RuntimeStatusSummary[];
   configuration: Array<{ label: string; value: string }>;
   ports: RuntimePortBinding[];
-  mounts: RuntimeMount[];
   processes: RuntimeProcess[];
-  healthChecks: RuntimeHealthCheck[];
-  events: RuntimeEvent[];
+  healthStatus: string;
 }
 
 export interface DeploymentTabSummary {
@@ -262,44 +231,15 @@ export interface StorageMountItem {
   target: string;
   type: "Bind" | "Volume" | "Tmpfs";
   access: "Read / Write" | "Read only";
-  size: string;
-  usage: number;
-  status: "Mounted" | "Detached" | "Pending";
-}
-
-export interface StorageVolumeItem {
-  id: string;
-  name: string;
   driver: string;
-  mountpoint: string;
-  scope: string;
-  createdAt: string;
-  labels: string[];
-}
-
-export interface StorageBackupItem {
-  id: string;
-  name: string;
-  target: string;
-  size: string;
-  status: "Completed" | "Scheduled" | "Failed";
-  lastRun: string;
-  retention: string;
-}
-
-export interface StoragePathItem {
-  label: string;
-  path: string;
-  purpose: string;
-  status: "Available" | "Missing" | "Readonly";
+  mode: string;
+  propagation: string;
 }
 
 export interface StorageTabData {
+  inspectAvailable: boolean;
   summaries: StorageSummary[];
   mounts: StorageMountItem[];
-  volumes: StorageVolumeItem[];
-  backups: StorageBackupItem[];
-  paths: StoragePathItem[];
 }
 
 export interface LogsSummary {

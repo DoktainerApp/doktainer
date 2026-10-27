@@ -37,6 +37,7 @@ type TimelineLoad = {
 type IncidentTimelinePanelProps = {
   serverId: string;
   scopeLabel: string;
+  pageSize?: number;
   containerId?: string;
   environmentId?: string;
   correlationId?: string;
@@ -92,6 +93,7 @@ function formatSource(source: IncidentEventRecord["source"]) {
 export default function IncidentTimelinePanel({
   serverId,
   scopeLabel,
+  pageSize = PAGE_SIZE,
   containerId,
   environmentId,
   correlationId,
@@ -119,6 +121,7 @@ export default function IncidentTimelinePanel({
     environmentId ?? "",
     correlationId ?? "",
     page,
+    pageSize,
     severity,
     type,
     reloadRevision,
@@ -136,7 +139,7 @@ export default function IncidentTimelinePanel({
       try {
         const response = await serversApi.timeline(serverId, {
           page,
-          pageSize: PAGE_SIZE,
+          pageSize,
           severity: showFilters && severity !== "ALL" ? severity : undefined,
           type: showFilters && type !== "ALL" ? type : undefined,
           containerId,
@@ -189,6 +192,7 @@ export default function IncidentTimelinePanel({
     correlationId,
     environmentId,
     page,
+    pageSize,
     requestKey,
     serverId,
     severity,
@@ -198,9 +202,9 @@ export default function IncidentTimelinePanel({
 
   const ready = load.key === requestKey;
   const groups = useMemo(() => groupIncidentEvents(load.items), [load.items]);
-  const totalPages = Math.max(1, Math.ceil((ready ? load.total : 0) / PAGE_SIZE));
-  const startItem = !ready || load.total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
-  const endItem = !ready ? 0 : Math.min(page * PAGE_SIZE, load.total);
+  const totalPages = Math.max(1, Math.ceil((ready ? load.total : 0) / pageSize));
+  const startItem = !ready || load.total === 0 ? 0 : (page - 1) * pageSize + 1;
+  const endItem = !ready ? 0 : Math.min(page * pageSize, load.total);
   const hasFilters = severity !== "ALL" || type !== "ALL";
 
   const changeSeverity = (next: SeverityFilter) => {
