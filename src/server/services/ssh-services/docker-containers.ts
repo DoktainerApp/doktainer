@@ -1,5 +1,6 @@
 ﻿import yaml from "js-yaml";
 import { randomBytes } from "crypto";
+import { parse as parseDotEnv } from "dotenv";
 import { posix as pathPosix } from "path";
 import { TextDecoder } from "util";
 import { Server } from "@prisma/client";
@@ -309,18 +310,7 @@ export function omitManagedEnvironmentOverrides(
   runtimeEnv: string | undefined,
   managedEnv: string,
 ): string {
-  const managedKeys = new Set(
-    managedEnv
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter((line) => line && !line.startsWith("#"))
-      .flatMap((line) => {
-        const separatorIndex = line.indexOf("=");
-        if (separatorIndex < 1) return [];
-        const key = line.slice(0, separatorIndex).trim();
-        return SAFE_ENV_KEY_PATTERN.test(key) ? [key] : [];
-      }),
-  );
+  const managedKeys = new Set(Object.keys(parseDotEnv(managedEnv)));
 
   return parseEnvironmentAssignments(runtimeEnv)
     .filter((assignment) => {
@@ -328,6 +318,23 @@ export function omitManagedEnvironmentOverrides(
       return !managedKeys.has(assignment.slice(0, separatorIndex));
     })
     .join("\n");
+}
+
+export function normalizeDockerEnvironmentFile(content: string): string {
+  const assignments = Object.entries(parseDotEnv(content)).map(([key, value]) => {
+    if (!SAFE_ENV_KEY_PATTERN.test(key)) {
+      throw new Error(`Invalid environment variable key: ${key}`);
+    }
+    if (/[\r\n\0]/.test(value)) {
+      throw new Error(
+        `Environment variable ${key} contains a multiline value that Docker env files cannot represent`,
+      );
+    }
+
+    return `${key}=${value}`;
+  });
+
+  return assignments.length > 0 ? `${assignments.join("\n")}\n` : "";
 }
 
 function normalizePath(path: string): string {
@@ -961,12 +968,17 @@ export async function writeDeploymentEnvFile(
 ): Promise<DeploymentEnvFileWriteResult> {
   const contentBase64 = Buffer.from(content, "utf8").toString("base64");
   const script = [
-    "set -u",
+    "set -eu",
     `TARGET=${escapeShellArg(filePath)}`,
     `CONTENT=${escapeShellArg(contentBase64)}`,
     'DIR=$(dirname "$TARGET")',
     'mkdir -p "$DIR"',
-    'printf %s "$CONTENT" | base64 -d > "$TARGET"',
+    'TEMP_TARGET="${TARGET}.tmp.$$"',
+    'trap \'rm -f "$TEMP_TARGET"\' EXIT',
+    'printf %s "$CONTENT" | base64 -d > "$TEMP_TARGET"',
+    'chmod 600 "$TEMP_TARGET"',
+    'mv -f "$TEMP_TARGET" "$TARGET"',
+    'trap - EXIT',
     'SIZE=$(wc -c < "$TARGET" 2>/dev/null || echo 0)',
     'printf "__SAVED__\\t%s\\t%s\\n" "$TARGET" "${SIZE:-0}"',
   ].join("\n");
@@ -1755,16 +1767,23 @@ export async function runContainer(
   },
 ): Promise<string> {
   let env = opts.env;
+  let envFilePath = opts.envFilePath;
   if (opts.envFilePath) {
     const managedEnv = await readDeploymentEnvFile(server, [opts.envFilePath]);
     if (managedEnv.found) {
       env = omitManagedEnvironmentOverrides(env, managedEnv.content);
+      envFilePath = `${opts.envFilePath}.docker`;
+      await writeDeploymentEnvFile(
+        server,
+        envFilePath,
+        normalizeDockerEnvironmentFile(managedEnv.content),
+      );
     }
   }
 
   return execDockerStrict(
     server,
-    buildDockerRunCommand({ ...opts, env }),
+    buildDockerRunCommand({ ...opts, env, envFilePath }),
     shortDockerCommandTimeout(DOCKER_RUN_TIMEOUT_MS),
   );
 }

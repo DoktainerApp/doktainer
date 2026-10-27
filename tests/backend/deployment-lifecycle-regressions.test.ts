@@ -209,6 +209,11 @@ test("SQLite state is persisted without coupling orchestration to a framework", 
     source,
     /env = omitManagedEnvironmentOverrides\(env, managedEnv\.content\)/,
   );
+  assert.match(source, /envFilePath = `\$\{opts\.envFilePath\}\.docker`/);
+  assert.match(
+    source,
+    /normalizeDockerEnvironmentFile\(managedEnv\.content\)/,
+  );
   assert.match(
     source,
     /omitManagedEnvironmentOverrides\(opts\.runtimeEnv, envFile\.content\)/,

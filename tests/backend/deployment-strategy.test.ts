@@ -6,6 +6,7 @@ import {
 } from "../../src/server/services/deployment-strategy";
 import {
   buildDockerRunCommand,
+  normalizeDockerEnvironmentFile,
   omitManagedEnvironmentOverrides,
   resolveSqliteDatabasePath,
 } from "../../src/server/services/ssh-services/docker-containers";
@@ -78,6 +79,38 @@ describe("deployment strategy", () => {
         "OPTION=\n",
       ),
       "UNCHANGED=value",
+    );
+  });
+
+  it("normalizes dotenv quoting before passing values to Docker", () => {
+    const normalized = normalizeDockerEnvironmentFile(
+      [
+        'DATABASE_URL="postgresql://user:pass@postgres:5432/app?schema=public"',
+        "EMPTY_VALUE=",
+        'HASH_VALUE="value#fragment"',
+        "SPACED_VALUE='value with spaces'",
+      ].join("\n"),
+    );
+
+    assert.equal(
+      normalized,
+      [
+        "DATABASE_URL=postgresql://user:pass@postgres:5432/app?schema=public",
+        "EMPTY_VALUE=",
+        "HASH_VALUE=value#fragment",
+        "SPACED_VALUE=value with spaces",
+        "",
+      ].join("\n"),
+    );
+    assert.doesNotThrow(
+      () => new URL(normalized.split("\n", 1)[0].slice("DATABASE_URL=".length)),
+    );
+  });
+
+  it("rejects dotenv multiline values that Docker env files cannot represent", () => {
+    assert.throws(
+      () => normalizeDockerEnvironmentFile('PRIVATE_KEY="line one\\nline two"'),
+      /multiline value/,
     );
   });
 
