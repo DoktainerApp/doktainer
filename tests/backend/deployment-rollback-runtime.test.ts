@@ -6,6 +6,7 @@ import {
   replaceRuntimeForRollback,
   replaceRuntimeWithProxyCandidate,
   resolveDirectRuntimeReadiness,
+  resolveDockerInspectCommand,
   resolveRollbackImageReference,
   RollbackRuntimeError,
 } from "../../src/server/services/deployment-rollback.service";
@@ -31,6 +32,23 @@ test("normalizes Docker display port mappings for rollback", () => {
   assert.equal(
     normalizeRollbackPortMappings(["8081:81", "9000->90/udp"]),
     "8081:81,9000:90/udp",
+  );
+});
+
+test("preserves Docker entrypoint arguments when rebuilding a recovery command", () => {
+  assert.deepEqual(
+    resolveDockerInspectCommand(
+      ["/bin/bash", "-l", "-c"],
+      ["php artisan migrate --force && nginx -c /nginx.conf"],
+    ),
+    {
+      entrypoint: "/bin/bash",
+      commandArgs: [
+        "-l",
+        "-c",
+        "php artisan migrate --force && nginx -c /nginx.conf",
+      ],
+    },
   );
 });
 

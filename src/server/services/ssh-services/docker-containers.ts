@@ -305,6 +305,31 @@ function parseEnvironmentAssignments(value?: string): string[] {
     });
 }
 
+export function omitManagedEnvironmentOverrides(
+  runtimeEnv: string | undefined,
+  managedEnv: string,
+): string {
+  const managedKeys = new Set(
+    managedEnv
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line && !line.startsWith("#"))
+      .flatMap((line) => {
+        const separatorIndex = line.indexOf("=");
+        if (separatorIndex < 1) return [];
+        const key = line.slice(0, separatorIndex).trim();
+        return SAFE_ENV_KEY_PATTERN.test(key) ? [key] : [];
+      }),
+  );
+
+  return parseEnvironmentAssignments(runtimeEnv)
+    .filter((assignment) => {
+      const separatorIndex = assignment.indexOf("=");
+      return !managedKeys.has(assignment.slice(0, separatorIndex));
+    })
+    .join("\n");
+}
+
 function normalizePath(path: string): string {
   return path.replace(/\/+$/, "") || "/";
 }
@@ -1729,9 +1754,17 @@ export async function runContainer(
     mountValidation?: MountValidationOptions;
   },
 ): Promise<string> {
+  let env = opts.env;
+  if (opts.envFilePath) {
+    const managedEnv = await readDeploymentEnvFile(server, [opts.envFilePath]);
+    if (managedEnv.found) {
+      env = omitManagedEnvironmentOverrides(env, managedEnv.content);
+    }
+  }
+
   return execDockerStrict(
     server,
-    buildDockerRunCommand(opts),
+    buildDockerRunCommand({ ...opts, env }),
     shortDockerCommandTimeout(DOCKER_RUN_TIMEOUT_MS),
   );
 }
@@ -2651,8 +2684,11 @@ async function prepareManagedSqliteState(
   ]);
   if (!envFile.found && !opts.runtimeEnv?.trim()) return null;
 
+  const runtimeEnv = envFile.found
+    ? omitManagedEnvironmentOverrides(opts.runtimeEnv, envFile.content)
+    : opts.runtimeEnv;
   const sourceDatabasePath = resolveSqliteDatabasePath(
-    `${envFile.content}\n${opts.runtimeEnv ?? ""}`,
+    `${runtimeEnv ?? ""}\n${envFile.content}`,
     opts.defaultDatabasePath,
   );
   if (!sourceDatabasePath) return null;

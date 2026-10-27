@@ -6,6 +6,7 @@ import {
 } from "../../src/server/services/deployment-strategy";
 import {
   buildDockerRunCommand,
+  omitManagedEnvironmentOverrides,
   resolveSqliteDatabasePath,
 } from "../../src/server/services/ssh-services/docker-containers";
 
@@ -45,6 +46,38 @@ describe("deployment strategy", () => {
           envFilePath: "relative/.env",
         }),
       /absolute path/,
+    );
+  });
+
+  it("lets managed env values replace stale Docker runtime overrides", () => {
+    const runtimeEnv = [
+      "DB_CONNECTION=sqlite",
+      "DB_DATABASE=/app/database/database.sqlite",
+      "APP_KEY=preserved-runtime-key",
+      "PATH=/usr/local/bin:/usr/bin",
+    ].join("\n");
+    const managedEnv = [
+      "DB_CONNECTION=mysql",
+      "DB_DATABASE=app",
+      "APP_ENV=production",
+    ].join("\n");
+
+    const filtered = omitManagedEnvironmentOverrides(runtimeEnv, managedEnv);
+
+    assert.doesNotMatch(filtered, /^DB_CONNECTION=/m);
+    assert.doesNotMatch(filtered, /^DB_DATABASE=/m);
+    assert.match(filtered, /^APP_KEY=preserved-runtime-key$/m);
+    assert.match(filtered, /^PATH=\/usr\/local\/bin:\/usr\/bin$/m);
+    assert.equal(resolveSqliteDatabasePath(`${filtered}\n${managedEnv}`), null);
+  });
+
+  it("honors an intentionally empty value in the managed env file", () => {
+    assert.equal(
+      omitManagedEnvironmentOverrides(
+        "OPTION=stale\nUNCHANGED=value",
+        "OPTION=\n",
+      ),
+      "UNCHANGED=value",
     );
   });
 

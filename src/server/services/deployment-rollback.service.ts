@@ -195,9 +195,29 @@ function formatPortBindings(bindings?: DockerPortBindings) {
     .join(",");
 }
 
-function formatEntrypoint(value?: string[] | string | null) {
-  if (typeof value === "string") return value.trim() || undefined;
-  return value?.[0]?.trim() || undefined;
+export function resolveDockerInspectCommand(
+  entrypoint?: string[] | string | null,
+  command?: string[] | null,
+) {
+  const commandArgs = (command ?? []).filter(
+    (argument): argument is string => typeof argument === "string",
+  );
+  if (typeof entrypoint === "string") {
+    return {
+      entrypoint: entrypoint.trim() || undefined,
+      commandArgs,
+    };
+  }
+
+  return {
+    entrypoint: entrypoint?.[0]?.trim() || undefined,
+    commandArgs: [
+      ...(entrypoint?.slice(1).filter(
+        (argument): argument is string => typeof argument === "string",
+      ) ?? []),
+      ...commandArgs,
+    ],
+  };
 }
 
 function snapshotRuntime(
@@ -318,6 +338,11 @@ export async function resolveCurrentRuntimeSpec(input: {
       ? networkMode
       : attachedNetworks[0] || networkMode || "bridge";
 
+    const runtimeCommand = resolveDockerInspectCommand(
+      inspect.Config?.Entrypoint,
+      inspect.Config?.Cmd,
+    );
+
     return {
       image:
         inspect.Image?.trim() ||
@@ -342,10 +367,7 @@ export async function resolveCurrentRuntimeSpec(input: {
         inspect.HostConfig?.RestartPolicy?.Name?.trim() ||
         input.container.restartPolicy ||
         "unless-stopped",
-      entrypoint: formatEntrypoint(inspect.Config?.Entrypoint),
-      commandArgs: inspect.Config?.Cmd?.filter(
-        (argument): argument is string => typeof argument === "string",
-      ),
+      ...runtimeCommand,
       command: "",
     };
   } catch {

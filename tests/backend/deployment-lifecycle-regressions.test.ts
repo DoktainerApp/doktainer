@@ -205,6 +205,14 @@ test("SQLite state is persisted without coupling orchestration to a framework", 
   assert.match(source, /docker cp .*CONTAINER_REF.*CONTAINER_DB/);
   assert.match(source, /command -v sqlite3/);
   assert.match(source, /php artisan migrate --force/);
+  assert.match(
+    source,
+    /env = omitManagedEnvironmentOverrides\(env, managedEnv\.content\)/,
+  );
+  assert.match(
+    source,
+    /omitManagedEnvironmentOverrides\(opts\.runtimeEnv, envFile\.content\)/,
+  );
   assert.match(gitDeployFunction, /managedSqliteState\.volumeMount/);
   assert.match(
     source,
