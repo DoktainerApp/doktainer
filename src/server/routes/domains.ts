@@ -20,6 +20,7 @@ import {
   resolveContainerUpstream,
 } from "../services/domain-provisioning";
 import { getDomainConfigAnchor } from "../services/domain-provisioning/names";
+import { isUnchangedSharedUpdateWithStoppedMember } from "../services/domain-provisioning/shared-update-noop";
 import * as ssh from "../services/ssh.service";
 
 const domainNameSchema = z
@@ -1849,6 +1850,38 @@ export async function domainRoutes(app: FastifyInstance) {
     const willBeSharedNginx = isSharedNginxConfig(nextInput);
     const previousRootDomain = getDomainConfigAnchor([existing.name]);
     const nextRootDomain = getDomainConfigAnchor([nextInput.name]);
+    if (wasSharedNginx && willBeSharedNginx && targetServer && existing.serverId) {
+      const updateData = toDomainUpdateData(nextInput);
+      const current = existing as unknown as Record<string, unknown>;
+      const update = updateData as Record<string, unknown>;
+      if (Object.entries(update).every(([key, value]) => current[key] === value)) {
+        const members = await listSharedNginxGroupMembers({
+          organizationId: req.organizationId!,
+          serverId: existing.serverId,
+          rootDomain: previousRootDomain,
+        });
+        if (await isUnchangedSharedUpdateWithStoppedMember({
+          current,
+          update,
+          domainId: existing.id,
+          members,
+          inspect: (ref) => ssh.dockerInspect(targetServer!, ref),
+        })) {
+          const domain = await prisma.domain.findUnique({
+            where: { id },
+            include: {
+              server: { select: { name: true } },
+              targetContainer: { select: { id: true, name: true, image: true } },
+              sslCert: { select: publicSslCertSelect },
+            },
+          });
+          if (!domain || domain.organizationId !== req.organizationId) {
+            return reply.status(404).send({ success: false, error: "Domain not found" });
+          }
+          return reply.send({ success: true, data: domain, meta: { unchanged: true } });
+        }
+      }
+    }
     const shouldReconcilePreviousShared =
       wasSharedNginx &&
       (!willBeSharedNginx ||
