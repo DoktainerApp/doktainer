@@ -5,7 +5,7 @@ import SearchField from "@/components/SearchField";
 import ToastViewport from "@/components/ToastViewport";
 import ConfirmActionDialog from "@/components/ConfirmActionDialog";
 import TablePagination from "@/components/TablePagination";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Network,
   Trash2,
@@ -32,6 +32,7 @@ import {
 } from "@/lib/page-state";
 import { useTablePagination } from "@/lib/use-table-pagination";
 import { useToastManager } from "@/lib/use-toast-manager";
+import { createLatestRequestGuard } from "@/lib/latest-request";
 
 const PAGE_KEY = "networks";
 
@@ -981,6 +982,7 @@ export default function NetworksPage() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [confirmDialog, setConfirmDialog] =
     useState<PendingConfirmAction | null>(null);
+  const latestRequest = useRef(createLatestRequestGuard());
 
   const applyCachedState = useCallback((serverId: string) => {
     const cached = readCachedPageData<{
@@ -998,6 +1000,7 @@ export default function NetworksPage() {
 
   const load = useCallback(
     async (options?: { sync?: boolean; serverId?: string }) => {
+      const isCurrent = latestRequest.current();
       setLoading(true);
       try {
         const resolvedServerId = options?.serverId ?? "";
@@ -1010,6 +1013,7 @@ export default function NetworksPage() {
             )
           : await networksApi.list(resolvedServerId || undefined);
 
+        if (!isCurrent()) return;
         setItems(networksRes.data ?? []);
         setServerList(nextServers);
         setSelectedServerId(resolvedServerId);
@@ -1022,15 +1026,17 @@ export default function NetworksPage() {
           },
           resolvedServerId,
         );
-      } catch {
+      } catch (error) {
         if (options?.sync) {
           try {
+            if (!isCurrent()) throw error;
             const resolvedServerId = options?.serverId ?? "";
             const serversRes = await serversApi.list();
             const nextServers = serversRes.data ?? [];
             const networksRes = await networksApi.list(
               resolvedServerId || undefined,
             );
+            if (!isCurrent()) throw error;
             setItems(networksRes.data ?? []);
             setServerList(nextServers);
             setSelectedServerId(resolvedServerId);
@@ -1046,9 +1052,10 @@ export default function NetworksPage() {
           } catch {
             /* ignore */
           }
+          throw error;
         }
       } finally {
-        setLoading(false);
+        if (isCurrent()) setLoading(false);
       }
     },
     [],
@@ -1056,12 +1063,21 @@ export default function NetworksPage() {
 
   useEffect(() => {
     const storedServerId = readStoredServerSelection(PAGE_KEY);
-    setSelectedServerId(storedServerId);
-    const hasCache = applyCachedState(storedServerId);
-    if (!hasCache) {
+    let active = true;
+    queueMicrotask(() => {
+      if (!active) return;
+      setSelectedServerId(storedServerId);
+      applyCachedState(storedServerId);
       void load({ sync: false, serverId: storedServerId });
-    }
+    });
+    return () => { active = false; };
   }, [applyCachedState, load]);
+
+  useEffect(() => {
+    const refreshAfterSync = () => void load({ sync: false, serverId: selectedServerId });
+    window.addEventListener("doktainer:networks-synced", refreshAfterSync);
+    return () => window.removeEventListener("doktainer:networks-synced", refreshAfterSync);
+  }, [load, selectedServerId]);
 
   const stats = useMemo(
     () => ({
@@ -1153,10 +1169,8 @@ export default function NetworksPage() {
     if (serverId === selectedServerId) return;
     storeServerSelection(PAGE_KEY, serverId);
     setSelectedServerId(serverId);
-    const hasCache = applyCachedState(serverId);
-    if (!hasCache) {
-      await load({ sync: false, serverId });
-    }
+    applyCachedState(serverId);
+    await load({ sync: false, serverId });
   };
 
   return (
@@ -1183,7 +1197,7 @@ export default function NetworksPage() {
         <AddNetworkModal
           serverList={serverList}
           onClose={() => setShowAdd(false)}
-          onAdded={() => void load()}
+          onAdded={() => void load({ serverId: selectedServerId })}
         />
       )}
       {detailFor && (
@@ -1580,5 +1594,3 @@ export default function NetworksPage() {
     </DashboardLayout>
   );
 }
-
-

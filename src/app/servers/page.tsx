@@ -17,12 +17,14 @@ import ServersToolbar from "@/app/servers/components/ServersToolbar";
 import {
   type DockerRuntimeStatus,
   servers as serversApi,
+  networks as networksApi,
   type Server as ServerType,
   canViewServerConnection,
 } from "@/lib/api";
 import { SERVER_METRICS_REFRESH_INTERVAL_MS } from "@/lib/monitoring-policy";
 import { useTablePagination } from "@/lib/use-table-pagination";
 import { useToastManager } from "@/lib/use-toast-manager";
+import { clearCachedPageData } from "@/lib/page-state";
 
 type PendingConfirmAction = {
   title: string;
@@ -67,6 +69,25 @@ export default function ServersPage() {
   const [serverGuardServer, setServerGuardServer] = useState<ServerType | null>(null);
   const { toasts, pushToast, dismissToast } = useToastManager();
   const refreshAllMetricsInFlightRef = useRef(false);
+
+  const syncServerNetworks = useCallback(async (serverId: string, checkDocker: boolean) => {
+    try {
+      if (checkDocker) {
+        const { data: docker } = await serversApi.dockerStatus(serverId);
+        if (!docker.available) {
+          pushToast({ tone: "info", title: "Network sync skipped", message: docker.probeFailed ? "Docker status could not be checked. Check the server connection and sync from Networks." : "Docker is not available yet. Install or start Docker, then sync networks." });
+          return;
+        }
+      }
+      await networksApi.sync({ serverId });
+      clearCachedPageData("networks");
+      clearCachedPageData("networks", serverId);
+      window.dispatchEvent(new Event("doktainer:networks-synced"));
+      pushToast({ tone: "success", title: "Networks synced", message: "Docker networks are available in Networks." });
+    } catch {
+      pushToast({ tone: "warning", title: "Network sync failed", message: "Docker networks could not be synced. Check the server connection and try Sync from Docker on the Networks page." });
+    }
+  }, [pushToast]);
 
   const fetchDockerStatuses = useCallback(async (serverIds: string[]) => {
     if (serverIds.length === 0) {
@@ -519,9 +540,10 @@ export default function ServersPage() {
       {showModal ? (
         <ServerFormModal
           onClose={() => setShowModal(false)}
-          onSaved={(message: string) => {
+          onSaved={(message: string, serverId?: string) => {
             pushToast({ tone: "success", message, showProgress: true });
             void load();
+            if (serverId) void syncServerNetworks(serverId, true);
           }}
         />
       ) : null}
@@ -569,6 +591,7 @@ export default function ServersPage() {
         <DockerManagerModal
           server={dockerManagerServer}
           onClose={() => setDockerManagerServer(null)}
+          onDockerReady={(serverId) => void syncServerNetworks(serverId, false)}
           onActionComplete={(message, tone = "success") => {
             pushToast({
               tone,

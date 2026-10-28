@@ -21,7 +21,7 @@ function createServerFormState(server?: ServerType) {
 interface ServerFormModalProps {
   server?: ServerType;
   onClose: () => void;
-  onSaved: (message: string) => void;
+  onSaved: (message: string, createdServerId?: string) => void;
 }
 
 export default function ServerFormModal({
@@ -75,8 +75,8 @@ export default function ServerFormModal({
         await serversApi.update(server.id, payload);
         onSaved(`Server \"${form.name}\" updated successfully`);
       } else {
-        await serversApi.create(payload);
-        onSaved(`Server \"${form.name}\" added successfully`);
+        const response = await serversApi.create(payload);
+        onSaved(`Server \"${form.name}\" added successfully`, response.data.id);
       }
       onClose();
     } catch (err: unknown) {

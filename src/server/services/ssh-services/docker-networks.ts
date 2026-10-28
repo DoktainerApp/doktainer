@@ -83,36 +83,29 @@ export async function listDockerNetworks(
 
   const inspected = await Promise.all(
     rawNetworks.map(async (network) => {
-      try {
-        const inspectOutput = await execDockerStrict(
-          server,
-          `docker network inspect ${escapeShellArg(network.name)}`,
-          dockerNetworkCommandTimeout(DOCKER_NETWORK_INSPECT_TIMEOUT_MS),
-        );
-        const parsed = JSON.parse(inspectOutput) as Array<{
-          IPAM?: { Config?: Array<{ Subnet?: string; Gateway?: string }> };
-          Containers?: Record<string, unknown>;
-        }>;
-        const details = parsed[0] ?? {};
-        const ipam = details.IPAM?.Config?.[0];
-        const containers = Object.keys(details.Containers ?? {}).length;
-
-        return {
-          ...network,
-          subnet: ipam?.Subnet,
-          gateway: ipam?.Gateway,
-          containers,
-        } satisfies DockerNetworkInfo;
-      } catch {
-        return {
-          ...network,
-          containers: 0,
-        } satisfies DockerNetworkInfo;
-      }
+      const inspectOutput = await execDockerStrict(
+        server,
+        `docker network inspect ${escapeShellArg(network.name)}`,
+        dockerNetworkCommandTimeout(DOCKER_NETWORK_INSPECT_TIMEOUT_MS),
+      );
+      return parseNetworkSyncDetails(network, inspectOutput);
     }),
   );
 
   return inspected.sort((left, right) => left.name.localeCompare(right.name));
+}
+
+export function parseNetworkSyncDetails(network: DockerNetworkInfo, output: string): DockerNetworkInfo {
+  const parsed = JSON.parse(output) as Array<{
+    IPAM?: { Config?: Array<{ Subnet?: string; Gateway?: string }> };
+    Containers?: Record<string, unknown> | null;
+  }>;
+  const details = Array.isArray(parsed) ? parsed[0] : undefined;
+  if (!details || !("Containers" in details) || (details.Containers != null && (typeof details.Containers !== "object" || Array.isArray(details.Containers)))) {
+    throw new Error(`Docker network details unavailable for ${network.name}`);
+  }
+  const ipam = details.IPAM?.Config?.[0];
+  return { ...network, subnet: ipam?.Subnet, gateway: ipam?.Gateway, containers: Object.keys(details.Containers ?? {}).length };
 }
 
 export async function dockerNetworkInspect(

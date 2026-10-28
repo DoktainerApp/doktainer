@@ -66,10 +66,12 @@ export default function DockerManagerModal({
   server,
   onClose,
   onActionComplete,
+  onDockerReady,
 }: {
   server: ServerType;
   onClose: () => void;
   onActionComplete: (message: string, tone?: "success" | "error") => void;
+  onDockerReady: (serverId: string) => void;
 }) {
   const [snapshot, setSnapshot] = useState<ServerConfigSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -179,6 +181,9 @@ export default function DockerManagerModal({
                 ? `Docker removal completed for ${server.name}.`
                 : `Docker cleanup completed for ${server.name}.`;
       onActionComplete(message);
+      if ((action === "install" || action === "repair" || action === "reinstall") && response.data.available) {
+        onDockerReady(server.id);
+      }
       await refresh();
     } catch (caught: unknown) {
       const message = formatDockerManagerError(caught);
