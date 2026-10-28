@@ -1,6 +1,7 @@
 "use client";
 
 import DashboardLayout from "@/components/DashboardLayout";
+import StatusBadge from "@/app/servers/components/StatusBadge";
 import SensitiveConnectionValue from "@/components/SensitiveConnectionValue";
 import TablePagination from "@/components/TablePagination";
 import { useTablePagination } from "@/lib/use-table-pagination";
@@ -586,7 +587,6 @@ function DashboardContent() {
                   {serverPagination.paginatedItems.map((s) => {
                     const cpu = s.metrics?.cpuPct ?? 0;
                     const ram = s.metrics?.ramPct ?? 0;
-                    const statusLow = s.status.toLowerCase();
                     return (
                       <tr key={s.id} style={{ cursor: "pointer" }}>
                         <td>
@@ -636,37 +636,7 @@ function DashboardContent() {
                           </div>
                         </td>
                         <td>
-                          <span
-                            className={
-                              statusLow === "online"
-                                ? "badge-online"
-                                : statusLow === "warning"
-                                  ? "badge-warning"
-                                  : "badge-offline"
-                            }
-                            style={{
-                              padding: "2px 8px",
-                              borderRadius: 6,
-                              fontSize: 11,
-                              fontWeight: 500,
-                            }}
-                          >
-                            {statusLow === "online" && (
-                              <span
-                                className="animate-pulse-dot"
-                                style={{
-                                  display: "inline-block",
-                                  width: 5,
-                                  height: 5,
-                                  borderRadius: "50%",
-                                  background: "currentColor",
-                                  marginRight: 5,
-                                  verticalAlign: "middle",
-                                }}
-                              />
-                            )}
-                            {s.status}
-                          </span>
+                          <StatusBadge status={s.status} />
                         </td>
                         <td>
                           <div>
