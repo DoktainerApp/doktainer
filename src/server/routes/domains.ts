@@ -1315,6 +1315,18 @@ function serializeDomainForViewer<
   return safeDomain;
 }
 
+export const publicSslCertSelect = {
+  id: true,
+  domainId: true,
+  issuer: true,
+  issuedAt: true,
+  expiresAt: true,
+  status: true,
+  autoRenew: true,
+  createdAt: true,
+  updatedAt: true,
+} as const;
+
 export async function domainRoutes(app: FastifyInstance) {
   // GET /domains
   app.get("/", { preHandler: domainReadAccess }, async (req, reply) => {
@@ -1324,7 +1336,7 @@ export async function domainRoutes(app: FastifyInstance) {
       include: {
         server: { select: { name: true, ip: true } },
         targetContainer: { select: { id: true, name: true, image: true } },
-        sslCert: true,
+        sslCert: { select: publicSslCertSelect },
       },
     });
     return reply.send({
@@ -1523,7 +1535,7 @@ export async function domainRoutes(app: FastifyInstance) {
       include: {
         server: { select: { name: true, ip: true } },
         targetContainer: { select: { id: true, name: true, image: true } },
-        sslCert: true,
+        sslCert: { select: publicSslCertSelect },
       },
     });
 
@@ -1545,9 +1557,9 @@ export async function domainRoutes(app: FastifyInstance) {
     const domain = await prisma.domain.findUnique({
       where: { id },
       include: {
-        server: true,
+        server: { select: { id: true, name: true, ip: true } },
         targetContainer: { select: { id: true, name: true, image: true } },
-        sslCert: true,
+        sslCert: { select: publicSslCertSelect },
       },
     });
     if (!domain || domain.organizationId !== req.organizationId)
@@ -1645,7 +1657,7 @@ export async function domainRoutes(app: FastifyInstance) {
       include: {
         server: { select: { name: true } },
         targetContainer: { select: { id: true, name: true, image: true } },
-        sslCert: true,
+        sslCert: { select: publicSslCertSelect },
       },
     });
 
@@ -2086,7 +2098,7 @@ export async function domainRoutes(app: FastifyInstance) {
       include: {
         server: { select: { name: true } },
         targetContainer: { select: { id: true, name: true, image: true } },
-        sslCert: true,
+        sslCert: { select: publicSslCertSelect },
       },
     });
     if (!domain || domain.organizationId !== req.organizationId) {

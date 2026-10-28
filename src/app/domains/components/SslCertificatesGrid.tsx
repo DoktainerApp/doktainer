@@ -36,7 +36,7 @@ export default function SslCertificatesGrid({
     <div
       style={{
         display: "grid",
-        gridTemplateColumns: "repeat(auto-fill, minmax(380px, 1fr))",
+        gridTemplateColumns: "repeat(auto-fill, minmax(min(380px, 100%), 1fr))",
         gap: 12,
       }}
     >
@@ -59,14 +59,14 @@ export default function SslCertificatesGrid({
             style={{
               padding: 18,
               position: "relative",
-              overflow: "hidden",
+              minWidth: 0,
             }}
           >
             <div
               style={{
                 position: "absolute",
-                top: -15,
-                right: -15,
+                top: 0,
+                right: 0,
                 width: 60,
                 height: 60,
                 borderRadius: "50%",
@@ -80,6 +80,8 @@ export default function SslCertificatesGrid({
                 display: "flex",
                 alignItems: "flex-start",
                 justifyContent: "space-between",
+                flexWrap: "wrap",
+                gap: 8,
                 marginBottom: 14,
               }}
             >
@@ -88,6 +90,8 @@ export default function SslCertificatesGrid({
                   display: "flex",
                   alignItems: "center",
                   gap: 8,
+                  minWidth: 0,
+                  flex: "1 1 180px",
                 }}
               >
                 <div
@@ -100,11 +104,12 @@ export default function SslCertificatesGrid({
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
+                    flexShrink: 0,
                   }}
                 >
                   <Lock size={15} style={{ color: statusColor }} />
                 </div>
-                <div>
+                <div style={{ minWidth: 0, overflowWrap: "anywhere" }}>
                   <p
                     style={{
                       fontSize: 13,
@@ -115,7 +120,7 @@ export default function SslCertificatesGrid({
                     {domain.name}
                   </p>
                   <p style={{ fontSize: 11, color: "var(--text-muted)" }}>
-                    {domain.sslCert?.issuer ?? "Let's Encrypt"}
+                    {domain.sslCert?.issuer || "Issuer unavailable"}
                   </p>
                 </div>
               </div>
@@ -132,6 +137,7 @@ export default function SslCertificatesGrid({
                 style={{
                   display: "flex",
                   justifyContent: "space-between",
+                  gap: 8,
                 }}
               >
                 <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
@@ -154,6 +160,7 @@ export default function SslCertificatesGrid({
                 style={{
                   display: "flex",
                   justifyContent: "space-between",
+                  gap: 8,
                 }}
               >
                 <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
@@ -163,6 +170,9 @@ export default function SslCertificatesGrid({
                   style={{
                     fontSize: 11,
                     color: "var(--text-secondary)",
+                    textAlign: "right",
+                    overflowWrap: "anywhere",
+                    minWidth: 0,
                   }}
                 >
                   {domain.server?.name ?? "—"}
@@ -172,6 +182,7 @@ export default function SslCertificatesGrid({
                 style={{
                   display: "flex",
                   justifyContent: "space-between",
+                  gap: 8,
                 }}
               >
                 <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
@@ -211,15 +222,15 @@ export default function SslCertificatesGrid({
                 >
                   {renewOperation.stage.replace(/_/g, " ")}
                 </p>
-                <p style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                <p style={{ fontSize: 11, color: "var(--text-muted)", overflowWrap: "anywhere" }}>
                   {renewOperation.message ?? "Renewal is still running"}
                 </p>
               </div>
             ) : null}
-            <div style={{ marginTop: 14, display: "flex", gap: 6 }}>
+            <div style={{ marginTop: 14, display: "flex", flexWrap: "wrap", gap: 6 }}>
               <button
                 className="btn btn-ghost"
-                style={{ flex: 1, fontSize: 11, padding: "5px" }}
+                style={{ flex: "1 1 110px", fontSize: 11, padding: "5px" }}
                 onClick={() => domain.sslCert && onRenew(domain.sslCert)}
                 disabled={renewBusy}
               >
@@ -233,7 +244,7 @@ export default function SslCertificatesGrid({
               {status === "expiring" && domain.sslCert && (
                 <button
                   className="btn btn-primary"
-                  style={{ flex: 1, fontSize: 11, padding: "5px" }}
+                  style={{ flex: "1 1 110px", fontSize: 11, padding: "5px" }}
                   onClick={() => onRenew(domain.sslCert as SslCert)}
                   disabled={renewBusy}
                 >

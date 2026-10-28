@@ -9,6 +9,7 @@ import VersionUpdateNotice from "@/components/VersionUpdateNotice";
 import { useCurrentUser, useRequireAuth } from "@/lib/auth-state";
 import { addPreferencesListener, getStoredPanelName } from "@/lib/preferences";
 import { getRoleCapabilities } from "@/lib/rbac";
+import { clearLegacySensitivePageCaches } from "@/lib/page-state";
 
 interface DashboardLayoutProps {
   children: React.ReactNode;
@@ -27,6 +28,10 @@ export default function DashboardLayout({
   const [collapsed, setCollapsed] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+
+  useEffect(() => {
+    clearLegacySensitivePageCaches();
+  }, []);
 
   useEffect(() => {
     const checkMobile = () => {

@@ -96,3 +96,27 @@ export function clearCachedPageData(pageKey: string, scope = ""): void {
     /* ignore storage errors */
   }
 }
+
+export function clearLegacySensitivePageCaches(): void {
+  if (typeof window === "undefined") return;
+  try {
+    const keys: string[] = [];
+    for (let index = 0; index < window.localStorage.length; index += 1) {
+      const key = window.localStorage.key(index);
+      if (!key) continue;
+      if (/^doktainer:page-cache:[^:]+:domains:/.test(key)) {
+        keys.push(key);
+      } else if (/^doktainer:page-cache:[^:]+:ssl:/.test(key)) {
+        try {
+          const domains = JSON.parse(window.localStorage.getItem(key) ?? "").data?.domains;
+          if (!Array.isArray(domains) || domains.some((domain: { sslCert?: object | null }) => domain.sslCert && ("keyPem" in domain.sslCert || "certPem" in domain.sslCert))) keys.push(key);
+        } catch {
+          keys.push(key);
+        }
+      }
+    }
+    for (const key of keys) window.localStorage.removeItem(key);
+  } catch {
+    /* storage may be unavailable */
+  }
+}

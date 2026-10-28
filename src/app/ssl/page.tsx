@@ -19,7 +19,9 @@ import {
   readStoredServerSelection,
   storeServerSelection,
   writeCachedPageData,
+  clearLegacySensitivePageCaches,
 } from "@/lib/page-state";
+import { sanitizeDomainForCache } from "@/lib/domain-cache";
 import IssueCertificateModal from "@/app/ssl/components/IssueCertificateModal";
 import SSLCertificatesGrid from "@/app/ssl/components/SSLCertificatesGrid";
 import SSLDomainsGrid from "@/app/ssl/components/SSLDomainsGrid";
@@ -104,7 +106,7 @@ export default function SSLPage() {
         PAGE_KEY,
         {
           certs: nextCerts,
-          domains: nextDomains,
+            domains: nextDomains.map(sanitizeDomainForCache),
           serverList: nextServers,
         },
         serverId,
@@ -115,6 +117,7 @@ export default function SSLPage() {
   }, []);
 
   useEffect(() => {
+    clearLegacySensitivePageCaches();
     const storedServerId = readStoredServerSelection(PAGE_KEY);
     setSelectedServerId(storedServerId);
     applyCachedState(storedServerId);

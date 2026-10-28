@@ -42,6 +42,17 @@ test("shared SSL renewal scopes members to the renewed root domain", () => {
       targetContainer: null,
     },
     {
+      id: "isolated-child",
+      name: "isolated.example.com",
+      configMode: "ISOLATED" as const,
+      isPrimary: false,
+      sslEnabled: true,
+      autoRenew: true,
+      targetContainerId: "container-3",
+      targetPort: 9000,
+      targetContainer: null,
+    },
+    {
       id: "other-api",
       name: "api.other.com",
       configMode: "SHARED" as const,
@@ -60,6 +71,13 @@ test("shared SSL renewal scopes members to the renewed root domain", () => {
 
   assert.deepEqual(
     members.map((member) => member.name),
+    ["example.com", "api.example.com"],
+  );
+  const isolatedRoot = candidates.map((candidate) =>
+    candidate.id === "root" ? { ...candidate, configMode: "ISOLATED" as const } : candidate,
+  );
+  assert.deepEqual(
+    filterSharedSslGroupMembersByRoot(isolatedRoot, { rootDomain: "example.com" }).map((member) => member.name),
     ["example.com", "api.example.com"],
   );
 });

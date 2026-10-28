@@ -719,7 +719,7 @@ export default function AddDomainModal({
                   style={{ width: "100%" }}
                 >
                   <option value="ISOLATED">Isolated Domain Config</option>
-                  <option value="SHARED">Shared Service Config</option>
+                  <option value="SHARED">Shared Root-Domain Config</option>
                 </select>
                 <p
                   style={{
@@ -729,8 +729,8 @@ export default function AddDomainModal({
                   }}
                 >
                   {form.proxyConfigMode === "SHARED"
-                    ? "Shared mode groups exact hostnames that use the same container and port on the same server into one Nginx service configuration."
-                    : "Isolated mode means exactly one domain per Nginx file, for example /etc/nginx/sites-available/app.example.com.conf. Domain lain seperti api.example.com atau admin.example.com tidak otomatis ikut masuk ke file ini dan harus dibuat sendiri, atau dipindah ke Shared mode jika memang ingin satu config bersama."}
+                    ? "Shared mode groups the root domain and its shared subdomains on the same server into one Nginx configuration. Each hostname can point to a different container and port."
+                    : "Isolated mode creates a separate Nginx configuration for this domain. Other subdomains must be configured separately or use Shared mode."}
                 </p>
               </div>
 
@@ -751,7 +751,7 @@ export default function AddDomainModal({
                     updateForm({ isPrimary: event.target.checked })
                   }
                 />
-                Mark this domain as primary within the shared service group
+                Mark this domain as primary within the shared domain group
               </label>
 
               {form.proxyConfigMode === "SHARED" && (
@@ -779,9 +779,8 @@ export default function AddDomainModal({
                 >
                   Isolated config means the Nginx config for this domain will be
                   created separately and won&apos;t be shared with any other domain.
-                  This allows you to reuse target containers and ports that are
-                  already in use by other domains, as long as those domains are
-                  not using Shared mode on the same server.
+                  Select a container that is not already linked to another
+                  domain on the same server.
                 </label>
               )}
 

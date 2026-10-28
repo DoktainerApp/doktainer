@@ -6,8 +6,11 @@ import {
   readStoredServerSelection,
   writeCachedPageData,
   storeServerSelection,
+  clearLegacySensitivePageCaches,
 } from "../src/lib/page-state";
 import { sensitiveStorageKeys } from "../src/lib/browser-storage";
+import { sanitizeDomainForCache } from "../src/lib/domain-cache";
+import type { Domain } from "../src/lib/api";
 
 const ORGANIZATION_STORAGE_KEY = sensitiveStorageKeys.organization;
 
@@ -102,4 +105,36 @@ test("stores cached page data per organization", () => {
   assert.deepEqual(readCachedPageData("domains", "server-1"), {
     items: ["alpha"],
   });
+});
+
+test("removes legacy domain caches across organizations without deleting preferences or other caches", () => {
+  window.localStorage.setItem(ORGANIZATION_STORAGE_KEY, "org-a");
+  storeServerSelection("domains", "server-a");
+  writeCachedPageData("domains", { items: ["old"] }, "server-a");
+  writeCachedPageData("domains", { items: ["old-all"] });
+  writeCachedPageData("ssl", { domains: [{ sslCert: { keyPem: "test-only" } }] }, "server-a");
+  writeCachedPageData("ssl", { domains: [{ sslCert: { status: "VALID" } }] }, "server-safe");
+  writeCachedPageData("networks", { items: ["keep"] }, "server-a");
+  window.localStorage.setItem(ORGANIZATION_STORAGE_KEY, "org-b");
+  writeCachedPageData("domains", { items: ["old-b"] }, "server-b");
+
+  clearLegacySensitivePageCaches();
+  assert.equal(readCachedPageData("domains", "server-b"), null);
+  window.localStorage.setItem(ORGANIZATION_STORAGE_KEY, "org-a");
+  assert.equal(readCachedPageData("domains", "server-a"), null);
+  assert.equal(readCachedPageData("domains"), null);
+  assert.equal(readCachedPageData("ssl", "server-a"), null);
+  assert.deepEqual(readCachedPageData("ssl", "server-safe"), { domains: [{ sslCert: { status: "VALID" } }] });
+  assert.equal(readStoredServerSelection("domains"), "server-a");
+  assert.deepEqual(readCachedPageData("networks", "server-a"), { items: ["keep"] });
+});
+
+test("SSL page cache keeps certificate metadata but excludes unexpected secret fields", () => {
+  const domain = {
+    id: "domain", sslCert: { id: "cert", domainId: "domain", issuer: "issuer", status: "VALID", issuedAt: null, expiresAt: null, autoRenew: true, keyPem: "test-secret", certPem: "test-certificate" },
+  } as unknown as Domain;
+  const safe = sanitizeDomainForCache(domain);
+  assert.equal(safe.sslCert?.id, "cert");
+  assert.equal("keyPem" in safe.sslCert!, false);
+  assert.equal("certPem" in safe.sslCert!, false);
 });

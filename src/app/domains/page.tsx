@@ -4,7 +4,7 @@ import ConfirmActionDialog from "@/components/ConfirmActionDialog";
 import DashboardLayout from "@/components/DashboardLayout";
 import SearchField from "@/components/SearchField";
 import ToastViewport from "@/components/ToastViewport";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Globe, Loader2, Lock, Plus, RefreshCw } from "lucide-react";
 import {
   domains as domainsApi,
@@ -16,11 +16,10 @@ import {
   servers as serversApi,
 } from "@/lib/api";
 import {
-  readCachedPageData,
   readStoredServerSelection,
   storeServerSelection,
-  writeCachedPageData,
 } from "@/lib/page-state";
+import { createLatestRequestGuard } from "@/lib/latest-request";
 import { useTablePagination } from "@/lib/use-table-pagination";
 import { useToastManager } from "@/lib/use-toast-manager";
 import AddDomainModal from "./components/AddDomainModal";
@@ -54,6 +53,7 @@ export default function DomainsPage() {
   const [selectedServerId, setSelectedServerId] = useState("");
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState("");
   const [showAdd, setShowAdd] = useState(false);
@@ -66,71 +66,57 @@ export default function DomainsPage() {
   >({});
   const [confirmDialog, setConfirmDialog] =
     useState<PendingConfirmAction | null>(null);
+  const latestRequest = useRef(createLatestRequestGuard());
 
-  const applyCachedState = useCallback((serverId: string) => {
-    const cached = readCachedPageData<{
-      items: Domain[];
-      serverList: Server[];
-    }>(PAGE_KEY, serverId);
-
-    if (!cached) return false;
-
-    setData(cached.items);
-    setServerList(cached.serverList);
-    setLoading(false);
-    return true;
-  }, []);
-
-  const load = useCallback(async (serverId = "") => {
+  const load = useCallback(async () => {
+    const isCurrent = latestRequest.current();
     setLoading(true);
+    setLoadError(false);
     try {
       const [dr, sr] = await Promise.all([
         domainsApi.list(),
         serversApi.list(),
       ]);
-      const nextData = dr.data ?? [];
-      const nextServers = sr.data ?? [];
-      setData(nextData);
-      setServerList(nextServers);
-      setSelectedServerId(serverId);
-      storeServerSelection(PAGE_KEY, serverId);
-      writeCachedPageData(
-        PAGE_KEY,
-        {
-          items: nextData,
-          serverList: nextServers,
-        },
-        serverId,
-      );
+      if (!isCurrent()) return false;
+      setData(dr.data ?? []);
+      setServerList(sr.data ?? []);
+      return true;
     } catch {
-      /* silently fail */
+      if (isCurrent()) {
+        setLoadError(true);
+        pushToast({
+          tone: "error",
+          title: "Could not load domains",
+          message: "Check your connection and use Refresh. Any previously loaded data may be out of date.",
+        });
+      }
+      return false;
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
-  }, []);
+  }, [pushToast]);
 
   useEffect(() => {
     const storedServerId = readStoredServerSelection(PAGE_KEY);
-    setSelectedServerId(storedServerId);
-    const hasCache = applyCachedState(storedServerId);
-    if (!hasCache) {
-      void load(storedServerId);
-    }
-  }, [applyCachedState, load]);
+    let active = true;
+    queueMicrotask(() => {
+      if (!active) return;
+      setSelectedServerId(storedServerId);
+      void load();
+    });
+    return () => { active = false; };
+  }, [load]);
 
-  const handleServerChange = async (serverId: string) => {
+  const handleServerChange = (serverId: string) => {
     if (serverId === selectedServerId) return;
     storeServerSelection(PAGE_KEY, serverId);
     setSelectedServerId(serverId);
-    const hasCache = applyCachedState(serverId);
-    if (!hasCache) {
-      await load(serverId);
-    }
+    void load();
   };
 
   const handleDomainSaved = useCallback(
     async (domainName: string, operation: "created" | "updated") => {
-      await load(selectedServerId);
+      await load();
       pushToast({
         tone: "success",
         title: operation === "created" ? "Domain Added" : "Domain Updated",
@@ -140,33 +126,25 @@ export default function DomainsPage() {
             : `Domain "${domainName}" updated successfully`,
       });
     },
-    [load, pushToast, selectedServerId],
+    [load, pushToast],
   );
 
   const handleSync = async () => {
     setSyncing(true);
     setSyncMessage("Scanning domain configs on server...");
     try {
-      await domainsApi.sync(
-        selectedServerId ? { serverId: selectedServerId } : undefined,
-      );
+      await domainsApi.sync(selectedServerId ? { serverId: selectedServerId } : undefined);
       setSyncMessage("Scanning SSL certificates on server...");
-      await sslApi.sync(
-        selectedServerId ? { serverId: selectedServerId } : undefined,
-      );
+      await sslApi.sync(selectedServerId ? { serverId: selectedServerId } : undefined);
       setSyncMessage("Refreshing local data...");
-      await load(selectedServerId);
+      await load();
       pushToast({
         tone: "success",
         title: "Sync Complete",
         message: "Domain and SSL inventory refreshed successfully",
       });
     } catch (err: unknown) {
-      pushToast({
-        tone: "error",
-        title: "Sync Failed",
-        message: err instanceof Error ? err.message : "Sync failed",
-      });
+      pushToast({ tone: "error", title: "Sync Failed", message: err instanceof Error ? err.message : "Sync failed" });
     } finally {
       setSyncMessage("");
       setSyncing(false);
@@ -178,7 +156,7 @@ export default function DomainsPage() {
     try {
       await domainsApi.delete(id);
       setData((prev) => prev.filter((d) => d.id !== id));
-      await load(selectedServerId);
+      await load();
       pushToast({
         tone: "success",
         message: `Domain \"${name}\" deleted successfully`,
@@ -257,7 +235,7 @@ export default function DomainsPage() {
         );
       }
 
-      await load(selectedServerId);
+      await load();
       pushToast({
         tone: "success",
         title: "SSL Renewal",
@@ -304,7 +282,6 @@ export default function DomainsPage() {
       [
         domain.name,
         domain.type,
-        domain.value,
         domain.proxy,
         domain.server?.name ?? "",
         domain.sslCert?.status ?? "",
@@ -361,12 +338,12 @@ export default function DomainsPage() {
         className="animate-slide-in"
         style={{ display: "flex", flexDirection: "column", gap: 16 }}
       >
-        <DomainStats
+        {(!loadError || data.length > 0) && <DomainStats
           total={stats.total}
           active={stats.active}
           sslValid={stats.sslValid}
           sslExpiring={stats.sslExpiring}
-        />
+        />}
 
         <div
           className="card ui-responsive-toolbar"
@@ -452,7 +429,7 @@ export default function DomainsPage() {
           style={{ padding: "12px 16px" }}
         >
           <SearchField
-            placeholder="Search domains, targets, or SSL status..."
+            placeholder="Search domains, servers, or SSL status..."
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             containerStyle={{ flex: "1 1 360px", minWidth: 240 }}
@@ -516,7 +493,7 @@ export default function DomainsPage() {
             <button
               className="btn btn-ghost"
               style={{ fontSize: 12 }}
-              onClick={() => void load(selectedServerId)}
+              onClick={() => void load()}
               disabled={hasPendingSslAction}
               title={
                 hasPendingSslAction
@@ -572,7 +549,7 @@ export default function DomainsPage() {
         )}
 
         {/* Empty state */}
-        {!loading && visibleData.length === 0 && (
+        {!loading && !loadError && visibleData.length === 0 && (
           <div
             className="card"
             style={{
