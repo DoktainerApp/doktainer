@@ -11,6 +11,7 @@ import {
   ATOMIC_PSQL_RESTORE_ARGS,
   createRestoreSqlSanitizer,
   CUSTOM_RESTORE_SCRIPT_ARGS,
+  databaseCommandError,
 } from "../lib/database-restore";
 import prisma from "../lib/prisma";
 import { decrypt, encrypt } from "../lib/crypto";
@@ -770,20 +771,18 @@ export async function settingsRoutes(app: FastifyInstance) {
           );
           const exitCode =
             exitResult?.status === "fulfilled" ? exitResult.value : 1;
-          const streamError =
-            rejectedResult?.status === "rejected" &&
-            rejectedResult.reason instanceof Error
-              ? rejectedResult.reason.message
-              : "";
-
           if (!rejectedResult && exitCode === 0) {
             resolve();
             return;
           }
 
           reject(
-            new Error(
-              stderr.trim() || streamError || `${command} failed with exit code ${exitCode}`,
+            databaseCommandError(
+              stderr,
+              rejectedResult?.status === "rejected"
+                ? rejectedResult.reason
+                : undefined,
+              `${command} failed with exit code ${exitCode}`,
             ),
           );
         });

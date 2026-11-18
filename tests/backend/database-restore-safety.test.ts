@@ -7,8 +7,17 @@ import {
   ATOMIC_PSQL_RESTORE_ARGS,
   createRestoreSqlSanitizer,
   CUSTOM_RESTORE_SCRIPT_ARGS,
+  databaseCommandError,
   isUnsupportedRestoreSetting,
 } from "../../src/server/lib/database-restore";
+
+test("missing Docker preserves ENOENT so the fallback can continue", () => {
+  const missing = Object.assign(new Error("spawn docker ENOENT"), {
+    code: "ENOENT",
+  });
+  assert.equal(databaseCommandError("", missing, "failed"), missing);
+  assert.equal(databaseCommandError("database error", missing, "failed").message, "database error");
+});
 
 async function sanitizeChunks(chunks: string[]) {
   const output: Buffer[] = [];

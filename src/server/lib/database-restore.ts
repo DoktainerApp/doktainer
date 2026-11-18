@@ -1,5 +1,14 @@
 import { Transform } from "node:stream";
 
+export function databaseCommandError(
+  stderr: string,
+  reason: unknown,
+  fallback: string,
+) {
+  if (stderr.trim()) return new Error(stderr.trim());
+  return reason instanceof Error ? reason : new Error(fallback);
+}
+
 export const CUSTOM_RESTORE_SCRIPT_ARGS = [
   "--clean",
   "--if-exists",
