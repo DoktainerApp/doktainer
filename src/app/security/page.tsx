@@ -34,6 +34,7 @@ import type {
   SecurityOperationalNoteData,
   SecuritySummaryData,
 } from "./components/security-types";
+import { resolveSecurityServerId } from "./components/security-utils";
 
 const POLL_INTERVAL = 15000;
 const PAGE_KEY = "security";
@@ -105,11 +106,10 @@ export default function SecurityPage() {
         const serversRes = await serversApi.list();
         const nextServers = serversRes.data ?? [];
         const requestedServerId = preferredServerId ?? "";
-        const resolvedServerId = nextServers.some(
-          (server) => server.id === requestedServerId,
-        )
-          ? requestedServerId
-          : "";
+        const resolvedServerId = resolveSecurityServerId(
+          nextServers,
+          requestedServerId,
+        );
 
         if (latestRequestIdRef.current !== requestId) {
           return;
@@ -204,10 +204,8 @@ export default function SecurityPage() {
 
   useEffect(() => {
     const storedServerId = readStoredServerSelection(PAGE_KEY);
-    setSelectedServerId(storedServerId);
-    const hasCache = applyCachedState(storedServerId);
-    void loadData(storedServerId, hasCache);
-  }, [applyCachedState, loadData]);
+    void loadData(storedServerId);
+  }, [loadData]);
 
   useEffect(() => {
     if (!selectedServerId) return;
@@ -273,15 +271,6 @@ export default function SecurityPage() {
 
   const handleRefresh = async () => {
     await loadData(selectedServerId, true);
-  };
-
-  const handleSelectAllServers = () => {
-    storeServerSelection(PAGE_KEY, "");
-    setSelectedServerId("");
-    setSnapshot(null);
-    setSnapshotLoading(false);
-    const hasCache = applyCachedState("");
-    void loadData("", hasCache);
   };
 
   const handleSelectServer = (serverId: string) => {
@@ -580,7 +569,6 @@ export default function SecurityPage() {
           selectedServerId={selectedServerId}
           loading={loading}
           refreshing={refreshing}
-          onSelectAll={handleSelectAllServers}
           onSelectServer={handleSelectServer}
           onRefresh={handleRefresh}
         />
@@ -599,7 +587,7 @@ export default function SecurityPage() {
         ) : (
           <>
             {!selectedServerId ? (
-              <SecurityStatePanel message="Select a server to inspect realtime firewall and Fail2ban details. Overview across all servers is shown below." />
+              <SecurityStatePanel message="No servers are available in this organization or assigned to your account. Add a server or ask an administrator to grant access." />
             ) : snapshotLoading && !selectedSnapshot ? (
               <div
                 className="card"
@@ -615,7 +603,7 @@ export default function SecurityPage() {
                 </p>
               </div>
             ) : !selectedSnapshot || !selectedServer ? (
-              <SecurityStatePanel message="Unable to load security details for the selected server. Switch to another server or choose All Servers." />
+              <SecurityStatePanel message="Unable to load security details for the selected server. Refresh the page or switch to another server." />
             ) : (
               <>
                 <div
@@ -654,11 +642,24 @@ export default function SecurityPage() {
                   />
                 </div>
 
-                <SecurityOperationalNote operationalNote={operationalNote} />
               </>
             )}
 
-            <SecurityOverviewGrid overview={overview} />
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns:
+                  "repeat(auto-fit, minmax(min(380px, 100%), 1fr))",
+                gap: 16,
+              }}
+            >
+              {selectedSnapshot && selectedServer && (
+                <SecurityOperationalNote operationalNote={operationalNote} />
+              )}
+              <SecurityOverviewGrid
+                overview={overview.filter((item) => item.server.id === selectedServerId)}
+              />
+            </div>
           </>
         )}
       </div>

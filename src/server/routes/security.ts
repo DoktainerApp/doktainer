@@ -1,8 +1,12 @@
 import { FastifyInstance } from "fastify";
 import { z } from "zod";
 import prisma from "../lib/prisma";
-import { authenticate, requireApiKeyPermission } from "../middleware/auth";
+import { authenticate, requireApiKeyPermission, requireOrganizationContext } from "../middleware/auth";
 import { auditLog } from "../services/audit.service";
+import {
+  getAccessibleServer,
+  getAccessibleServerFilterForOrganization,
+} from "../services/server-access.service";
 import * as ssh from "../services/ssh.service";
 
 const SECURITY_OVERVIEW_FETCH_TIMEOUT_MS = 5000;
@@ -10,11 +14,13 @@ const SECURITY_OVERVIEW_FETCH_TIMEOUT_MS = 5000;
 const securityReadAccess = [
   authenticate,
   requireApiKeyPermission("read:security"),
+  requireOrganizationContext,
 ];
 
 const securityWriteAccess = [
   authenticate,
   requireApiKeyPermission("write:security"),
+  requireOrganizationContext,
 ];
 
 function emptySecurityOverviewItem(
@@ -164,13 +170,12 @@ async function listDisabledFirewallRules(serverId: string) {
   }));
 }
 
-async function findOrganizationServer(
+async function findSecurityServer(
+  userId: string | undefined,
   serverId: string,
   organizationId: string,
 ) {
-  return prisma.server.findFirst({
-    where: { id: serverId, organizationId },
-  });
+  return getAccessibleServer(userId, serverId, organizationId);
 }
 
 function mapActiveFirewallRules(rules: ssh.FirewallRule[]) {
@@ -191,8 +196,12 @@ export async function securityRoutes(app: FastifyInstance) {
     "/overview",
     { preHandler: securityReadAccess },
     async (req, reply) => {
+      const accessFilter = await getAccessibleServerFilterForOrganization(
+        req.userId,
+        req.organizationId,
+      );
       const servers = await prisma.server.findMany({
-        where: { organizationId: req.organizationId! },
+        where: accessFilter,
         orderBy: { name: "asc" },
       });
 
@@ -214,7 +223,8 @@ export async function securityRoutes(app: FastifyInstance) {
     { preHandler: securityReadAccess },
     async (req, reply) => {
       const { serverId } = req.params as { serverId: string };
-      const server = await findOrganizationServer(
+      const server = await findSecurityServer(
+        req.userId,
         serverId,
         req.organizationId!,
       );
@@ -276,7 +286,8 @@ export async function securityRoutes(app: FastifyInstance) {
     { preHandler: securityReadAccess },
     async (req, reply) => {
       const { serverId } = req.params as { serverId: string };
-      const server = await findOrganizationServer(
+      const server = await findSecurityServer(
+        req.userId,
         serverId,
         req.organizationId!,
       );
@@ -307,7 +318,8 @@ export async function securityRoutes(app: FastifyInstance) {
     { preHandler: securityWriteAccess },
     async (req, reply) => {
       const { serverId } = req.params as { serverId: string };
-      const server = await findOrganizationServer(
+      const server = await findSecurityServer(
+        req.userId,
         serverId,
         req.organizationId!,
       );
@@ -336,7 +348,8 @@ export async function securityRoutes(app: FastifyInstance) {
     { preHandler: securityWriteAccess },
     async (req, reply) => {
       const { serverId } = req.params as { serverId: string };
-      const server = await findOrganizationServer(
+      const server = await findSecurityServer(
+        req.userId,
         serverId,
         req.organizationId!,
       );
@@ -377,7 +390,8 @@ export async function securityRoutes(app: FastifyInstance) {
           .status(400)
           .send({ success: false, error: body.error.flatten() });
 
-      const server = await findOrganizationServer(
+      const server = await findSecurityServer(
+        req.userId,
         serverId,
         req.organizationId!,
       );
@@ -415,7 +429,8 @@ export async function securityRoutes(app: FastifyInstance) {
         serverId: string;
         ruleNum: string;
       };
-      const server = await findOrganizationServer(
+      const server = await findSecurityServer(
+        req.userId,
         serverId,
         req.organizationId!,
       );
@@ -463,7 +478,8 @@ export async function securityRoutes(app: FastifyInstance) {
           .send({ success: false, error: body.error.flatten() });
       }
 
-      const server = await findOrganizationServer(
+      const server = await findSecurityServer(
+        req.userId,
         serverId,
         req.organizationId!,
       );
@@ -523,7 +539,7 @@ export async function securityRoutes(app: FastifyInstance) {
       };
 
       const [server, preset] = await Promise.all([
-        findOrganizationServer(serverId, req.organizationId!),
+        findSecurityServer(req.userId, serverId, req.organizationId!),
         prisma.firewallRulePreset.findUnique({ where: { id: ruleId } }),
       ]);
 
@@ -580,7 +596,7 @@ export async function securityRoutes(app: FastifyInstance) {
       };
 
       const [server, preset] = await Promise.all([
-        findOrganizationServer(serverId, req.organizationId!),
+        findSecurityServer(req.userId, serverId, req.organizationId!),
         prisma.firewallRulePreset.findUnique({ where: { id: ruleId } }),
       ]);
 
@@ -620,7 +636,8 @@ export async function securityRoutes(app: FastifyInstance) {
     { preHandler: securityReadAccess },
     async (req, reply) => {
       const { serverId } = req.params as { serverId: string };
-      const server = await findOrganizationServer(
+      const server = await findSecurityServer(
+        req.userId,
         serverId,
         req.organizationId!,
       );
@@ -643,7 +660,8 @@ export async function securityRoutes(app: FastifyInstance) {
     { preHandler: securityWriteAccess },
     async (req, reply) => {
       const { serverId } = req.params as { serverId: string };
-      const server = await findOrganizationServer(
+      const server = await findSecurityServer(
+        req.userId,
         serverId,
         req.organizationId!,
       );
@@ -670,7 +688,8 @@ export async function securityRoutes(app: FastifyInstance) {
     { preHandler: securityWriteAccess },
     async (req, reply) => {
       const { serverId } = req.params as { serverId: string };
-      const server = await findOrganizationServer(
+      const server = await findSecurityServer(
+        req.userId,
         serverId,
         req.organizationId!,
       );
@@ -697,7 +716,8 @@ export async function securityRoutes(app: FastifyInstance) {
     { preHandler: securityWriteAccess },
     async (req, reply) => {
       const { serverId } = req.params as { serverId: string };
-      const server = await findOrganizationServer(
+      const server = await findSecurityServer(
+        req.userId,
         serverId,
         req.organizationId!,
       );
@@ -739,7 +759,8 @@ export async function securityRoutes(app: FastifyInstance) {
           .status(400)
           .send({ success: false, error: body.error.flatten() });
 
-      const server = await findOrganizationServer(
+      const server = await findSecurityServer(
+        req.userId,
         serverId,
         req.organizationId!,
       );

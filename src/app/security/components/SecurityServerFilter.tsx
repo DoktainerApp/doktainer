@@ -6,7 +6,6 @@ interface SecurityServerFilterProps {
   selectedServerId: string;
   loading: boolean;
   refreshing: boolean;
-  onSelectAll: () => void;
   onSelectServer: (serverId: string) => void;
   onRefresh: () => void | Promise<void>;
 }
@@ -32,7 +31,6 @@ export default function SecurityServerFilter({
   selectedServerId,
   loading,
   refreshing,
-  onSelectAll,
   onSelectServer,
   onRefresh,
 }: SecurityServerFilterProps) {
@@ -56,13 +54,6 @@ export default function SecurityServerFilter({
           Server:
         </span>
         <div className="ui-chip-scroll no-scrollbar">
-          <button
-            type="button"
-            onClick={onSelectAll}
-            style={getButtonStyle(selectedServerId === "")}
-          >
-            All Servers
-          </button>
           {servers.map((server) => (
             <button
               type="button"

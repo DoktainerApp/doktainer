@@ -11,3 +11,12 @@ export function formatRelativeTime(value: string): string {
   if (diffSeconds < 86400) return `${Math.floor(diffSeconds / 3600)}h ago`;
   return date.toLocaleString();
 }
+
+export function resolveSecurityServerId(
+  servers: Array<{ id: string }>,
+  preferredServerId: string,
+) {
+  return servers.some((server) => server.id === preferredServerId)
+    ? preferredServerId
+    : (servers[0]?.id ?? "");
+}

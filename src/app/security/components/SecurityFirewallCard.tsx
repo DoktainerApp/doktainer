@@ -51,13 +51,15 @@ export default function SecurityFirewallCard({
           padding: "16px 20px",
           borderBottom: "1px solid var(--border)",
           display: "flex",
+          flexWrap: "wrap",
+          gap: 12,
           alignItems: "center",
           justifyContent: "space-between",
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <Flame size={16} style={{ color: "#f59e0b" }} />
-          <div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0, flex: "1 1 180px" }}>
+          <Flame size={16} style={{ color: "#f59e0b", flexShrink: 0 }} />
+          <div style={{ minWidth: 0, overflowWrap: "anywhere" }}>
             <h2
               style={{
                 fontSize: 14,
@@ -72,10 +74,11 @@ export default function SecurityFirewallCard({
             </p>
           </div>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
           <span
             style={{
               fontSize: 12,
+              whiteSpace: "nowrap",
               color: snapshot.firewall.enabled ? "#10b981" : "#ef4444",
             }}
           >
@@ -104,7 +107,7 @@ export default function SecurityFirewallCard({
           </button>
           <button
             className="btn btn-primary"
-            style={{ fontSize: 11, padding: "5px 10px" }}
+            style={{ fontSize: 11, padding: "5px 10px", whiteSpace: "nowrap" }}
             onClick={onOpenAddRule}
           >
             <Plus size={11} /> Add Rule

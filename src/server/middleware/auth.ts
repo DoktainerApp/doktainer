@@ -390,6 +390,18 @@ export function requireApiKeyPermission(
   };
 }
 
+export async function requireOrganizationContext(
+  req: FastifyRequest,
+  reply: FastifyReply,
+): Promise<void> {
+  if (!req.userId || !req.organizationId) {
+    reply.status(403).send({
+      success: false,
+      error: "Forbidden — active organization required",
+    });
+  }
+}
+
 function enforceUserSecurityPolicies(
   req: FastifyRequest,
   reply: FastifyReply,

@@ -34,13 +34,15 @@ export default function SecurityFail2banCard({
           padding: "16px 20px",
           borderBottom: "1px solid var(--border)",
           display: "flex",
+          flexWrap: "wrap",
+          gap: 12,
           alignItems: "center",
           justifyContent: "space-between",
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <Ban size={16} style={{ color: "#ef4444" }} />
-          <div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0, flex: "1 1 180px" }}>
+          <Ban size={16} style={{ color: "#ef4444", flexShrink: 0 }} />
+          <div style={{ minWidth: 0, overflowWrap: "anywhere" }}>
             <h2
               style={{
                 fontSize: 14,
@@ -55,10 +57,11 @@ export default function SecurityFail2banCard({
             </p>
           </div>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
           <span
             style={{
               fontSize: 12,
+              whiteSpace: "nowrap",
               color: !snapshot.fail2ban.installed
                 ? "#f59e0b"
                 : snapshot.fail2ban.enabled
@@ -75,7 +78,7 @@ export default function SecurityFail2banCard({
           {!snapshot.fail2ban.installed ? (
             <button
               className="btn btn-primary"
-              style={{ fontSize: 11, padding: "5px 10px" }}
+              style={{ fontSize: 11, padding: "5px 10px", whiteSpace: "nowrap" }}
               onClick={() => void onToggle()}
               disabled={actionKey === "fail2ban-toggle"}
             >

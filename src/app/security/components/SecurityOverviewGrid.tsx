@@ -18,7 +18,7 @@ export default function SecurityOverviewGrid({
           marginBottom: 16,
         }}
       >
-        Security Overview — All Servers
+        Security Overview
       </h2>
       <div
         style={{
