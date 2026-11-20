@@ -1,5 +1,5 @@
 import prisma from "../lib/prisma";
-import { LogCategory, LogLevel } from "@prisma/client";
+import { LogCategory, LogLevel, Prisma } from "@prisma/client";
 
 export const AUDIT_LOG_RETENTION_DAYS = 180;
 export const AUDIT_LOG_RETENTION_BATCH_SIZE = 1000;
@@ -109,36 +109,47 @@ export async function auditLog(entry: LogEntry): Promise<void> {
   }
 }
 
-export async function getLogs(opts: {
-  organizationId?: string;
+export function buildAuditLogWhere(opts: {
+  organizationId: string;
+  userId: string;
+  scope: { role: string; allServersAccess: boolean; serverIds: string[] };
   serverId?: string;
-  category?: LogCategory;
+  category?: LogCategory | "AUTH_SECURITY";
+  level?: LogLevel;
+  search?: string;
+}): Prisma.AuditLogWhereInput {
+  const { organizationId, userId, scope, serverId, category, level, search } = opts;
+  const canSeeOrganizationEvents = scope.role === "OPERATOR" || scope.role === "SUPER_ADMIN";
+  return {
+    organizationId,
+    ...(serverId ? { serverId } : {}),
+    category: category === "AUTH_SECURITY" ? { in: ["AUTH", "SECURITY"] } : category,
+    level,
+    ...(search ? { message: { contains: search, mode: "insensitive" } } : {}),
+    OR: [
+      { serverId: null, ...(canSeeOrganizationEvents ? {} : { userId }) },
+      { server: { is: { organizationId, ...(scope.allServersAccess ? {} : { id: { in: scope.serverIds } }) } } },
+    ],
+  };
+}
+
+export async function getLogs(opts: {
+  organizationId: string;
+  userId: string;
+  scope: { role: string; allServersAccess: boolean; serverIds: string[] };
+  serverId?: string;
+  category?: LogCategory | "AUTH_SECURITY";
   level?: LogLevel;
   search?: string;
   limit?: number;
   offset?: number;
 }) {
-  const {
-    organizationId,
-    serverId,
-    category,
-    level,
-    search,
-    limit = 100,
-    offset = 0,
-  } = opts;
+  const { limit = 100, offset = 0 } = opts;
+  const where = buildAuditLogWhere(opts);
 
   const [logs, total] = await prisma.$transaction([
     prisma.auditLog.findMany({
-      where: {
-        organizationId,
-        serverId,
-        category,
-        level,
-        ...(search
-          ? { message: { contains: search, mode: "insensitive" } }
-          : {}),
-      },
+      where,
       orderBy: { createdAt: "desc" },
       take: limit,
       skip: offset,
@@ -148,15 +159,7 @@ export async function getLogs(opts: {
       },
     }),
     prisma.auditLog.count({
-      where: {
-        organizationId,
-        serverId,
-        category,
-        level,
-        ...(search
-          ? { message: { contains: search, mode: "insensitive" } }
-          : {}),
-      },
+      where,
     }),
   ]);
 

@@ -8,10 +8,10 @@ import { useEffect, useState } from "react";
 import {
   Activity,
   Clock,
-  Download,
   Server,
   Container,
   Globe,
+  RefreshCw,
   Shield,
   Terminal,
 } from "lucide-react";
@@ -53,6 +53,7 @@ const categoryMap: Record<string, string | undefined> = {
   domain: "DOMAIN",
   ssl: "SSL",
   security: "SECURITY",
+  security_events: "AUTH_SECURITY",
   system: "SYSTEM",
   terminal: "TERMINAL",
 };
@@ -91,10 +92,7 @@ export default function ActivityPage() {
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [currentPage, setCurrentPage] = useState(1);
   const [totalItems, setTotalItems] = useState(0);
-
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [search, typeFilter, categoryFilter]);
+  const [refreshVersion, setRefreshVersion] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -113,6 +111,12 @@ export default function ActivityPage() {
         });
 
         if (cancelled) return;
+
+        const lastPage = Math.max(1, Math.ceil((response.total ?? 0) / PAGE_SIZE));
+        if (currentPage > lastPage) {
+          setCurrentPage(lastPage);
+          return;
+        }
 
         setLogs(response.data ?? []);
         setTotalItems(response.total ?? 0);
@@ -136,23 +140,17 @@ export default function ActivityPage() {
     return () => {
       cancelled = true;
     };
-  }, [search, typeFilter, categoryFilter, currentPage]);
+  }, [search, typeFilter, categoryFilter, currentPage, refreshVersion]);
 
   const totalPages = Math.max(1, Math.ceil(totalItems / PAGE_SIZE));
   const startItem = totalItems === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
   const endItem =
     totalItems === 0 ? 0 : Math.min(currentPage * PAGE_SIZE, totalItems);
 
-  useEffect(() => {
-    if (currentPage > totalPages) {
-      setCurrentPage(totalPages);
-    }
-  }, [currentPage, totalPages]);
-
   return (
     <DashboardLayout
       title="Activity Log"
-      subtitle="Complete audit trail of system events and actions"
+      subtitle="Recorded system events and actions"
     >
       <div
         className="animate-slide-in"
@@ -172,7 +170,10 @@ export default function ActivityPage() {
           <SearchField
             placeholder="Search activity..."
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setCurrentPage(1);
+            }}
             containerStyle={{ flex: "1 1 280px", minWidth: 220, maxWidth: 420 }}
           />
           <div
@@ -188,7 +189,10 @@ export default function ActivityPage() {
             {["all", "success", "info", "warning", "error"].map((f) => (
               <button
                 key={f}
-                onClick={() => setTypeFilter(f)}
+                onClick={() => {
+                  setTypeFilter(f);
+                  setCurrentPage(1);
+                }}
                 style={{
                   padding: "4px 12px",
                   borderRadius: 6,
@@ -209,70 +213,50 @@ export default function ActivityPage() {
               </button>
             ))}
           </div>
-          <div
-            style={{
-              display: "flex",
-              gap: 4,
-              background: "var(--bg-input)",
-              borderRadius: 8,
-              padding: 3,
-              flexWrap: "wrap",
+          <select
+            className="input"
+            aria-label="Activity category"
+            value={categoryFilter}
+            onChange={(event) => {
+              setCategoryFilter(event.target.value);
+              setCurrentPage(1);
             }}
+            style={{ width: 180, maxWidth: "100%", minHeight: 40, fontSize: 12 }}
           >
-            {[
-              "all",
-              "auth",
-              "container",
-              "server",
-              "domain",
-              "ssl",
-              "security",
-              "system",
-              "terminal",
-            ].map((c) => (
-              <button
-                key={c}
-                onClick={() => setCategoryFilter(c)}
-                style={{
-                  padding: "4px 10px",
-                  borderRadius: 6,
-                  border: "none",
-                  cursor: "pointer",
-                  background:
-                    categoryFilter === c ? "var(--bg-card)" : "transparent",
-                  color:
-                    categoryFilter === c
-                      ? "var(--text-primary)"
-                      : "var(--text-muted)",
-                  fontSize: 11,
-                  fontWeight: 500,
-                  textTransform: "capitalize",
-                }}
-              >
-                {c}
-              </button>
-            ))}
-          </div>
+            <option value="all">All categories</option>
+            <option value="security_events">Auth &amp; Security</option>
+            <option value="auth">Auth</option>
+            <option value="security">Security</option>
+            <option value="container">Container</option>
+            <option value="server">Server</option>
+            <option value="domain">Domain</option>
+            <option value="ssl">SSL</option>
+            <option value="system">System</option>
+            <option value="terminal">Terminal</option>
+          </select>
           <button
+            type="button"
             className="btn btn-ghost"
             style={{ marginLeft: "auto", fontSize: 12 }}
+            disabled={loading}
+            onClick={() => setRefreshVersion((value) => value + 1)}
           >
-            <Download size={12} /> Export
+            <RefreshCw size={12} /> Refresh
           </button>
         </div>
 
         {/* Log table */}
         <div className="card" style={{ overflow: "hidden" }}>
           <div style={{ overflowX: "auto" }}>
-            <table className="data-table">
+            <table className="data-table" style={{ minWidth: 1020 }}>
               <thead>
                 <tr>
-                  <th style={{ width: 160 }}>Time</th>
-                  <th style={{ width: 90 }}>Status</th>
-                  <th style={{ width: 100 }}>Category</th>
-                  <th style={{ width: 150 }}>Server</th>
-                  <th>Message</th>
-                  <th style={{ width: 80 }}>User</th>
+                  <th style={{ minWidth: 180 }}>Time</th>
+                  <th style={{ minWidth: 100 }}>Status</th>
+                  <th style={{ minWidth: 120 }}>Category</th>
+                  <th style={{ minWidth: 200 }}>Server</th>
+                  <th style={{ minWidth: 280 }}>Message</th>
+                  <th style={{ minWidth: 140 }}>User</th>
                 </tr>
               </thead>
               <tbody>
@@ -390,6 +374,9 @@ export default function ActivityPage() {
                           <span
                             style={{
                               fontSize: 11,
+                              display: "inline-block",
+                              maxWidth: "100%",
+                              overflowWrap: "anywhere",
                               background: "rgba(59,130,246,0.08)",
                               color: "#3b82f6",
                               padding: "2px 8px",
@@ -403,6 +390,7 @@ export default function ActivityPage() {
                         <td
                           style={{
                             fontSize: 12,
+                            overflowWrap: "anywhere",
                             color:
                               normalizedType === "error"
                                 ? "#ef4444"
@@ -414,7 +402,7 @@ export default function ActivityPage() {
                           {log.message}
                         </td>
                         <td
-                          style={{ fontSize: 11, color: "var(--text-muted)" }}
+                          style={{ fontSize: 11, color: "var(--text-muted)", overflowWrap: "anywhere" }}
                         >
                           {log.user?.name ?? "system"}
                         </td>
@@ -433,41 +421,6 @@ export default function ActivityPage() {
             itemLabel="events"
             onPageChange={setCurrentPage}
           />
-          <div
-            style={{
-              padding: "10px 16px",
-              borderTop: "1px solid var(--border)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-            }}
-          >
-            {/* <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
-              {totalItems === 0
-                ? "Showing 0 of 0 events"
-                : `Showing ${startItem}-${endItem} of ${totalItems} events`}
-            </span> */}
-            <div
-              className="animate-pulse-dot"
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 6,
-                fontSize: 11,
-                color: "#10b981",
-              }}
-            >
-              <div
-                style={{
-                  width: 6,
-                  height: 6,
-                  borderRadius: "50%",
-                  background: "#10b981",
-                }}
-              />
-              Live monitoring active
-            </div>
-          </div>
         </div>
       </div>
     </DashboardLayout>
