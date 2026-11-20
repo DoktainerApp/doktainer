@@ -7,11 +7,11 @@ import {
   ToggleRight,
   Trash2,
 } from "lucide-react";
-import type { SecurityFirewallRule, SecuritySnapshot, Server } from "@/lib/api";
+import type { FirewallStatus, SecurityFirewallRule, Server } from "@/lib/api";
 
 interface SecurityFirewallCardProps {
   selectedServer: Server;
-  snapshot: SecuritySnapshot;
+  firewall: FirewallStatus;
   actionKey: string | null;
   currentPage: number;
   totalPages: number;
@@ -29,7 +29,7 @@ interface SecurityFirewallCardProps {
 
 export default function SecurityFirewallCard({
   selectedServer,
-  snapshot,
+  firewall,
   actionKey,
   currentPage,
   totalPages,
@@ -79,10 +79,10 @@ export default function SecurityFirewallCard({
             style={{
               fontSize: 12,
               whiteSpace: "nowrap",
-              color: snapshot.firewall.enabled ? "#10b981" : "#ef4444",
+              color: firewall.enabled ? "#10b981" : "#ef4444",
             }}
           >
-            {snapshot.firewall.enabled ? "Enabled" : "Disabled"}
+            {firewall.enabled ? "Enabled" : "Disabled"}
           </span>
           <button
             type="button"
@@ -91,7 +91,7 @@ export default function SecurityFirewallCard({
               background: "none",
               border: "none",
               cursor: "pointer",
-              color: snapshot.firewall.enabled
+              color: firewall.enabled
                 ? "#10b981"
                 : "var(--text-muted)",
             }}
@@ -99,7 +99,7 @@ export default function SecurityFirewallCard({
           >
             {actionKey === "firewall-toggle" ? (
               <Loader2 size={20} className="animate-spin" />
-            ) : snapshot.firewall.enabled ? (
+            ) : firewall.enabled ? (
               <ToggleRight size={24} />
             ) : (
               <ToggleLeft size={24} />
@@ -127,7 +127,7 @@ export default function SecurityFirewallCard({
             </tr>
           </thead>
           <tbody>
-            {snapshot.firewall.rules.length === 0 ? (
+            {firewall.rules.length === 0 ? (
               <tr>
                 <td
                   colSpan={6}

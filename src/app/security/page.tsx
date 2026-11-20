@@ -11,6 +11,7 @@ import {
   SecurityOverviewItem,
   servers as serversApi,
   SecuritySnapshot,
+  FirewallStatus,
   Server,
 } from "@/lib/api";
 import {
@@ -34,7 +35,7 @@ import type {
   SecurityOperationalNoteData,
   SecuritySummaryData,
 } from "./components/security-types";
-import { resolveSecurityServerId } from "./components/security-utils";
+import { loadSecurityDetails, resolveSecurityServerId } from "./components/security-utils";
 
 const POLL_INTERVAL = 15000;
 const PAGE_KEY = "security";
@@ -52,6 +53,7 @@ export default function SecurityPage() {
   const [servers, setServers] = useState<Server[]>([]);
   const [overview, setOverview] = useState<SecurityOverviewItem[]>([]);
   const [snapshot, setSnapshot] = useState<SecuritySnapshot | null>(null);
+  const [fallbackFirewall, setFallbackFirewall] = useState<{ serverId: string; data: FirewallStatus } | null>(null);
   const [selectedServerId, setSelectedServerId] = useState("");
   const [loading, setLoading] = useState(true);
   const [snapshotLoading, setSnapshotLoading] = useState(false);
@@ -120,6 +122,7 @@ export default function SecurityPage() {
 
         if (!resolvedServerId) {
           setSnapshot(null);
+          setFallbackFirewall(null);
           setSnapshotLoading(false);
         } else {
           setSnapshotLoading(true);
@@ -155,22 +158,18 @@ export default function SecurityPage() {
           return;
         }
 
-        const snapshotResult = await Promise.allSettled([
-          securityApi.get(resolvedServerId),
-        ]);
+        const details = await loadSecurityDetails(
+          async () => (await securityApi.get(resolvedServerId)).data,
+          async () => (await securityApi.getFirewall(resolvedServerId)).data,
+        );
 
         if (latestRequestIdRef.current !== requestId) {
           return;
         }
 
-        let nextSnapshot: SecuritySnapshot | null = null;
-
-        if (snapshotResult[0].status === "fulfilled") {
-          nextSnapshot = snapshotResult[0].value.data ?? null;
-          setSnapshot(nextSnapshot);
-        } else {
-          setSnapshot(null);
-        }
+        const nextSnapshot = details.snapshot ?? null;
+        setSnapshot(nextSnapshot);
+        setFallbackFirewall(details.firewall ? { serverId: resolvedServerId, data: details.firewall } : null);
 
         setSnapshotLoading(false);
         storeServerSelection(PAGE_KEY, resolvedServerId);
@@ -224,6 +223,8 @@ export default function SecurityPage() {
       snapshot && snapshot.server.id === selectedServerId ? snapshot : null,
     [selectedServerId, snapshot],
   );
+  const selectedFirewall = selectedSnapshot?.firewall ??
+    (fallbackFirewall?.serverId === selectedServerId ? fallbackFirewall.data : null);
 
   const summary = useMemo<SecuritySummaryData>(() => {
     const secured = overview.filter(
@@ -265,7 +266,7 @@ export default function SecurityPage() {
     };
   }, [selectedServer?.username, selectedSnapshot]);
   const rulesPagination = useTablePagination({
-    items: selectedSnapshot?.firewall.rules ?? [],
+    items: selectedFirewall?.rules ?? [],
     resetKey: selectedServerId,
   });
 
@@ -285,10 +286,10 @@ export default function SecurityPage() {
   };
 
   const handleFirewallToggle = async () => {
-    if (!selectedServerId || !selectedSnapshot) return;
+    if (!selectedServerId || !selectedFirewall) return;
     setActionKey("firewall-toggle");
     try {
-      if (selectedSnapshot.firewall.enabled) {
+      if (selectedFirewall.enabled) {
         await securityApi.disableFirewall(selectedServerId);
       } else {
         await securityApi.enableFirewall(selectedServerId);
@@ -297,7 +298,7 @@ export default function SecurityPage() {
       pushToast({
         tone: "success",
         title: "Firewall",
-        message: `Firewall ${selectedSnapshot.firewall.enabled ? "disabled" : "enabled"} successfully`,
+        message: `Firewall ${selectedFirewall.enabled ? "disabled" : "enabled"} successfully`,
         showProgress: true,
       });
     } catch (err: unknown) {
@@ -588,7 +589,7 @@ export default function SecurityPage() {
           <>
             {!selectedServerId ? (
               <SecurityStatePanel message="No servers are available in this organization or assigned to your account. Add a server or ask an administrator to grant access." />
-            ) : snapshotLoading && !selectedSnapshot ? (
+            ) : snapshotLoading && !selectedSnapshot && !selectedFirewall ? (
               <div
                 className="card"
                 style={{ padding: 42, textAlign: "center" }}
@@ -602,7 +603,7 @@ export default function SecurityPage() {
                   Loading selected server security details...
                 </p>
               </div>
-            ) : !selectedSnapshot || !selectedServer ? (
+            ) : !selectedFirewall || !selectedServer ? (
               <SecurityStatePanel message="Unable to load security details for the selected server. Refresh the page or switch to another server." />
             ) : (
               <>
@@ -616,7 +617,7 @@ export default function SecurityPage() {
                 >
                   <SecurityFirewallCard
                     selectedServer={selectedServer}
-                    snapshot={selectedSnapshot}
+                    firewall={selectedFirewall}
                     actionKey={actionKey}
                     currentPage={rulesPagination.currentPage}
                     totalPages={rulesPagination.totalPages}
@@ -632,14 +633,14 @@ export default function SecurityPage() {
                     onDeleteSavedRule={handleDeleteSavedRule}
                   />
 
-                  <SecurityFail2banCard
+                  {selectedSnapshot ? <SecurityFail2banCard
                     selectedServer={selectedServer}
                     snapshot={selectedSnapshot}
                     actionKey={actionKey}
                     onToggle={handleFail2banToggle}
                     onRefresh={handleRefresh}
                     onUnban={handleUnban}
-                  />
+                  /> : <SecurityStatePanel message="Unable to load Fail2ban and platform details. Firewall management remains available. Refresh to retry." />}
                 </div>
 
               </>

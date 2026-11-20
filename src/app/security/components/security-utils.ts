@@ -20,3 +20,18 @@ export function resolveSecurityServerId(
     ? preferredServerId
     : (servers[0]?.id ?? "");
 }
+
+export async function loadSecurityDetails<T, U>(
+  loadSnapshot: () => Promise<T>,
+  loadFirewall: () => Promise<U>,
+): Promise<{ snapshot: T | null; firewall: U | null }> {
+  try {
+    return { snapshot: await loadSnapshot(), firewall: null };
+  } catch {
+    try {
+      return { snapshot: null, firewall: await loadFirewall() };
+    } catch {
+      return { snapshot: null, firewall: null };
+    }
+  }
+}
