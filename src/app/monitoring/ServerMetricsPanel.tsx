@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { servers as serversApi, canViewServerConnection, type CpuInvestigationSnapshot, type Server as ServerType, type ServerMetric } from "@/lib/api";
 import { CONTAINER_METRICS_REFRESH_INTERVAL_MS } from "@/lib/monitoring-policy";
-import { Activity, Cpu, HardDrive, Server, Wifi } from "lucide-react";
+import { Activity, Cpu, HardDrive, Loader2, Server, Wifi } from "lucide-react";
 import {
   Area,
   AreaChart,
@@ -559,15 +559,18 @@ export default function ServerMetricsPanel({
     return (
       <div
         style={{
-          padding: 20,
-          display: "flex",
-          alignItems: "center",
-          gap: 10,
-          color: "var(--text-muted)",
+          padding: 42,
+          textAlign: "center",
         }}
       >
-        <Activity size={16} className="animate-spin" />
-        Loading metrics history for {server.name}...
+        <Loader2
+          size={24}
+          className="animate-spin"
+          style={{ color: "var(--accent)", margin: "0 auto 10px" }}
+        />
+        <p style={{ color: "var(--text-muted)", fontSize: 14 }}>
+          Loading metrics history for {server.name}...
+        </p>
       </div>
     );
   }

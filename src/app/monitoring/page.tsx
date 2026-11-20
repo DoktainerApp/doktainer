@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Activity, Layers } from "lucide-react";
+import { Activity, Layers, Loader2 } from "lucide-react";
 import DashboardLayout from "@/components/DashboardLayout";
 import ServerMetricsPanel, { CpuInvestigationPanel } from "./ServerMetricsPanel";
 import IncidentTimelinePanel from "@/components/IncidentTimelinePanel";
@@ -405,8 +405,15 @@ function MonitoringContent() {
         <MonitoringTabs activeTab={activeTab} onChange={setActiveTab} />
 
         {!listReady ? (
-          <div className="card" role="status" style={{ padding: 20, color: "var(--text-secondary)" }}>
-            Loading servers for monitoring...
+          <div className="card" role="status" style={{ padding: 42, textAlign: "center" }}>
+            <Loader2
+              size={24}
+              className="animate-spin"
+              style={{ color: "var(--accent)", margin: "0 auto 10px" }}
+            />
+            <p style={{ color: "var(--text-muted)", fontSize: 14 }}>
+              Loading monitoring...
+            </p>
           </div>
         ) : serverLoad.error ? (
           <div className="card" role="alert" style={{ padding: 20, display: "grid", gap: 12 }}>
